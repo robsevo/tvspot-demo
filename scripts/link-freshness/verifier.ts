@@ -313,6 +313,77 @@ async function checkLiveness(url: string): Promise<boolean> {
   return seqAdvanced || segChanged; // either signals fresh content
 }
 
+/** Resolve the first non-comment line of a playlist to an absolute URL. */
+function firstSegmentLine(text: string): string | null {
+  for (const raw of text.split(/\r?\n/)) {
+    const t = raw.trim();
+    if (t && !t.startsWith("#")) return t;
+  }
+  return null;
+}
+
+/**
+ * BLOCKING segment check: does an actual media segment load? Catches the
+ * "playlist looks live but segments 404" case (e.g. the 24/7 mains.services
+ * channels: the m3u8 advances but every .ts 404s with an HTML error). The
+ * verifier must mirror what the player can fetch — a stream whose segments we
+ * can't load is dead for us, no matter how healthy its playlist looks.
+ * Tolerant of master playlists (drills one level into the first variant) and of
+ * a transient live-edge 404 (one retry on the freshest segment).
+ */
+async function segmentLoads(playlistUrl: string): Promise<boolean> {
+  try {
+    let url = playlistUrl;
+    let { text } = await fetchGet(url, TIMEOUT_LONG);
+    if (!text.trimStart().startsWith("#EXTM3U")) return false;
+    // Master → drill into the first variant playlist.
+    if (/#EXT-X-STREAM-INF/.test(text)) {
+      const v = firstSegmentLine(text);
+      if (!v) return false;
+      try { url = new URL(v, url).href; } catch { return false; }
+      ({ text } = await fetchGet(url, TIMEOUT_LONG));
+      if (!text.trimStart().startsWith("#EXTM3U")) return false;
+    }
+    // VOD playlist (ENDLIST) with segments is inherently fine.
+    const segs = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+    if (!segs.length) return false;
+    const target = segs[segs.length - 1]; // freshest segment (live edge)
+    let segUrl: string;
+    try { segUrl = new URL(target, url).href; } catch { return false; }
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), TIMEOUT_SHORT);
+        const r = await fetch(segUrl, {
+          headers: { Range: "bytes=0-65535", "User-Agent": "tvspot-link-freshness/1.0" },
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (r.status === 200 || r.status === 206) {
+          const ct = (r.headers.get("content-type") || "").toLowerCase();
+          if (/html|json|text\/plain/.test(ct)) return false; // error page disguised as a segment
+          const buf = Buffer.from(await r.arrayBuffer());
+          if (buf.length === 0) { await sleep(1500); continue; }
+          // Real media: MPEG-TS sync byte, or an ISO/fMP4 box, or a video CT.
+          const tag = buf.toString("ascii", 4, 8);
+          if (buf[0] === 0x47) return true;
+          if (["ftyp", "styp", "moof", "moov"].includes(tag)) return true;
+          if (/video|mp2t|octet-stream|mpegurl/.test(ct)) return true;
+          // Obfuscated (fake image header) is still real media behind it — accept.
+          if (buf[0] === 0x89 && buf[1] === 0x50) return true;
+          return false;
+        }
+        if (r.status === 404 || r.status >= 500) { await sleep(1500); continue; } // live edge may have moved
+        return false; // 403/401 → we can't fetch it → dead for us
+      } catch { await sleep(1000); }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 const MAX_CANDIDATES_PER_CHANNEL = 25; // bound work per channel
 const LIVENESS_PROBE_CAP = 8;          // max liveness probes (the 9s cost) per channel
 // No keep-cap here: return ALL loadable links so index.ts can build the sticky
@@ -350,6 +421,13 @@ async function verifyCandidate(c: Candidate, nowIso: string, doLiveness: boolean
 
   const latencyMs = t2.latencyMs || t1.latencyMs;
   const t3 = await tier3_attempt(c.verifyUrl, latencyMs);
+
+  // BLOCKING segment gate: a playlist that parses + advances but whose segments
+  // 404 is dead for the player (the 24/7 mains.services case). Drop it so we
+  // never store an unplayable "live-looking" source. Only run on the bounded
+  // liveness-probed set (it's an extra fetch); benched/extra links keep the old
+  // load-only bar so we don't over-prune the reserve.
+  if (doLiveness && !(await segmentLoads(c.verifyUrl))) return null;
 
   // Liveness as a RANKING flag, not a gate. The "plays ~15s then drops" source
   // stalls here (edge doesn't advance) → live:false, so it sorts to the bench;

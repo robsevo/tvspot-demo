@@ -109,6 +109,58 @@ function applyRegionScores(items: any[], scores: Map<number, number>): any[] {
   });
 }
 
+/**
+ * Supplement the (narrow, ~200/service) backend catalog with broader American/
+ * Canadian content straight from TMDB discover — so the home rails surface far
+ * more popular movies + series, plus adult-animation shows (Family Guy, Rick &
+ * Morty, …) that the backend catalog doesn't carry. These link to the normal
+ * detail pages, which resolve metadata (example.com details work for ANY tmdb) and
+ * streams (IPTV + provider-a) regardless of catalog membership. Each item carries
+ * genre_ids so the client's genre/adult-animation rails pick it up.
+ */
+async function fetchDiscover(
+  kind: "movie" | "tv",
+  extra: string,
+  pages: number,
+): Promise<any[]> {
+  const tmdbToken = process.env.TMDB_ACCESS_TOKEN;
+  if (!tmdbToken) return [];
+  const reqs: Promise<any>[] = [];
+  for (let page = 1; page <= pages; page++) {
+    const url =
+      `https://api.themoviedb.org/3/discover/${kind}` +
+      `?language=en-US&watch_region=US&with_original_language=en` +
+      `&sort_by=popularity.desc&vote_count.gte=50&page=${page}${extra}`;
+    reqs.push(
+      fetch(url, { headers: { Authorization: `Bearer ${tmdbToken}` }, next: { revalidate: 3600 } })
+        .then((r) => r.json())
+        .catch(() => ({ results: [] })),
+    );
+  }
+  const pagesData = await Promise.all(reqs);
+  const items: any[] = [];
+  for (const pd of pagesData) {
+    for (const m of pd.results || []) {
+      items.push({
+        tmdb_id: m.id,
+        title: m.title || m.name || "",
+        name: m.title || m.name || "",
+        year: (m.release_date || m.first_air_date || "").slice(0, 4),
+        rating: m.vote_average || 0,
+        vote_average: m.vote_average || 0,
+        poster: m.poster_path ? `/api/images?url=${encodeURIComponent(`https://image.tmdb.org/t/p/w500${m.poster_path}`)}` : "",
+        backdrop: m.backdrop_path ? `/api/images?url=${encodeURIComponent(`https://image.tmdb.org/t/p/w1280${m.backdrop_path}`)}` : "",
+        overview: m.overview || "",
+        service: kind === "movie" ? "Popular Movies" : "Popular Series",
+        category: kind === "movie" ? "movie" : "series",
+        genre_ids: m.genre_ids || [],
+        popularity: m.popularity || 0,
+      });
+    }
+  }
+  return items;
+}
+
 export async function GET(request: NextRequest) {
   const service = request.nextUrl.searchParams.get("service");
   const trending = request.nextUrl.searchParams.get("trending");
@@ -143,6 +195,21 @@ export async function GET(request: NextRequest) {
         } catch {}
       })
     );
+
+    // Supplement with broader US/CA TMDB content the backend catalog lacks:
+    // more popular movies + series, plus a dedicated animation pass (genre 16)
+    // so adult-animation shows appear. Dedupe against what the backend returned.
+    const [supMovies, supSeries, supAnimation] = await Promise.all([
+      fetchDiscover("movie", "", 5),
+      fetchDiscover("tv", "", 5),
+      fetchDiscover("tv", "&with_genres=16", 3), // animation (Family Guy, Rick & Morty, …)
+    ]);
+    for (const m of supMovies) {
+      if (!seenIds.has(m.tmdb_id)) { seenIds.add(m.tmdb_id); allMovies.push(m); }
+    }
+    for (const s of [...supSeries, ...supAnimation]) {
+      if (!seenIds.has(s.tmdb_id)) { seenIds.add(s.tmdb_id); allSeries.push(s); }
+    }
 
     // Enrich + rank by US/CA popularity (writes score onto item.popularity).
     const [movieScores, seriesScores] = await Promise.all([
