@@ -72,21 +72,74 @@ export default function VideoPlayer({
     const isHlsUrl = typeof src === 'string' && src.includes(".m3u8");
 
     if (isHlsUrl && Hls.isSupported()) {
+      // The relay upstream (relay.example.com, used by TSN1 etc.) transiently 403s
+      // and times out even on a healthy stream. Bump load retries so those blips
+      // are absorbed by the loader instead of bubbling up as a fatal error that
+      // kills an otherwise-fine source. Build from DefaultConfig so we only
+      // override the retry counts and keep every other policy field intact.
+      const dc = Hls.DefaultConfig;
+      const resilient = (p: typeof dc.fragLoadPolicy): typeof dc.fragLoadPolicy => ({
+        default: {
+          ...p.default,
+          errorRetry: { maxNumRetry: 8, retryDelayMs: 1000, maxRetryDelayMs: 8000 },
+          timeoutRetry: { maxNumRetry: 4, retryDelayMs: 500, maxRetryDelayMs: 4000 },
+        },
+      });
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
+        // No low-latency: build a real ~45s forward buffer to ride out upstream
+        // hiccups instead of pinning to the live edge with no cushion.
+        lowLatencyMode: false,
+        maxBufferLength: 45,
+        maxMaxBufferLength: 90, // bound growth for mobile memory
         backBufferLength: 30,
+        // Sit ~4 segments behind the live edge so there's a deep forward buffer.
+        // The relay has sustained ~30-40s outage windows where every (shared)
+        // source 403s at once — failover is futile, so the buffer is what keeps
+        // playback alive until the relay recovers. Stay within a typical 60s
+        // live window; if the playlist falls too far behind, resync forward.
+        liveSyncDurationCount: 4,
+        liveMaxLatencyDurationCount: 10,
+        fragLoadPolicy: resilient(dc.fragLoadPolicy),
+        playlistLoadPolicy: resilient(dc.playlistLoadPolicy),
+        manifestLoadPolicy: resilient(dc.manifestLoadPolicy),
       });
       hlsRef.current = hls;
+
+      // Canonical hls.js recovery: transient network/media errors are recovered
+      // in place (startLoad / recoverMediaError) rather than immediately failing
+      // over. A time-windowed budget still escalates to the parent (real failover)
+      // once a source is genuinely dead, and resets when playback recovers.
+      let recoverAttempts = 0;
+      let lastRecoverAt = 0;
+      const MAX_RECOVERS = 4;
+
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (autoPlay) video.play().catch(() => {});
       });
+      hls.on(Hls.Events.FRAG_BUFFERED, () => { recoverAttempts = 0; });
       hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data.fatal) {
-          onError?.("HLS playback error");
+        if (!data.fatal) return;
+        const now = Date.now();
+        if (now - lastRecoverAt > 60000) recoverAttempts = 0; // healthy gap → reset
+        if (
+          recoverAttempts < MAX_RECOVERS &&
+          (data.type === Hls.ErrorTypes.NETWORK_ERROR ||
+            data.type === Hls.ErrorTypes.MEDIA_ERROR)
+        ) {
+          recoverAttempts++;
+          lastRecoverAt = now;
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad();         // resume after transient relay 403 / timeout
+          } else {
+            hls.recoverMediaError(); // re-init the media pipeline
+          }
+          return;
         }
+        // Unrecoverable, or recovery budget exhausted → let the parent fail over.
+        onError?.("HLS playback error");
       });
     } else if (isHlsUrl && video.canPlayType("application/vnd.apple.mpegurl")) {
       // Native HLS (Safari)
@@ -138,18 +191,20 @@ export default function VideoPlayer({
 
   // Stall watchdog: a live source can load fine, play a few buffered seconds,
   // then stop producing segments ("plays ~15s then drops"). The fatal-error path
-  // doesn't always fire for that — playback just freezes. So we poll progress:
-  // if currentTime hasn't advanced for STALL_MS while we should be playing (and
-  // it's not a user pause / seek / legit ended), report a stall so the parent can
-  // fail over to the next source. Re-arms whenever `src` changes.
+  // doesn't always fire for that — playback just freezes. So we poll progress.
+  // Two-strike, to match how production players treat a freeze: on the FIRST
+  // stall we self-heal in place (hls.startLoad + play) without disturbing the
+  // user; only if it stalls AGAIN without recovering do we report it so the
+  // parent fails over. A transient relay hiccup no longer kills a good source.
+  // Re-arms whenever `src` changes.
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
 
-    const STALL_MS = 7000;
+    const STALL_MS = 10000;
     let lastTime = video.currentTime;
     let lastProgressAt = Date.now();
-    let fired = false;
+    let recovering = false; // attempted self-heal, awaiting fresh progress
 
     const id = setInterval(() => {
       const v = videoRef.current;
@@ -163,14 +218,23 @@ export default function VideoPlayer({
       if (v.currentTime > lastTime + 0.05) {
         lastTime = v.currentTime;
         lastProgressAt = Date.now();
-        fired = false;
+        recovering = false; // progress resumed
         return;
       }
-      // No forward progress while playing — if it persists, it's a stall/drop.
-      if (!fired && Date.now() - lastProgressAt > STALL_MS) {
-        fired = true;
-        onStall?.();
+      if (Date.now() - lastProgressAt <= STALL_MS) return;
+
+      // No forward progress past the threshold.
+      if (!recovering && hlsRef.current) {
+        // First strike: try to recover in place; give it a fresh window.
+        recovering = true;
+        lastProgressAt = Date.now();
+        try { hlsRef.current.startLoad(); } catch {}
+        v.play().catch(() => {});
+        return;
       }
+      // Second strike (or no hls to recover) → genuine drop, fail over once.
+      lastProgressAt = Date.now(); // avoid re-firing every tick before src swaps
+      onStall?.();
     }, 1000);
 
     return () => clearInterval(id);
