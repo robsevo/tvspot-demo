@@ -16,6 +16,10 @@ export default function VodMoviePage() {
   const [detail, setDetail] = useState<VodDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [sourceIndex, setSourceIndex] = useState(0);
+  // Clean direct HLS streams resolved on-demand (ad-free, played in our own
+  // VideoPlayer). Empty until /api/vod-extract returns; embed is the fallback.
+  const [resolved, setResolved] = useState<string[]>([]);
+  const [resolving, setResolving] = useState(true);
 
   useEffect(() => {
     if (!tmdbId) return;
@@ -26,17 +30,41 @@ export default function VodMoviePage() {
       .finally(() => setLoading(false));
   }, [tmdbId]);
 
-  // Unified source list: direct/resolved streams first, vidlink embed LAST.
-  // Capped at 5 (up to 4 streams + vidlink) per product requirement.
+  // Resolve a clean direct stream in parallel with the detail fetch.
+  useEffect(() => {
+    if (!tmdbId) return;
+    let cancelled = false;
+    setResolving(true);
+    setResolved([]);
+    fetch(`/api/vod-extract?type=movie&tmdb=${tmdbId}`)
+      .then((r) => (r.ok ? r.json() : { stream_urls: [] }))
+      .then((d) => {
+        if (!cancelled) setResolved(Array.isArray(d?.stream_urls) ? d.stream_urls : []);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setResolving(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tmdbId]);
+
+  // Unified source list: resolved CLEAN streams first (default), then any
+  // backend direct streams, then the vidlink embed LAST as fallback.
+  // Capped at 5 per product requirement.
   const sources = useMemo(() => {
+    const clean = resolved.map((url, i) => ({
+      url, kind: "stream" as const, label: `HD ${i + 1}`,
+    }));
     const streams = (detail?.stream_urls ?? []).map((url, i) => ({
       url, kind: "stream" as const, label: `Source ${i + 1}`,
     }));
     const embeds = (detail?.embed_urls ?? []).map((url) => ({
       url, kind: "embed" as const, label: providerName(url),
     }));
-    return [...streams.slice(0, 4), ...embeds].slice(0, 5);
-  }, [detail]);
+    return [...clean, ...streams.slice(0, 4), ...embeds].slice(0, 5);
+  }, [detail, resolved]);
   const idx = Math.min(sourceIndex, Math.max(0, sources.length - 1));
   const current = sources[idx];
 
@@ -93,7 +121,12 @@ export default function VodMoviePage() {
 
         {sources.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-white text-sm font-semibold mb-2">Watch Now</h2>
+            <h2 className="text-white text-sm font-semibold mb-2 flex items-center gap-2">
+              Watch Now
+              {resolving && (
+                <span className="text-text-muted text-[10px] font-normal">· finding clean stream…</span>
+              )}
+            </h2>
             {/* Unified source list: direct streams first, vidlink last (≤5). */}
             <div className="flex flex-wrap items-center gap-1.5 mb-2">
               {sources.length > 1 &&
@@ -132,13 +165,13 @@ export default function VodMoviePage() {
                   sandbox="allow-scripts allow-same-origin allow-presentation"
                   className="w-full h-full aspect-video"
                   style={{ border: "none" }}
-                  key={idx}
+                  key={current.url}
                 />
               ) : (
                 <VideoPlayer
                   src={current.url}
                   autoPlay={false}
-                  key={idx}
+                  key={current.url}
                 />
               )}
             </div>

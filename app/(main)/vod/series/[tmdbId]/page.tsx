@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { proxyFetch } from "@/lib/api";
 import Link from "next/link";
 import { ChevronLeft, ChevronDown } from "lucide-react";
@@ -17,10 +17,36 @@ export default function VodSeriesPage() {
   const [loading, setLoading] = useState(true);
   const [playingEpisode, setPlayingEpisode] = useState<string | null>(null);
   const [episodeSourceIdx, setEpisodeSourceIdx] = useState<Record<string, number>>({});
+  // Clean direct HLS streams resolved on-demand per episode (ad-free, played in
+  // our own VideoPlayer). Keyed by "S-E". Empty/absent → embed iframe fallback.
+  const [resolvedByEp, setResolvedByEp] = useState<Record<string, string[]>>({});
+  const inFlight = useRef<Set<string>>(new Set());
   // Seasons start COLLAPSED — tap a season header to expand its episodes.
   const [expandedSeasons, setExpandedSeasons] = useState<Record<number, boolean>>({});
   const toggleSeason = (n: number) =>
     setExpandedSeasons((prev) => ({ ...prev, [n]: !prev[n] }));
+
+  // Resolve a clean direct stream for one episode (once). The sandboxed embed
+  // plays instantly meanwhile; when this returns, the clean stream is prepended
+  // as the default "HD" source and the player auto-upgrades to it.
+  const resolveEpisode = useCallback(
+    (epKey: string, season: number, episode: number) => {
+      if (!tmdbId) return;
+      if (resolvedByEp[epKey] !== undefined || inFlight.current.has(epKey)) return;
+      inFlight.current.add(epKey);
+      fetch(`/api/vod-extract?type=tv&tmdb=${tmdbId}&s=${season}&e=${episode}`)
+        .then((r) => (r.ok ? r.json() : { stream_urls: [] }))
+        .then((d) =>
+          setResolvedByEp((prev) => ({
+            ...prev,
+            [epKey]: Array.isArray(d?.stream_urls) ? d.stream_urls : [],
+          })),
+        )
+        .catch(() => setResolvedByEp((prev) => ({ ...prev, [epKey]: [] })))
+        .finally(() => inFlight.current.delete(epKey));
+    },
+    [tmdbId, resolvedByEp],
+  );
 
   useEffect(() => {
     if (!tmdbId) return;
@@ -106,10 +132,16 @@ export default function VodSeriesPage() {
                     {season.episodes.map((ep, i) => {
                       const epKey = `${season.season_number}-${ep.episode_number}`;
                       const isPlaying = playingEpisode === epKey;
-                      // One labeled source list: direct streams FIRST, vidlink
-                      // embed LAST (the safety-net fallback). Capped at 5 (up to
-                      // 4 streams + vidlink) per product requirement.
+                      // One labeled source list: resolved CLEAN streams FIRST
+                      // (default), then any backend direct streams, then the
+                      // vidlink embed LAST (safety-net fallback). Capped at 5.
+                      const clean = (resolvedByEp[epKey] ?? []).map((url, n) => ({
+                        url,
+                        kind: "stream" as const,
+                        label: `HD ${n + 1}`,
+                      }));
                       const sources = [
+                        ...clean,
                         ...(ep.stream_urls ?? []).map((url, n) => ({
                           url,
                           kind: "stream" as const,
@@ -154,7 +186,11 @@ export default function VodSeriesPage() {
                         </div>
                         {hasSources && (
                           <button
-                            onClick={() => setPlayingEpisode(isPlaying ? null : epKey)}
+                            onClick={() => {
+                              const opening = !isPlaying;
+                              setPlayingEpisode(isPlaying ? null : epKey);
+                              if (opening) resolveEpisode(epKey, season.season_number, ep.episode_number);
+                            }}
                             className="flex-shrink-0 w-7 h-7 rounded-full bg-brand/20 flex items-center justify-center hover:bg-brand/40 transition-colors"
                           >
                             <svg className="w-3.5 h-3.5 text-brand" fill="currentColor" viewBox="0 0 24 24">
@@ -204,13 +240,13 @@ export default function VodSeriesPage() {
                                 sandbox="allow-scripts allow-same-origin allow-presentation"
                                 className="w-full h-full aspect-video"
                                 style={{ border: "none" }}
-                                key={`${epKey}-${epSrcIdx}`}
+                                key={currentSource.url}
                               />
                             ) : (
                               <VideoPlayer
                                 src={currentSource.url}
                                 autoPlay
-                                key={`${epKey}-${epSrcIdx}`}
+                                key={currentSource.url}
                               />
                             )}
                           </div>
