@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "refresh-links": "tsx scripts/link-freshness/index.ts"
+    "refresh-links": "tsx scripts/link-freshness/index.ts",
+    "refresh-vod-index": "tsx scripts/link-freshness/vod-index.ts"
   },
   "dependencies": {
     "framer-motion": "^12.42.0",
