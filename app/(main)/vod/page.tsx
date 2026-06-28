@@ -103,7 +103,7 @@ export default function VodPage() {
               <ChevronLeft className="w-5 h-5 text-white" />
             </button>
           ) : (
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-red-700 flex items-center justify-center hud-glow">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-cyan-400 flex items-center justify-center hud-glow">
               <Film className="w-4 h-4 text-white" />
             </div>
           )}

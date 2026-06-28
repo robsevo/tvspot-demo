@@ -171,6 +171,26 @@ const BRAND_DOMAINS: Record<string, string> = {
   bravo: "bravotv.com", syfy: "syfy.com", "a&e": "aetv.com",
 };
 
+/** Known logo URLs (Wikipedia thumbnails) for 24/7 single-show channels
+ *  so they display the actual show logo, not a generic network favicon.
+ *  If a URL is wrong, the <img> onError handler falls through cleanly. */
+const SHOW_LOGO_URLS: Record<string, string> = {
+  "family guy": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/aa/Family_Guy_Logo.svg/960px-Family_Guy_Logo.svg.png",
+  "american dad": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/American_dad_logo.svg/960px-American_dad_logo.svg.png",
+  "rick and morty": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b1/Rick_and_Morty.svg/960px-Rick_and_Morty.svg.png",
+  "south park": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/South_Park_logo.svg/960px-South_Park_logo.svg.png",
+  "bob's burgers": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4c/Bob%27s_Burgers_logo.svg/960px-Bob%27s_Burgers_logo.svg.png",
+  futurama: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Futurama_1999_logo.svg/960px-Futurama_1999_logo.svg.png",
+  "the simpsons": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/The_Simpsons_yellow_logo.svg/960px-The_Simpsons_yellow_logo.svg.png",
+  simpsons: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/The_Simpsons_yellow_logo.svg/960px-The_Simpsons_yellow_logo.svg.png",
+  "king of the hill": "https://upload.wikimedia.org/wikipedia/en/thumb/5/51/King_of_the_Hill_%28logo%29.svg/960px-King_of_the_Hill_%28logo%29.svg.png",
+};
+
+/** Resolve a show-specific logo URL for a channel name. */
+function getShowLogoUrl(name: string): string | null {
+  const n = name.toLowerCase().replace(/^24\/7\s+/, "").trim();
+  return SHOW_LOGO_URLS[n] ?? null;
+}
 /** Resolve a logo domain for a channel name, tolerating numbers/regions/prefixes
  *  ("TSN1", "Sportsnet East", "24/7 Family Guy") via normalized brand matching. */
 function domainFor(name: string): string | undefined {
@@ -202,6 +222,8 @@ function domainFor(name: string): string | undefined {
  */
 export function getLogoCandidates(name: string): string[] {
   const out: string[] = [];
+  const showUrl = getShowLogoUrl(name);
+  if (showUrl) out.push(showUrl);
   const slug = SIMPLEICONS_SLUGS[name];
   if (slug) out.push(`https://cdn.simpleicons.org/${slug}/white`);
   const domain = domainFor(name);
@@ -288,16 +310,16 @@ export function getChannelAbbr(name: string): string {
 
 export function getChannelColors(name: string): string {
   const map: Record<string, string> = {
-    "ESPN": "from-red-700 to-black",
-    "ESPN 2": "from-red-600 to-black",
-    "CNN": "from-red-600 to-gray-900",
+    "ESPN": "from-violet-800 to-black",
+    "ESPN 2": "from-violet-700 to-black",
+    "CNN": "from-violet-800 to-gray-900",
     "FOX News": "from-blue-700 to-blue-900",
     "Fox Sports 1": "from-green-700 to-green-900",
     "MSNBC": "from-blue-600 to-blue-800",
-    "NBA TV": "from-red-600 to-blue-800",
+    "NBA TV": "from-violet-800 to-blue-800",
     "NFL Network": "from-gray-800 to-black",
     "NHL Network": "from-gray-700 to-black",
-    "MLB Network": "from-blue-700 to-red-700",
+    "MLB Network": "from-blue-700 to-violet-700",
     "HGTV": "from-emerald-600 to-emerald-800",
     "Food Network": "from-orange-500 to-orange-700",
     "Discovery Channel": "from-yellow-600 to-yellow-800",
@@ -319,7 +341,7 @@ export function getChannelColors(name: string): string {
     "ABC": "from-gray-600 to-black",
     "CBS": "from-blue-600 to-blue-800",
     "NBC": "from-purple-600 to-purple-800",
-    "BBC America": "from-red-600 to-red-800",
+    "BBC America": "from-violet-800 to-violet-950",
     "CNBC": "from-orange-500 to-orange-700",
   };
   return map[name] || "from-brand/70 to-brand/30";
@@ -328,7 +350,7 @@ export function getChannelColors(name: string): string {
 /** Service brand colors */
 export function getServiceColor(service: string): string {
   const map: Record<string, string> = {
-    "Netflix": "#E50914",
+    "Netflix": "#5B21B6",
     "Disney+": "#113CCF",
     "HBO Max": "#5822B4",
     "Max": "#5822B4",
@@ -374,7 +396,7 @@ export function getServiceColor(service: string): string {
     "Spike": "#FF7800",
     "Syfy": "#00D4FF",
     "TBS": "#FFD700",
-    "TNT": "#8B0000",
+    "TNT": "#5B21B6",
     "USA": "#003DA5",
     "Warner Bros": "#00A4E4",
     "Sony": "#000000",
@@ -384,7 +406,7 @@ export function getServiceColor(service: string): string {
     "Lionsgate": "#00A650",
     "A24": "#000000",
     "Criterion": "#000000",
-    "Arrow": "#E50914",
+    "Arrow": "#5B21B6",
     "Shudder": "#0A0A0A",
     "Sundance Now": "#00A94F",
     "BritBox": "#FF0000",
@@ -416,13 +438,13 @@ export function getServiceColor(service: string): string {
     "Sony Pictures": "#000000",
     "20th Century Studios": "#0000FF",
     "Disney+ Hotstar": "#113CCF",
-    "ESPN": "#E50914",
-    "ESPN+": "#E50914",
+    "ESPN": "#5B21B6",
+    "ESPN+": "#5B21B6",
     "NFL": "#013369",
     "NBA": "#1D428A",
     "MLB": "#002D72",
     "NHL": "#003057",
-    "UFC": "#E50914",
+    "UFC": "#5B21B6",
     "WWE": "#000000",
     "AEW": "#000000",
     "Impact Wrestling": "#000000",
@@ -484,7 +506,7 @@ export function getServiceColor(service: string): string {
     "LG Channels": "#000000",
     "Vizio WatchFree+": "#000000",
     "Xumo": "#000000",
-    "Redbox": "#E50914",
+    "Redbox": "#5B21B6",
     "Kanopy Kids": "#005A9C",
     "Hoopla": "#000000",
     "Libby": "#000000",
@@ -566,7 +588,7 @@ export function getServiceColor(service: string): string {
     "TBN Antarctica": "#000000",
     "three": "#000000",
     "three +": "#000000",
-    "Netflix Canada": "#E50914",
+    "Netflix Canada": "#5B21B6",
     "Amazon Prime Video": "#00A8E1",
     "Paramount+ Canada": "#0064FF",
     "Apple TV+ Canada": "#555555",

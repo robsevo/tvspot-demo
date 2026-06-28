@@ -8,7 +8,7 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/",
     display: "standalone",
     background_color: "#141414",
-    theme_color: "#E50914",
+    theme_color: "#5B21B6",
     icons: [
       // Real PNGs — iOS ignores SVG home-screen icons and Android maskable-SVG
       // is unreliable, which is why the saved-to-home-screen logo was blank.

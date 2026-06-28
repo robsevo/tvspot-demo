@@ -11,7 +11,7 @@ import { Tv, Sparkles } from "lucide-react";
 import type { EpgResponse } from "@/lib/types";
 
 const HOUR_WIDTH = 240; // pixels per hour
-const NOW_COLOR = "#E50914";
+const NOW_COLOR = "#5B21B6";
 
 const categoryTabs = ["All", "Sports", "Entertainment", "Movies", "News", "Kids", "Music", "Lifestyle"];
 
@@ -183,7 +183,7 @@ export default function LivePage() {
       <div className="pt-4 min-h-screen">
         <div className="px-4 space-y-3">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="h-16 bg-card rounded-xl animate-pulse" />
+            <div key={i} className="h-16 bg-card rounded-3xl animate-pulse" />
           ))}
         </div>
       </div>
@@ -195,7 +195,7 @@ export default function LivePage() {
       {/* Header */}
       <div className="px-4 mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-red-700 flex items-center justify-center hud-glow">
+          <div className="w-9 h-9 rounded-3xl bg-gradient-to-br from-brand to-cyan-400 flex items-center justify-center hud-glow">
             <Tv className="w-4 h-4 text-white" />
           </div>
           <div>
@@ -203,8 +203,8 @@ export default function LivePage() {
             <p className="text-text-muted text-[11px]">{channels.length} channels</p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 text-brand text-xs font-medium bg-brand/10 px-2.5 py-1 rounded-full">
-          <span className="w-1.5 h-1.5 rounded-full bg-brand live-dot" />
+        <div className="flex items-center gap-1.5 text-brand text-xs font-medium bg-brand/10 px-2.5 py-1 rounded-xl">
+          <span className="w-1.5 h-1.5 rounded-xl bg-brand live-dot" />
           <span>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
         </div>
       </div>
@@ -218,7 +218,7 @@ export default function LivePage() {
             <button
               key={cat}
               onClick={() => setActiveCat(cat)}
-              className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
+              className={`flex-shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all ${
                 activeCat === cat
                   ? "bg-brand text-white hud-glow"
                   : "glass-card text-text-secondary hover:text-white"
@@ -239,7 +239,7 @@ export default function LivePage() {
           <button
             key={genre}
             onClick={() => setActiveGenre(genre)}
-            className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 ${
+            className={`flex-shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 ${
               activeGenre === genre
                 ? "bg-brand text-white hud-glow"
                 : "glass-card text-text-secondary hover:text-white"
@@ -247,7 +247,7 @@ export default function LivePage() {
           >
             {genre}
             {count > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-xl ${
                 activeGenre === genre
                   ? "bg-white/20 text-white"
                   : "bg-white/10 text-text-muted"
@@ -281,13 +281,15 @@ export default function LivePage() {
                   href={`/live/${channelSlug(ch.name)}`}
                   className="flex flex-col items-center justify-center gap-0.5 h-14 border-b border-white/5 hover:bg-card/50 transition-colors"
                 >
-                  <div className="w-10 h-9 rounded-lg bg-white flex items-center justify-center overflow-hidden relative shadow-sm ring-1 ring-black/5 p-0.5">
+                  <div className="w-11 h-9 rounded-lg bg-white flex items-center justify-center overflow-hidden relative p-1 ring-1 ring-white/10">
                     <LogoImage
                       name={ch.name}
                       logoUrl={ch.logo_url || ch.logo}
                       className="w-full h-full object-contain"
                       fallbackClassName="text-gray-700"
                     />
+                    {/* Glass casing — glossy overlay over the logo */}
+                    <div className="absolute inset-0 rounded-lg pointer-events-none bg-gradient-to-br from-white/30 via-brand/15 to-brand/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),inset_0_-1px_1px_rgba(91,33,182,0.10)] ring-1 ring-white/15" />
                     {ch.online && (
                       <div className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-500 ring-1 ring-white" />
                     )}
@@ -328,7 +330,7 @@ export default function LivePage() {
               {/* Now line on ruler */}
               <div
                 className="absolute top-0 bottom-0 w-0.5 z-20"
-                style={{ left: nowOffset, backgroundColor: NOW_COLOR, boxShadow: "0 0 8px rgba(229,9,20,0.6)" }}
+                style={{ left: nowOffset, backgroundColor: NOW_COLOR, boxShadow: "0 0 8px rgba(91,33,182,0.6)" }}
               >
                 <div className="absolute -top-0 left-1/2 -translate-x-1/2 bg-brand text-white text-[8px] px-1.5 py-0.5 rounded-b font-bold hud-glow">
                   NOW

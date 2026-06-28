@@ -1,10 +1,10 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-brand: #E50914;
-  --color-surface: #141414;
-  --color-card: #1f1f1f;
-  --color-header: #0a0a0a;
+  --color-brand: #5B21B6;
+  --color-surface: #0a0a0a;
+  --color-card: #181818;
+  --color-header: #050505;
   --color-text-primary: #ffffff;
   --color-text-secondary: #b3b3b3;
   --color-text-muted: #808080;
@@ -13,7 +13,7 @@
 }
 
 :root {
-  --background: #141414;
+  --background: #0a0a0a;
   --foreground: #ffffff;
 }
 
@@ -145,7 +145,7 @@ video::-webkit-media-controls { display: none !important; }
 }
 
 /* Pill active */
-.pill-active { box-shadow: 0 0 0 1px rgba(229, 9, 20, 0.5); }
+.pill-active { box-shadow: 0 0 0 1px rgba(91, 33, 182, 0.5); }
 
 /* Glass */
 .glass {
@@ -163,12 +163,12 @@ video::-webkit-media-controls { display: none !important; }
 
 /* Hero fade overlay for transitions */
 .hero-overlay {
-  background: linear-gradient(to top, #141414 0%, rgba(20,20,20,0.6) 50%, transparent 100%);
+  background: linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.6) 50%, transparent 100%);
 }
 
 /* Genre gradient for VOD detail */
 .genre-gradient {
-  background: linear-gradient(135deg, rgba(229,9,20,0.15) 0%, transparent 100%);
+  background: linear-gradient(135deg, rgba(91,33,182,0.15) 0%, transparent 100%);
 }
 
 /* Smooth in-page scrolling (rail arrows, anchor jumps) */
@@ -193,6 +193,21 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
   transform: scale(0.94);
   filter: brightness(0.92);
 }
+/* Button depth — subtle raised 3D look */
+.btn-depth {
+  box-shadow: 0 2px 0 rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.btn-depth:active {
+  box-shadow: 0 1px 0 rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+/* Glass 3D card — frosted with depth */
+.glass-card-depth {
+  background: rgba(24, 24, 24, 0.7);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04);
+}
 /* Buttons that are big tap targets shouldn't shrink as hard as small chips. */
 .pressable-soft:active { transform: scale(0.975); filter: brightness(0.95); }
 
@@ -208,15 +223,15 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
   100% { background-position: 200% 50%; }
 }
 .brand-sheen {
-  background: linear-gradient(110deg, #E50914, #ff3b44, #E50914);
+  background: linear-gradient(110deg, #5B21B6, #8b5cf6, #5B21B6);
   background-size: 200% 100%;
   animation: brandSheen 3s linear infinite;
 }
 
 /* Soft neon ring for "now/live" emphasis — uses brand color, opt-in. */
 @keyframes neonPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(229,9,20,0.45); }
-  50% { box-shadow: 0 0 0 4px rgba(229,9,20,0.0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(91,33,182,0.45); }
+  50% { box-shadow: 0 0 0 4px rgba(91,33,182,0.0); }
 }
 .neon-pulse { animation: neonPulse 2s ease-in-out infinite; }
 
@@ -236,16 +251,16 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 .animate-page-rise { animation: pageRise 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
 
 /* ════════════════════════════════════════════════════════════════════════
-   HUD / "JARVIS"-style futuristic system — adapted to the brand RED (#E50914),
-   keeping the existing dark palette + layout. Inspired by Origin's HUD theme.
-   Brand RGB for tinting: 229, 9, 20.
+   HUD / "JARVIS"-style futuristic system — adapted to brand VIOLET (#5B21B6),
+   keeping the existing dark palette + layout.
+   Brand RGB for tinting: 91, 33, 182.
    ════════════════════════════════════════════════════════════════════════ */
 :root {
-  --br: 229; --bg: 9; --bb: 20;            /* brand red rgb */
-  --hud-corner: rgba(229,9,20,0.55);
-  --hud-glow-sm: 0 0 8px rgba(229,9,20,0.35);
-  --hud-glow-md: 0 0 18px rgba(229,9,20,0.30);
-  --hud-glow-lg: 0 0 36px rgba(229,9,20,0.22);
+  --br: 91; --bg: 33; --bb: 182;            /* brand violet rgb (violet-800) */
+  --hud-corner: rgba(91,33,182,0.55);
+  --hud-glow-sm: 0 0 8px rgba(91,33,182,0.40);
+  --hud-glow-md: 0 0 18px rgba(91,33,182,0.35);
+  --hud-glow-lg: 0 0 36px rgba(91,33,182,0.25);
   --hud-grid:
     repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 34px),
     repeating-linear-gradient(90deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 34px);
@@ -280,14 +295,14 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 .hud-scan { position: relative; overflow: hidden; }
 .hud-scan::after {
   content: ""; position: absolute; left: 0; right: 0; height: 40%; z-index: 2; pointer-events: none;
-  background: linear-gradient(180deg, transparent, rgba(229,9,20,0.10), transparent);
+  background: linear-gradient(180deg, transparent, rgba(91,33,182,0.10), transparent);
   animation: hudScan 6s ease-in-out infinite;
 }
 
 /* Live pulse — red glowing dot/border for "LIVE"/now. */
 @keyframes livePulseRed {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(229,9,20,0.55); }
-  50%      { box-shadow: 0 0 0 5px rgba(229,9,20,0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(91,33,182,0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(91,33,182,0); }
 }
 .live-dot { animation: livePulseRed 1.8s ease-in-out infinite; }
 
@@ -303,12 +318,12 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 
 /* Brand glow utility for accent chips/headers. */
 .hud-glow { box-shadow: var(--hud-glow-sm); }
-.hud-text-glow { text-shadow: 0 0 14px rgba(229,9,20,0.5); }
+.hud-text-glow { text-shadow: 0 0 14px rgba(91,33,182,0.5); }
 
 /* Shimmer skeleton in brand tint (loading states feel intentional). */
 @keyframes hudShimmer { 0% { background-position: -150% 0; } 100% { background-position: 150% 0; } }
 .hud-skeleton {
-  background: linear-gradient(100deg, rgba(255,255,255,0.04) 30%, rgba(229,9,20,0.10) 50%, rgba(255,255,255,0.04) 70%);
+  background: linear-gradient(100deg, rgba(255,255,255,0.04) 30%, rgba(91,33,182,0.10) 50%, rgba(255,255,255,0.04) 70%);
   background-size: 200% 100%;
   animation: hudShimmer 1.4s linear infinite;
 }

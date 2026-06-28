@@ -4,10 +4,10 @@ import { useCatalog } from "@/hooks/useCatalog";
 import { LogoImage } from "./LogoImage";
 
 const serviceColors: Record<string, string> = {
-  "Netflix": "from-red-600 to-red-900",
+  "Netflix": "from-violet-800 to-violet-950",
   "Disney+": "from-blue-700 to-blue-950",
-  "HBO Max": "from-violet-600 to-indigo-900",
-  "Paramount+": "from-blue-500 to-cyan-800",
+  "HBO Max": "from-violet-700 to-indigo-950",
+  "Paramount+": "from-blue-500 to-violet-900",
   "Prime Video": "from-sky-500 to-blue-800",
   "Apple TV+": "from-zinc-700 to-zinc-950",
   "Hulu": "from-green-500 to-emerald-800",
@@ -15,7 +15,7 @@ const serviceColors: Record<string, string> = {
   "Crave": "from-purple-600 to-pink-900",
   "Other": "from-zinc-600 to-zinc-900",
   "Classics": "from-amber-600 to-yellow-900",
-  "Theater": "from-rose-600 to-orange-900",
+  "Theater": "from-violet-800 to-violet-950",
 };
 
 export default function ServicePicker({ onSelectAction }: { onSelectAction: (service: string) => void }) {
@@ -36,7 +36,7 @@ export default function ServicePicker({ onSelectAction }: { onSelectAction: (ser
     <div className="grid grid-cols-2 gap-3 px-4 stagger-children">
       {services.map((service) => {
         const s = summary[service];
-        const gradient = serviceColors[service] || "from-brand to-red-800";
+        const gradient = serviceColors[service] || "from-brand to-violet-950";
         // Backend summaries carry a few sample items — use the first poster as a
         // backdrop so each provider card previews its content (virtual services
         // use a description string, so guard with Array.isArray).

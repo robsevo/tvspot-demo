@@ -23,7 +23,9 @@ function scoreMatch(title: string, q: string): number {
   if (!t.includes(n)) return -1;
   if (t === n) return 100;
   if (t.startsWith(n)) return 80;
-  if (new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(t)) return 60;
+  // Word-boundary match: n at start of string or after a non-letter char
+  const i = t.indexOf(n);
+  if (i > 0 && !/\p{L}/u.test(t[i - 1])) return 60;
   return 30;
 }
 
@@ -116,7 +118,7 @@ export default function SearchPage() {
     <div className="hud-grid-bg pt-12 min-h-screen pb-20 animate-page-rise">
       <div className="px-4 mb-3">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-red-700 flex items-center justify-center hud-glow">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-cyan-400 flex items-center justify-center hud-glow">
             <Search className="w-4 h-4 text-white" />
           </div>
           <div>
@@ -139,7 +141,7 @@ export default function SearchPage() {
               onKeyDown={(e) => { if (e.key === "Enter") { commitRecent(query); setShowSuggestions(false); } }}
               placeholder="Search movies and series..."
               autoComplete="off"
-              className="w-full glass-card rounded-xl pl-10 pr-10 py-2.5 text-white text-sm placeholder-text-muted outline-none focus:ring-1 focus:ring-brand focus:shadow-[0_0_18px_rgba(229,9,20,0.3)] transition-all"
+              className="w-full glass-card rounded-xl pl-10 pr-10 py-2.5 text-white text-sm placeholder-text-muted outline-none focus:ring-1 focus:ring-brand focus:shadow-[0_0_18px_rgba(91,33,182,0.3)] transition-all"
             />
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
             {corpusLoading && (

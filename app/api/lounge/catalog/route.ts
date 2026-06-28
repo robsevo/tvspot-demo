@@ -127,9 +127,10 @@ async function fetchDiscover(
   if (!tmdbToken) return [];
   const reqs: Promise<any>[] = [];
   for (let page = 1; page <= pages; page++) {
+    // USA + Canada content ONLY: origin country US or CA, English-language.
     const url =
       `https://api.themoviedb.org/3/discover/${kind}` +
-      `?language=en-US&watch_region=US&with_original_language=en` +
+      `?language=en-US&watch_region=US&with_original_language=en&with_origin_country=US%7CCA` +
       `&sort_by=popularity.desc&vote_count.gte=50&page=${page}${extra}`;
     reqs.push(
       fetch(url, { headers: { Authorization: `Bearer ${tmdbToken}` }, next: { revalidate: 3600 } })

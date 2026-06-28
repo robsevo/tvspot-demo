@@ -1,4 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <rect width="512" height="512" rx="96" fill="#E50914"/>
-  <text x="256" y="320" font-family="Arial,Helvetica,sans-serif" font-size="320" font-weight="900" fill="white" text-anchor="middle">T</text>
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5B21B6"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <!-- TV screen -->
+  <rect x="122" y="143" width="268" height="184" rx="26" fill="white"/>
+  <!-- Stand -->
+  <rect x="204" y="348" width="104" height="20" rx="10" fill="white"/>
+  <rect x="174" y="380" width="164" height="18" rx="9" fill="white" opacity="0.7"/>
 </svg>

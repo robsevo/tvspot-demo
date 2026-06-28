@@ -11,6 +11,8 @@ interface Props {
   /** Class for the text-initials fallback. Default suits a dark backdrop;
    *  override (e.g. dark text) when the logo sits on a light background. */
   fallbackClassName?: string;
+  /** Class applied directly to the <img> element (for CSS filters etc.). */
+  imgClassName?: string;
 }
 
 /**
@@ -20,7 +22,7 @@ interface Props {
  *   3. text initials
  * Each failed source advances to the next via the <img> onError handler.
  */
-export function LogoImage({ name, logoUrl, className = "", fallbackClassName = "text-white/80" }: Props) {
+export function LogoImage({ name, logoUrl, className = "", fallbackClassName = "text-white/80", imgClassName = "" }: Props) {
   // Try reliable brand-favicon sources FIRST (Simple Icons / Google favicon by
   // domain), then the backend logo-proxy as a last resort. The backend's
   // /static/channel-logos path currently returns an HTML login page for many
@@ -48,7 +50,7 @@ export function LogoImage({ name, logoUrl, className = "", fallbackClassName = "
           alt={name}
           loading="lazy"
           referrerPolicy="no-referrer"
-          className="w-full h-full object-contain"
+          className={`w-full h-full object-contain ${imgClassName}`}
           onError={() => setIdx((i) => i + 1)}
         />
       </div>
