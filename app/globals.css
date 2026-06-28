@@ -1,0 +1,327 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-brand: #E50914;
+  --color-surface: #141414;
+  --color-card: #1f1f1f;
+  --color-header: #0a0a0a;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #b3b3b3;
+  --color-text-muted: #808080;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+:root {
+  --background: #141414;
+  --foreground: #ffffff;
+}
+
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar { display: none; }
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 30px #1f1f1f inset;
+  -webkit-text-fill-color: #ffffff;
+}
+
+video::-webkit-media-controls { display: none !important; }
+
+/* Poster rail smooth scroll */
+.poster-rail {
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.poster-rail > * { scroll-snap-align: start; }
+
+/* ── Animations ── */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes heroZoom {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.08); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+@keyframes ripple { 0%{transform:scale(1);opacity:0.4} 100%{transform:scale(2);opacity:0} }
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes shimmerWide {
+  0% { background-position: -400% 0; }
+  100% { background-position: 400% 0; }
+}
+@keyframes heroGradientShift {
+  0% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+  100% { background-position: 0% 0%; }
+}
+@keyframes skeletonPulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
+.animate-fade-in { animation: fadeIn 0.3s ease-out; }
+.animate-fade-in-up { animation: fadeInUp 0.35s ease-out; }
+.animate-fade-in-down { animation: fadeInDown 0.25s ease-out; }
+.animate-scale-in { animation: scaleIn 0.25s ease-out; }
+.animate-hero-zoom { animation: heroZoom 7s ease-in-out forwards; }
+.animate-slide-in-right { animation: slideInRight 0.3s ease-out; }
+.animate-slide-up { animation: slideUp 0.3s ease-out; }
+.animate-fade-in-scale { animation: fadeInScale 0.25s ease-out; }
+.animate-slide-in-left { animation: slideInLeft 0.3s ease-out; }
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+.animate-skeleton { animation: skeletonPulse 1.5s ease-in-out infinite; }
+
+/* Transition helpers */
+.transition-slide { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* Stagger children */
+.stagger-children > * {
+  opacity: 0;
+  animation: fadeInUp 0.35s ease-out forwards;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0.02s; }
+.stagger-children > *:nth-child(2) { animation-delay: 0.04s; }
+.stagger-children > *:nth-child(3) { animation-delay: 0.06s; }
+.stagger-children > *:nth-child(4) { animation-delay: 0.08s; }
+.stagger-children > *:nth-child(5) { animation-delay: 0.10s; }
+.stagger-children > *:nth-child(6) { animation-delay: 0.12s; }
+.stagger-children > *:nth-child(7) { animation-delay: 0.14s; }
+.stagger-children > *:nth-child(8) { animation-delay: 0.16s; }
+.stagger-children > *:nth-child(9) { animation-delay: 0.18s; }
+.stagger-children > *:nth-child(10) { animation-delay: 0.20s; }
+
+/* Hero title text shadow */
+.hero-text-shadow {
+  text-shadow: 0 2px 20px rgba(0,0,0,0.6), 0 1px 4px rgba(0,0,0,0.8);
+}
+
+/* Pill active */
+.pill-active { box-shadow: 0 0 0 1px rgba(229, 9, 20, 0.5); }
+
+/* Glass */
+.glass {
+  background: rgba(15, 15, 15, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Logo placeholder */
+.logo-placeholder {
+  background: linear-gradient(135deg, #1f1f1f 0%, #2a2a2a 50%, #1f1f1f 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Hero fade overlay for transitions */
+.hero-overlay {
+  background: linear-gradient(to top, #141414 0%, rgba(20,20,20,0.6) 50%, transparent 100%);
+}
+
+/* Genre gradient for VOD detail */
+.genre-gradient {
+  background: linear-gradient(135deg, rgba(229,9,20,0.15) 0%, transparent 100%);
+}
+
+/* Smooth in-page scrolling (rail arrows, anchor jumps) */
+html { scroll-behavior: smooth; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Futuristic interaction layer (added 2026-06-27). Applied site-wide at the
+   CSS layer so it lifts the whole app without touching every component —
+   structure, layout and colors are untouched; only motion/feedback is added.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* Universal press feedback — EVERYTHING feels pressed when pressed. A snappy
+   spring scale + slight brightness dip on the active state of any interactive
+   element (buttons, links, role=button, the poster cards' Link). */
+button, a, [role="button"], .pressable, label[for] {
+  transition: transform 0.13s cubic-bezier(0.34, 1.56, 0.64, 1),
+              filter 0.13s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+button:active, a:active, [role="button"]:active, .pressable:active, label[for]:active {
+  transform: scale(0.94);
+  filter: brightness(0.92);
+}
+/* Buttons that are big tap targets shouldn't shrink as hard as small chips. */
+.pressable-soft:active { transform: scale(0.975); filter: brightness(0.95); }
+
+/* Futuristic focus/hover glow in the brand red — subtle, dark-theme native. */
+@media (hover: hover) {
+  button:hover, a:hover, [role="button"]:hover { filter: brightness(1.08); }
+}
+
+/* Animated brand-gradient sheen for "futuristic" accents (headers, active pills).
+   Opt-in via class so it never overrides existing colors globally. */
+@keyframes brandSheen {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.brand-sheen {
+  background: linear-gradient(110deg, #E50914, #ff3b44, #E50914);
+  background-size: 200% 100%;
+  animation: brandSheen 3s linear infinite;
+}
+
+/* Soft neon ring for "now/live" emphasis — uses brand color, opt-in. */
+@keyframes neonPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(229,9,20,0.45); }
+  50% { box-shadow: 0 0 0 4px rgba(229,9,20,0.0); }
+}
+.neon-pulse { animation: neonPulse 2s ease-in-out infinite; }
+
+/* Glassy elevated surface for a futuristic depth cue (opt-in). */
+.glass-card {
+  background: rgba(31, 31, 31, 0.6);
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Smoother shared page-enter: gives every route a cohesive futuristic settle. */
+@keyframes pageRise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-page-rise { animation: pageRise 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   HUD / "JARVIS"-style futuristic system — adapted to the brand RED (#E50914),
+   keeping the existing dark palette + layout. Inspired by Origin's HUD theme.
+   Brand RGB for tinting: 229, 9, 20.
+   ════════════════════════════════════════════════════════════════════════ */
+:root {
+  --br: 229; --bg: 9; --bb: 20;            /* brand red rgb */
+  --hud-corner: rgba(229,9,20,0.55);
+  --hud-glow-sm: 0 0 8px rgba(229,9,20,0.35);
+  --hud-glow-md: 0 0 18px rgba(229,9,20,0.30);
+  --hud-glow-lg: 0 0 36px rgba(229,9,20,0.22);
+  --hud-grid:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 34px);
+}
+
+/* Faint HUD grid backdrop — opt-in on a page wrapper for the "interface" feel. */
+@keyframes hudGridDrift { 0% { background-position:0 0; } 100% { background-position:34px 34px; } }
+.hud-grid-bg {
+  position: relative;
+}
+.hud-grid-bg::before {
+  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: var(--hud-grid);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 75%);
+          mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 75%);
+  animation: hudGridDrift 40s linear infinite;
+  opacity: 0.6;
+}
+.hud-grid-bg > * { position: relative; z-index: 1; }
+
+/* HUD corner brackets — the signature Origin panel accent, brand-red. */
+.hud-corners { position: relative; }
+.hud-corners::before, .hud-corners::after {
+  content: ""; position: absolute; width: 12px; height: 12px;
+  border: 1.5px solid var(--hud-corner); pointer-events: none; z-index: 2;
+}
+.hud-corners::before { top: 5px; left: 5px; border-right: none; border-bottom: none; border-top-left-radius: 3px; }
+.hud-corners::after  { bottom: 5px; right: 5px; border-left: none; border-top: none; border-bottom-right-radius: 3px; }
+
+/* Scan-line sweep across a surface (hero, featured). */
+@keyframes hudScan { 0% { transform: translateY(-110%); opacity: 0; } 10% { opacity: .6; } 90% { opacity: .6; } 100% { transform: translateY(110%); opacity: 0; } }
+.hud-scan { position: relative; overflow: hidden; }
+.hud-scan::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 40%; z-index: 2; pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(229,9,20,0.10), transparent);
+  animation: hudScan 6s ease-in-out infinite;
+}
+
+/* Live pulse — red glowing dot/border for "LIVE"/now. */
+@keyframes livePulseRed {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(229,9,20,0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(229,9,20,0); }
+}
+.live-dot { animation: livePulseRed 1.8s ease-in-out infinite; }
+
+/* Card lift — poster cards float + glow on hover/active (futuristic depth). */
+.hud-card {
+  transition: transform 0.22s cubic-bezier(0.22,1,0.36,1), box-shadow 0.22s ease, filter 0.22s ease;
+  will-change: transform;
+}
+@media (hover: hover) {
+  .hud-card:hover { transform: translateY(-4px) scale(1.03); box-shadow: var(--hud-glow-md), 0 12px 30px rgba(0,0,0,0.55); filter: brightness(1.06); }
+}
+.hud-card:active { transform: scale(0.96); }
+
+/* Brand glow utility for accent chips/headers. */
+.hud-glow { box-shadow: var(--hud-glow-sm); }
+.hud-text-glow { text-shadow: 0 0 14px rgba(229,9,20,0.5); }
+
+/* Shimmer skeleton in brand tint (loading states feel intentional). */
+@keyframes hudShimmer { 0% { background-position: -150% 0; } 100% { background-position: 150% 0; } }
+.hud-skeleton {
+  background: linear-gradient(100deg, rgba(255,255,255,0.04) 30%, rgba(229,9,20,0.10) 50%, rgba(255,255,255,0.04) 70%);
+  background-size: 200% 100%;
+  animation: hudShimmer 1.4s linear infinite;
+}
+
+/* Respect user motion preferences — industry/accessibility standard.
+   Disable non-essential motion but keep opacity fades subtle. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-hero-zoom { animation: none !important; }
+}
+

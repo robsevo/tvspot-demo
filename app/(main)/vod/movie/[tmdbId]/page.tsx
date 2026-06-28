@@ -1,0 +1,147 @@
+"use client";
+
+import { useParams } from "next/navigation";
+import { useState, useEffect, useMemo } from "react";
+import { proxyFetch } from "@/lib/api";
+import Link from "next/link";
+import { ChevronLeft } from "lucide-react";
+import VideoPlayer from "@/components/VideoPlayer";
+import { providerName } from "@/lib/sources";
+import { SourceTroubleHint } from "@/components/SourceTroubleHint";
+import { ExternalLink } from "lucide-react";
+import type { VodDetail } from "@/lib/types";
+
+export default function VodMoviePage() {
+  const { tmdbId } = useParams<{ tmdbId: string }>();
+  const [detail, setDetail] = useState<VodDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sourceIndex, setSourceIndex] = useState(0);
+
+  useEffect(() => {
+    if (!tmdbId) return;
+    setLoading(true);
+    proxyFetch<VodDetail>(`/api/lounge/vod/details/${tmdbId}`)
+      .then((d) => setDetail(d))
+      .catch((err) => console.error("Movie detail fetch failed:", err))
+      .finally(() => setLoading(false));
+  }, [tmdbId]);
+
+  // Unified source list: direct/resolved streams first, vidlink embed LAST.
+  // Capped at 5 (up to 4 streams + vidlink) per product requirement.
+  const sources = useMemo(() => {
+    const streams = (detail?.stream_urls ?? []).map((url, i) => ({
+      url, kind: "stream" as const, label: `Source ${i + 1}`,
+    }));
+    const embeds = (detail?.embed_urls ?? []).map((url) => ({
+      url, kind: "embed" as const, label: providerName(url),
+    }));
+    return [...streams.slice(0, 4), ...embeds].slice(0, 5);
+  }, [detail]);
+  const idx = Math.min(sourceIndex, Math.max(0, sources.length - 1));
+  const current = sources[idx];
+
+  if (loading) {
+    return (
+      <div className="pt-3 min-h-screen pb-20">
+        <div className="aspect-[16/9] hud-skeleton mb-4" />
+        <div className="px-4 space-y-3">
+          <div className="h-6 hud-skeleton rounded w-2/3" />
+          <div className="h-4 hud-skeleton rounded w-1/2" />
+          <div className="h-32 hud-skeleton rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <div className="pt-3 min-h-screen pb-20 px-4 text-center pt-20">
+        <p className="text-text-secondary">Movie not found</p>
+        <Link href="/vod" className="text-brand text-sm mt-2 inline-block">Back to VOD</Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pt-3 min-h-screen pb-20 animate-page-rise">
+      {/* Back */}
+      <Link href="/vod" className="absolute top-14 left-3 z-10 w-9 h-9 rounded-full glass-card flex items-center justify-center">
+        <ChevronLeft className="w-5 h-5 text-white" />
+      </Link>
+
+      {/* Backdrop */}
+      <div className="hud-scan relative aspect-[16/9] mb-4 overflow-hidden">
+        {detail.backdrop ? (
+          <img src={detail.backdrop} alt={detail.title} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-br from-brand/30 to-surface" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/50 to-transparent" />
+      </div>
+
+      {/* Info */}
+      <div className="px-4">
+        <h1 className="text-white text-xl font-bold mb-2">{detail.title}</h1>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-text-muted text-xs">{detail.year || ""}</span>
+          {Number(detail.rating) > 0 && (
+            <span className="text-brand text-xs font-medium">{Number(detail.rating).toFixed(1)}</span>
+          )}
+          <span className="text-text-muted text-xs">{detail.service}</span>
+        </div>
+        <p className="text-text-secondary text-sm mb-4">{detail.overview}</p>
+
+        {sources.length > 0 && (
+          <div className="mb-6">
+            <h2 className="text-white text-sm font-semibold mb-2">Watch Now</h2>
+            {/* Unified source list: direct streams first, vidlink last (≤5). */}
+            <div className="flex flex-wrap items-center gap-1.5 mb-2">
+              {sources.length > 1 &&
+                sources.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSourceIndex(i)}
+                    className={`text-[10px] px-2.5 py-1 rounded-full transition-colors ${
+                      idx === i ? "bg-brand text-white hud-glow" : "glass-card text-text-muted hover:text-white"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              <a
+                href={current.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] px-2.5 py-1 rounded-full bg-card text-text-muted hover:text-white transition-colors flex items-center gap-1 ml-auto"
+                title="If this source won't play here, open it in a new tab"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Open
+              </a>
+            </div>
+            <div className="rounded-xl overflow-hidden bg-black">
+              {current.kind === "embed" ? (
+                <iframe
+                  src={current.url}
+                  allowFullScreen
+                  allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+                  className="w-full h-full aspect-video"
+                  style={{ border: "none" }}
+                  key={idx}
+                />
+              ) : (
+                <VideoPlayer
+                  src={current.url}
+                  autoPlay={false}
+                  key={idx}
+                />
+              )}
+            </div>
+            {/* No auto-switch — the user picks. Nudge after 30s on this source. */}
+            <SourceTroubleHint resetKey={idx} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

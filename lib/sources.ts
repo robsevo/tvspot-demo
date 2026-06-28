@@ -1,0 +1,67 @@
+/**
+ * Helpers for labeling third-party VOD embed/stream sources.
+ *
+ * The catalog's embed URLs point at public embed aggregators (vidlink, 2embed,
+ * etc.). Their uptime, geo-availability, and whether they permit <iframe>
+ * embedding all vary and are outside our control — so the UI labels each source
+ * by provider (instead of "Source 1/2/3") and always offers an open-in-new-tab
+ * escape hatch for providers that frame-bust or refuse embedding.
+ */
+
+import verifiedSources from "@/data/verified-sources.json";
+
+/**
+ * URL-safe channel slug. Replaces EVERY non-alphanumeric run (incl. "/" in
+ * "24/7 South Park") with "-" so the slug is a single URL path segment. Must be
+ * the one source of truth used for both link generation and route matching —
+ * otherwise channels with "/" or other punctuation 404.
+ */
+export function channelSlug(name: string): string {
+  return (name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/** Get verified stream URLs for a channel from the freshness pipeline output. */
+export function getChannelSources(channelName: string): string[] {
+  try {
+    const slug = channelSlug(channelName);
+    const entry = (verifiedSources as any).channels?.[slug];
+    if (!entry?.sources) return [];
+    return entry.sources.map((s: { url: string }) => s.url);
+  } catch {
+    return [];
+  }
+}
+
+const PROVIDER_NAMES: Record<string, string> = {
+  "vidlink.pro": "Vidlink",
+  "moviesapi.club": "MoviesAPI",
+  "2embed.cc": "2Embed",
+  "2embed.to": "2Embed",
+  "multiembed.mov": "MultiEmbed",
+  "streamingnow.mov": "MultiEmbed",
+  "nontongo.win": "Nontongo",
+  "pstream.org": "Pstream",
+  "vidsrc.to": "VidSrc",
+  "vidsrc.me": "VidSrc",
+  "vidsrc.net": "VidSrc",
+  "vidsrc.xyz": "VidSrc",
+  "embed.su": "Embed.su",
+  "autoembed.co": "AutoEmbed",
+  "superembed.stream": "SuperEmbed",
+  "smashystream.com": "SmashyStream",
+  "vidsrc.cc": "VidSrc",
+};
+
+/** Human-friendly provider name for an embed URL, e.g. "Vidlink". */
+export function providerName(url: string): string {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    if (PROVIDER_NAMES[host]) return PROVIDER_NAMES[host];
+    // Fall back to the registrable-ish domain (drop subdomains), title-cased.
+    const parts = host.split(".");
+    const base = parts.length >= 2 ? parts[parts.length - 2] : host;
+    return base.charAt(0).toUpperCase() + base.slice(1);
+  } catch {
+    return "Source";
+  }
+}

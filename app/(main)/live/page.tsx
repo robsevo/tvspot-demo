@@ -1,0 +1,407 @@
+"use client";
+
+import { useState, useRef, useEffect, useMemo } from "react";
+import { useChannels } from "@/hooks/useChannels";
+import { getChannelType } from "@/lib/logos";
+import { LogoImage } from "@/components/LogoImage";
+import { proxyFetch } from "@/lib/api";
+import { channelSlug } from "@/lib/sources";
+import Link from "next/link";
+import { Tv, Sparkles } from "lucide-react";
+import type { EpgResponse } from "@/lib/types";
+
+const HOUR_WIDTH = 240; // pixels per hour
+const NOW_COLOR = "#E50914";
+
+const categoryTabs = ["All", "Sports", "Entertainment", "Movies", "News", "Kids", "Music", "Lifestyle"];
+
+const genreTabs = ["All", "Movies", "Sports", "News", "Entertainment", "Kids", "Music", "Documentary"];
+
+/** Rough genre detection from program title text */
+function guessGenre(title: string): string[] {
+  const t = title.toLowerCase();
+  const matches: string[] = [];
+  if (/\b(movie|film|cinema|action|thriller|sci.fy|horror|comedy|drama|romance)\b/.test(t)) matches.push("Movies");
+  if (/\b(sport|game|match|race|cup|championship|final|derby|olympic|nfl|nba|mlb|nhl|espn|fight|boxing|ufc|soccer|football|hockey|basketball|baseball|tennis|golf|f1|grand prix|playoff|tournament|stadium|arena|vs\.|vs )\b/.test(t)) matches.push("Sports");
+  if (/\b(news|report|update|weather|today|hour|breaking|alert|live now)\b/.test(t)) matches.push("News");
+  if (/\b(kid|child|cartoon|animation|preschool|toddler|nick|jr|disney junior|paw patrol|bluey|sesame)\b/.test(t)) matches.push("Kids");
+  if (/\b(music|concert|live|song|band|dj|remix|award|billboard|mtv)\b/.test(t)) matches.push("Music");
+  if (/\b(documentary|doc|nature|wildlife|history|explore|planet|ocean|science|discover)\b/.test(t)) matches.push("Documentary");
+  if (/\b(entertainment|talk|show|variety|lifestyle|reality|cooking|food|home|garden|makeover|fashion|celebrity)\b/.test(t)) matches.push("Entertainment");
+  return matches;
+}
+
+export default function LivePage() {
+  const { channels, loading } = useChannels();
+  const [activeCat, setActiveCat] = useState("All");
+  const [activeGenre, setActiveGenre] = useState("All");
+  const [epgData, setEpgData] = useState<Record<string, { title: string; start: Date; end: Date }[]>>({});
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const timeRulerRef = useRef<HTMLDivElement>(null);
+  const [now, setNow] = useState(new Date());
+
+  // Update "now" every 30 seconds
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Fetch EPG data
+  useEffect(() => {
+    if (channels.length === 0) return;
+    const names = channels.map((c) => c.name).join(",");
+    proxyFetch<EpgResponse>(`/api/lounge/epg?channels=${encodeURIComponent(names)}`)
+      .then((data) => {
+        const parsed: Record<string, { title: string; start: Date; end: Date }[]> = {};
+        for (const [name, progs] of Object.entries(data.programmes || {})) {
+          // First pass: merge overlapping/contiguous entries with the same title
+          const sorted = progs
+            .map((p) => ({
+              title: p.title,
+              start: new Date(p.start_utc),
+              end: new Date(p.stop_utc),
+            }))
+            .sort((a, b) => a.start.getTime() - b.start.getTime());
+          const merged: typeof sorted = [];
+          for (const p of sorted) {
+            const last = merged[merged.length - 1];
+            if (last && last.title === p.title && p.start.getTime() <= last.end.getTime() + 300000) {
+              if (p.end > last.end) last.end = p.end;
+            } else {
+              merged.push({ title: p.title, start: p.start, end: p.end });
+            }
+          }
+          // Second pass: remove any remaining overlaps between different titles
+          const deduped: typeof merged = [];
+          for (const p of merged) {
+            const last = deduped[deduped.length - 1];
+            if (last && p.start.getTime() < last.end.getTime()) {
+              // Overlaps with previous — different titles, skip the duplicate
+            } else {
+              deduped.push(p);
+            }
+          }
+          parsed[name] = deduped;
+        }
+        setEpgData(parsed);
+      })
+      .catch(() => {});
+  }, [channels]);
+
+  // Time window: 1 hour before to 5 hours after
+  const windowStart = useMemo(() => {
+    const d = new Date(now);
+    d.setHours(d.getHours() - 1, 0, 0, 0);
+    return d;
+  }, [now]);
+
+  const windowEnd = useMemo(() => {
+    const d = new Date(now);
+    d.setHours(d.getHours() + 5, 0, 0, 0);
+    return d;
+  }, [now]);
+
+  const windowHours = useMemo(() => {
+    const hours: Date[] = [];
+    const h = new Date(windowStart);
+    while (h < windowEnd) {
+      hours.push(new Date(h));
+      h.setHours(h.getHours() + 1);
+    }
+    return hours;
+  }, [windowStart, windowEnd]);
+
+  const totalWidth = windowHours.length * HOUR_WIDTH;
+
+  // Now-line position
+  const nowOffset = ((now.getTime() - windowStart.getTime()) / (1000 * 60 * 60)) * HOUR_WIDTH;
+
+  // Scroll to now on mount
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollLeft = Math.max(0, nowOffset - 100);
+    }
+  }, [nowOffset, loading]);
+
+  // Channels grouped + ordered by derived TYPE (backend category is just "live",
+  // so we classify by name). Sports → News → Entertainment → Movies → Kids →
+  // Music → Lifestyle, keeping channel_number order within each type.
+  const TYPE_ORDER = ["Sports", "News", "Entertainment", "Movies", "Kids", "Music", "Lifestyle"];
+  const channelsByType = useMemo(() => {
+    return [...channels]
+      .map((ch) => ({ ch, type: getChannelType(ch.name) }))
+      .sort((a, b) => {
+        const ta = TYPE_ORDER.indexOf(a.type), tb = TYPE_ORDER.indexOf(b.type);
+        if (ta !== tb) return (ta < 0 ? 99 : ta) - (tb < 0 ? 99 : tb);
+        return (a.ch.channel_number || 0) - (b.ch.channel_number || 0);
+      })
+      .map((x) => x.ch);
+  }, [channels]);
+
+  // Filter channels by derived type (category tabs).
+  const filteredByCat = useMemo(() => {
+    return activeCat === "All"
+      ? channelsByType
+      : channelsByType.filter((ch) => getChannelType(ch.name) === activeCat);
+  }, [channelsByType, activeCat]);
+
+  // Genre counts from EPG data using keyword detection
+  const genreCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const genre of genreTabs) {
+      if (genre === "All") continue;
+      counts[genre] = 0;
+    }
+    for (const ch of filteredByCat) {
+      const progs = epgData[ch.name] || [];
+      const nowShowing = progs.filter((p) => p.start <= now && p.end > now);
+      const genresFound = new Set<string>();
+      for (const p of nowShowing) {
+        for (const g of guessGenre(p.title)) {
+          genresFound.add(g);
+        }
+      }
+      for (const g of genresFound) {
+        if (counts[g] !== undefined) counts[g]++;
+      }
+    }
+    return counts;
+  }, [filteredByCat, epgData, now]);
+
+  const filteredChannels = useMemo(() => {
+    if (activeGenre === "All") return filteredByCat;
+    return filteredByCat.filter((ch) => {
+      const progs = epgData[ch.name] || [];
+      return progs.some(
+        (p) => p.start <= now && p.end > now && guessGenre(p.title).includes(activeGenre)
+      );
+    });
+  }, [filteredByCat, activeGenre, epgData, now]);
+
+  if (loading) {
+    return (
+      <div className="pt-4 min-h-screen">
+        <div className="px-4 space-y-3">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="h-16 bg-card rounded-xl animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="hud-grid-bg pt-12 min-h-screen pb-20 animate-page-rise">
+      {/* Header */}
+      <div className="px-4 mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-red-700 flex items-center justify-center hud-glow">
+            <Tv className="w-4 h-4 text-white" />
+          </div>
+          <div>
+            <h1 className="text-white text-lg font-bold">Live TV</h1>
+            <p className="text-text-muted text-[11px]">{channels.length} channels</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 text-brand text-xs font-medium bg-brand/10 px-2.5 py-1 rounded-full">
+          <span className="w-1.5 h-1.5 rounded-full bg-brand live-dot" />
+          <span>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+        </div>
+      </div>
+
+      {/* Category tabs — horizontal scroll */}
+      <div className="flex gap-2 overflow-x-auto px-4 mb-3 poster-rail">
+        {categoryTabs.map((cat) => {
+          const count = cat === "All" ? channels.length : channels.filter((ch) => getChannelType(ch.name) === cat).length;
+          if (count === 0 && cat !== "All") return null;
+          return (
+            <button
+              key={cat}
+              onClick={() => setActiveCat(cat)}
+              className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
+                activeCat === cat
+                  ? "bg-brand text-white hud-glow"
+                  : "glass-card text-text-secondary hover:text-white"
+              }`}
+            >
+              {cat}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Genre pills — horizontal scroll */}
+      <div className="flex gap-2 overflow-x-auto px-4 mb-4 poster-rail">
+        {genreTabs.map((genre) => {
+          const count = genre === "All" ? filteredByCat.length : genreCounts[genre] || 0;
+          if (count === 0 && genre !== "All") return null;
+          return (
+          <button
+            key={genre}
+            onClick={() => setActiveGenre(genre)}
+            className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 ${
+              activeGenre === genre
+                ? "bg-brand text-white hud-glow"
+                : "glass-card text-text-secondary hover:text-white"
+            }`}
+          >
+            {genre}
+            {count > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                activeGenre === genre
+                  ? "bg-white/20 text-white"
+                  : "bg-white/10 text-text-muted"
+              }`}>
+                {count}
+              </span>
+            )}
+          </button>
+          );
+        })}
+      </div>
+
+      {/* EPG Grid */}
+      {filteredChannels.length === 0 && activeGenre !== "All" ? (
+        <div className="flex items-center justify-center min-h-[200px]">
+          <p className="text-text-muted text-sm">No {activeGenre} programming right now</p>
+        </div>
+      ) : (
+      <div className="relative">
+        {/* Sticky channel column + scrollable grid */}
+        <div className="flex">
+          {/* Channel logos — fixed column */}
+          <div className="flex-shrink-0 w-[72px] bg-surface z-20 border-r border-white/5">
+            {/* Empty top-left corner (aligns with time ruler) */}
+            <div className="h-8 border-b border-white/5" />
+            {/* Channel rows */}
+            {filteredChannels.map((ch) => {
+              return (
+                <Link
+                  key={ch.name}
+                  href={`/live/${channelSlug(ch.name)}`}
+                  className="flex flex-col items-center justify-center gap-0.5 h-14 border-b border-white/5 hover:bg-card/50 transition-colors"
+                >
+                  <div className="w-10 h-9 rounded-lg bg-white flex items-center justify-center overflow-hidden relative shadow-sm ring-1 ring-black/5 p-0.5">
+                    <LogoImage
+                      name={ch.name}
+                      logoUrl={ch.logo_url || ch.logo}
+                      className="w-full h-full object-contain"
+                      fallbackClassName="text-gray-700"
+                    />
+                    {ch.online && (
+                      <div className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-500 ring-1 ring-white" />
+                    )}
+                  </div>
+                  <span className="text-text-muted text-[8px] leading-tight text-center truncate max-w-[64px]">{ch.name}</span>
+                </Link>
+              );
+            })}
+          </div>
+
+          {/* Scrollable program grid */}
+          <div
+            ref={scrollRef}
+            className="flex-1 overflow-x-auto relative"
+            onScroll={(e) => {
+              if (timeRulerRef.current) {
+                timeRulerRef.current.scrollLeft = (e.target as HTMLElement).scrollLeft;
+              }
+            }}
+          >
+            {/* Time ruler */}
+            <div
+              ref={timeRulerRef}
+              className="sticky top-0 z-10 h-8 bg-header/95 border-b border-white/5 flex items-end overflow-hidden"
+              style={{ width: totalWidth + 32 }}
+            >
+              {windowHours.map((h, i) => (
+                <div
+                  key={i}
+                  className="flex-shrink-0 text-[10px] text-text-muted font-medium pl-2 pb-1 border-l border-white/5"
+                  style={{ width: HOUR_WIDTH }}
+                >
+                  {h.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </div>
+              ))}
+              {/* Spacer for right padding */}
+              <div className="flex-shrink-0 w-8" />
+              {/* Now line on ruler */}
+              <div
+                className="absolute top-0 bottom-0 w-0.5 z-20"
+                style={{ left: nowOffset, backgroundColor: NOW_COLOR, boxShadow: "0 0 8px rgba(229,9,20,0.6)" }}
+              >
+                <div className="absolute -top-0 left-1/2 -translate-x-1/2 bg-brand text-white text-[8px] px-1.5 py-0.5 rounded-b font-bold hud-glow">
+                  NOW
+                </div>
+              </div>
+            </div>
+
+            {/* Program rows */}
+            <div style={{ width: totalWidth + 32 }}>
+              {filteredChannels.map((ch) => {
+                const progs = epgData[ch.name] || [];
+                return (
+                  <div
+                    key={ch.name}
+                    className="h-14 border-b border-white/5 relative"
+                  >
+                    <div className="absolute inset-y-0 left-0 right-8 flex items-center">
+                      {progs.length > 0 ? (
+                        progs
+                          .filter((p) => p.end > windowStart && p.start < windowEnd)
+                          .map((p, i) => {
+                            const startOffset = Math.max(0, (p.start.getTime() - windowStart.getTime()) / (1000 * 60 * 60)) * HOUR_WIDTH;
+                            const endOffset = Math.min(totalWidth, ((p.end.getTime() - windowStart.getTime()) / (1000 * 60 * 60)) * HOUR_WIDTH);
+                            const width = endOffset - startOffset;
+                            if (width < 4) return null;
+                            const isNow = p.start <= now && p.end > now;
+                            const gap = 3;
+                            return (
+                              <Link
+                                key={`${ch.name}-${i}`}
+                                href={`/live/${channelSlug(ch.name)}`}
+                                className={`rounded-md flex items-center px-2 overflow-hidden ${
+                                  isNow
+                                    ? "bg-brand/25 ring-1 ring-brand/50 z-10"
+                                    : "bg-card/70 hover:bg-card"
+                                }`}
+                                style={{
+                                  position: "absolute",
+                                  top: 4,
+                                  bottom: 4,
+                                  left: startOffset + gap,
+                                  width: Math.max(width - gap * 2, 36),
+                                }}
+                              >
+                                <span className={`text-[11px] truncate font-medium ${isNow ? "text-white" : "text-text-secondary"}`}>
+                                  {p.title}
+                                </span>
+                              </Link>
+                            );
+                          })
+                      ) : (
+                        <Link
+                          href={`/live/${channelSlug(ch.name)}`}
+                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-card/30 border border-white/5 flex items-center px-3 hover:bg-card/60 transition-colors"
+                        >
+                          <span className="text-text-muted text-[11px]">No schedule data</span>
+                        </Link>
+                      )}
+                    </div>
+
+                    {/* Now line */}
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5 z-10 pointer-events-none"
+                      style={{ left: nowOffset, backgroundColor: NOW_COLOR }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+      )}
+    </div>
+  );
+}

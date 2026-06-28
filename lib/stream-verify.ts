@@ -1,0 +1,113 @@
+/**
+ * Runtime stream verification for live-TV sources.
+ *
+ * Live channels arrive with a primary_url + several backup_urls (shown in the UI
+ * as "Source 1..N"). Many of those backups are dead at any given moment — they
+ * 401, return an empty playlist, or time out — so the player would otherwise
+ * present sources that silently fail when tapped. This probes each HLS playlist
+ * server-side (no browser CORS/auth limits) and reports which actually work, so
+ * the UI can badge dead sources and auto-pick a working one.
+ *
+ * This is a lean Tier-1/Tier-2 check (reachable + valid playlist + has at least
+ * one segment) — the deeper 4-tier offline pipeline lives in
+ * scripts/link-freshness/verifier.ts and is not appropriate for a per-request
+ * runtime path.
+ */
+
+export interface StreamCheck {
+  url: string;
+  ok: boolean;
+  /** HTTP status; 0 means the request never completed (timeout / unreachable). */
+  status: number;
+  latencyMs: number;
+  /** Short human-readable outcome, e.g. "ok", "timeout", "401 unauthorized". */
+  reason: string;
+}
+
+const DEFAULT_TIMEOUT_MS = 6000;
+/** Playlists are a few KB; anything large is not a playlist we should buffer. */
+const MAX_PLAYLIST_BYTES = 2_000_000;
+
+function httpReason(status: number): string {
+  if (status === 401 || status === 403) return `${status} unauthorized`;
+  if (status === 404) return "404 not found";
+  if (status >= 500) return `${status} server error`;
+  return `http ${status}`;
+}
+
+/** True if the content-type looks like an HLS playlist (and not html/json). */
+function isHlsContentType(ct: string): boolean {
+  const lower = ct.toLowerCase();
+  if (lower.includes("html") || lower.includes("json")) return false;
+  return lower.includes("mpegurl");
+}
+
+/** Playlist has at least one media segment or child playlist reference. */
+function hasSegments(playlist: string): boolean {
+  for (const raw of playlist.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("#EXTINF")) return true;
+    if (!line.startsWith("#") && (/\.m3u8(\?|$)/i.test(line) || /\.ts(\?|$)/i.test(line))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Probe a single HLS source URL. Resolves (never rejects) with a verdict.
+ */
+export async function checkStream(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<StreamCheck> {
+  const start = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { "User-Agent": "tvspot-stream-check/1.0" },
+      cache: "no-store",
+    });
+    const latencyMs = Date.now() - start;
+
+    if (!res.ok) {
+      return { url, ok: false, status: res.status, latencyMs, reason: httpReason(res.status) };
+    }
+
+    const ct = res.headers.get("content-type") || "";
+    if (!isHlsContentType(ct)) {
+      return { url, ok: false, status: res.status, latencyMs, reason: "not a stream" };
+    }
+
+    const len = Number(res.headers.get("content-length") || "0");
+    if (len > MAX_PLAYLIST_BYTES) {
+      return { url, ok: false, status: res.status, latencyMs, reason: "not a stream" };
+    }
+
+    const body = (await res.text()).trimStart();
+    if (!body.startsWith("#EXTM3U")) {
+      return { url, ok: false, status: res.status, latencyMs, reason: "invalid playlist" };
+    }
+    if (!hasSegments(body)) {
+      return { url, ok: false, status: res.status, latencyMs, reason: "empty stream" };
+    }
+
+    return { url, ok: true, status: res.status, latencyMs, reason: "ok" };
+  } catch {
+    const latencyMs = Date.now() - start;
+    return {
+      url,
+      ok: false,
+      status: 0,
+      latencyMs,
+      reason: ctrl.signal.aborted ? "timeout" : "unreachable",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Probe many sources concurrently. Order of results matches input order. */
+export async function checkStreams(urls: string[], timeoutMs = DEFAULT_TIMEOUT_MS): Promise<StreamCheck[]> {
+  return Promise.all(urls.map((u) => checkStream(u, timeoutMs)));
+}
