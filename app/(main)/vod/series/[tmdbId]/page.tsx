@@ -233,7 +233,7 @@ export default function VodSeriesPage() {
                               <iframe
                                 src={currentSource.url}
                                 allowFullScreen
-                                allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+                                allow="fullscreen; encrypted-media; picture-in-picture"
                                 // Sandbox removed per request — the strict sandbox
                                 // stopped some providers from playing. Trade-off:
                                 // popup/redirect ads can return; "Open" + the source
@@ -245,7 +245,7 @@ export default function VodSeriesPage() {
                             ) : (
                               <VideoPlayer
                                 src={currentSource.url}
-                                autoPlay
+                                autoPlay={false}
                                 key={currentSource.url}
                               />
                             )}

@@ -157,7 +157,7 @@ export default function VodMoviePage() {
                 <iframe
                   src={current.url}
                   allowFullScreen
-                  allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+                  allow="fullscreen; encrypted-media; picture-in-picture"
                   // Sandbox removed per request — the strict sandbox stopped some
                   // providers from playing. Trade-off: popup/redirect ads can come
                   // back; the "Open" hatch + source switcher remain the escape.
