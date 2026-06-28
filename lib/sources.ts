@@ -20,13 +20,20 @@ export function channelSlug(name: string): string {
   return (name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-/** Get verified stream URLs for a channel from the freshness pipeline output. */
+/**
+ * Verified stream URLs for a channel from the freshness pipeline output.
+ * Active set first (≤5, live-verified, what the site relies on), then the
+ * waiting bench as lower-priority failover — the player de-dupes, live-checks,
+ * and auto-picks a working one, so surfacing the bench just gives more to try.
+ */
 export function getChannelSources(channelName: string): string[] {
   try {
     const slug = channelSlug(channelName);
     const entry = (verifiedSources as any).channels?.[slug];
-    if (!entry?.sources) return [];
-    return entry.sources.map((s: { url: string }) => s.url);
+    if (!entry) return [];
+    const active = (entry.sources || []).map((s: { url: string }) => s.url);
+    const waiting = (entry.waiting || []).map((s: { url: string }) => s.url);
+    return [...active, ...waiting];
   } catch {
     return [];
   }

@@ -33,6 +33,10 @@ export interface VerifiedSource {
   /** Where the link came from: the backend channel list, the Reddit scrape,
    *  or carried over from a previous run's store. */
   origin?: "backend" | "scraped" | "store";
+  /** Passed the liveness check (edge advanced over time) on the last run. Used to
+   *  RANK (live-first) — NOT to delete: a flaky 9s snapshot must not drop a
+   *  loadable link, or we'd remove currently-working channels. */
+  live?: boolean;
 }
 
 /** A candidate link to test: verify one URL, store another (raw vs wrapped). */
@@ -48,7 +52,12 @@ export interface Candidate {
 
 export interface VerifiedChannel {
   name: string;
-  sources: VerifiedSource[]; // max 6, sorted best first
+  /** Active set shown on the site — up to 5, sticky (working ones not replaced),
+   *  live-verified first. */
+  sources: VerifiedSource[];
+  /** Reserve bench — all other loadable links (unbounded), promoted into the
+   *  active set when an active one dies on a later run. */
+  waiting?: VerifiedSource[];
 }
 
 export interface VerifiedMovie {

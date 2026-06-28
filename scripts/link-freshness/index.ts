@@ -158,12 +158,13 @@ async function main(): Promise<void> {
     else candidateMap.set(slug, [c]);
   };
 
-  // 1) Existing store first — so dedupe keeps its preserved firstSeenUtc.
+  // 1) Existing store first (active + waiting bench) — so dedupe keeps its
+  //    preserved firstSeenUtc and benched links get re-tested for promotion.
   let storeCount = 0;
   if (existing?.channels) {
     for (const [slug, vc] of Object.entries(existing.channels)) {
       nameBySlug.set(slug, vc.name);
-      for (const s of vc.sources || []) {
+      for (const s of [...(vc.sources || []), ...(vc.waiting || [])]) {
         add(slug, { verifyUrl: s.url, storeUrl: s.url, origin: "store", firstSeenUtc: s.firstSeenUtc || s.verifiedUtc });
         storeCount++;
       }
@@ -209,15 +210,50 @@ async function main(): Promise<void> {
 
   let totalVerified = 0;
   for (const sources of verified.values()) totalVerified += sources.length;
-  log(`  Kept ${totalVerified} working sources across ${verified.size} channels`);
+  log(`  Kept ${totalVerified} loadable sources across ${verified.size} channels`);
 
-  // Build output — only channels with at least one working source survive, so
-  // a channel whose every link died simply drops out of the list this run.
+  // Build output — per channel, split loadable links into a STICKY active set
+  // (≤5) plus an unbounded waiting bench. Stickiness preserves whatever was
+  // active before (so a working channel is never torn out on a flaky run); empty
+  // active slots are filled from the rest, live-verified first.
+  const ACTIVE_CAP = 5;
   const channelsSection: Record<string, VerifiedChannel> = {};
-  for (const [slug, sources] of verified) {
-    if (!sources.length) continue;
-    channelsSection[slug] = { name: nameBySlug.get(slug) || slug, sources };
+  let activeTotal = 0;
+  let waitingTotal = 0;
+
+  for (const [slug, loadable] of verified) {
+    if (!loadable.length) continue;
+
+    // URLs that were active in the previous run (preserve their order).
+    const prevActiveUrls = (existing?.channels?.[slug]?.sources || []).map((s) => s.url);
+    const byUrl = new Map(loadable.map((s) => [s.url, s]));
+
+    const active: typeof loadable = [];
+    const taken = new Set<string>();
+    // 1) Keep previously-active links that are still loadable (sticky — no replace).
+    for (const url of prevActiveUrls) {
+      if (active.length >= ACTIVE_CAP) break;
+      const s = byUrl.get(url);
+      if (s && !taken.has(url)) { active.push(s); taken.add(url); }
+    }
+    // 2) Fill remaining slots from the rest (already ranked live-first).
+    for (const s of loadable) {
+      if (active.length >= ACTIVE_CAP) break;
+      if (!taken.has(s.url)) { active.push(s); taken.add(s.url); }
+    }
+    // 3) Everything else loadable → waiting bench (keep all).
+    const waiting = loadable.filter((s) => !taken.has(s.url));
+
+    activeTotal += active.length;
+    waitingTotal += waiting.length;
+    channelsSection[slug] = {
+      name: nameBySlug.get(slug) || slug,
+      sources: active,
+      ...(waiting.length ? { waiting } : {}),
+    };
   }
+
+  log(`  Active ${activeTotal} (≤5/ch) + waiting ${waitingTotal} across ${Object.keys(channelsSection).length} channels`);
 
   const output: VerifiedSources = {
     meta: {

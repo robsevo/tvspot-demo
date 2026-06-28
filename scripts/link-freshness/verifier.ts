@@ -1,9 +1,20 @@
 import type { Candidate, VerifiedSource } from "./types";
 import { withTimeout } from "./util";
 
-const VERIFY_CONCURRENCY = 10; // verification is I/O-bound; 4 was the runtime bottleneck
+// Verification is I/O-bound, but the liveness check hammers relay.example.com with
+// two samples per candidate — too much concurrency makes the 2nd sample fail and
+// wrongly reject live links. Configurable so it can be dialed down for accuracy.
+const VERIFY_CONCURRENCY = Number(process.env.VERIFY_CONCURRENCY) || 10;
 const TIMEOUT_SHORT = 5000;
 const TIMEOUT_LONG = 8000;
+// Liveness gap: a live HLS edge must produce new segments over time. We sample
+// the playlist twice this far apart and require it to advance — this is what
+// catches the "plays ~15s then drops" sources (a stale playlist serves a few old
+// segments that buffer, then never refreshes). Must exceed one target-duration
+// (~6-11s here). Tune via LIVENESS_WAIT_MS; set 0 to disable the check.
+const LIVENESS_WAIT_MS = process.env.LIVENESS_WAIT_MS !== undefined
+  ? Number(process.env.LIVENESS_WAIT_MS)
+  : 9000; // ≥ one max target-duration so even slow-segment edges advance once
 // Hard wall-clock ceiling for the whole verify stage. Against dead hosts the
 // stage could otherwise run 10+ min and get SIGKILL'd (exit 137); this returns
 // whatever passed so far instead of being killed. Tune via VERIFY_BUDGET_MS.
@@ -15,9 +26,24 @@ const VERIFY_BUDGET_MS = Number(process.env.VERIFY_BUDGET_MS) || 120_000;
 // is what collapses the stage from minutes to seconds.
 const deadHosts = new Set<string>();
 
+// Shared proxy fronts that wrap MANY distinct upstreams as `?u=<upstream>`. We
+// must NOT circuit-break on these — one dead upstream would blacklist the whole
+// proxy and skip every still-live link behind it (this silently dropped all
+// relay-fronted channels: tsn/sportsnet/news). Key on the real upstream instead.
+const PROXY_HOSTS = new Set(["relay.example.com", "api.example.com"]);
+
 function hostKey(url: string): string {
   try {
     const u = new URL(url);
+    if (PROXY_HOSTS.has(u.host)) {
+      const inner = u.searchParams.get("u") || u.searchParams.get("url");
+      if (inner) {
+        try {
+          const iu = new URL(inner);
+          return `${iu.protocol}//${iu.host}`;
+        } catch { /* fall through to the proxy host */ }
+      }
+    }
     return `${u.protocol}//${u.host}`;
   } catch {
     return url;
@@ -74,7 +100,9 @@ async function fetchGet(url: string, timeoutMs: number): Promise<{ status: numbe
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
-      headers: { "User-Agent": "tvspot-link-freshness/1.0" },
+      // no-cache so the two liveness samples aren't an identical cached playlist
+      // (relay/CDN can serve a stale m3u8 within the sampling window).
+      headers: { "User-Agent": "tvspot-link-freshness/1.0", "Cache-Control": "no-cache", "Pragma": "no-cache" },
     });
     const ct = res.headers.get("content-type");
     const text = await res.text();
@@ -208,18 +236,95 @@ async function tier3_attempt(url: string, t2latency: number): Promise<TierResult
 }
 
 // Tier 4 (relay.example.com/proxy) was retired — that endpoint now 404s. Reaching
-// Tier 1+2 (host up + valid HLS playlist with segments) is the bar, matching the
-// runtime check in lib/stream-verify.ts.
+// Tier 1+2 (host up + valid HLS playlist with segments) plus the liveness check
+// below is the bar, matching the runtime check in lib/stream-verify.ts.
 
-const MAX_CANDIDATES_PER_CHANNEL = 20; // bound work per channel
-const MAX_KEEP_PER_CHANNEL = 6;        // keep up to 6 working sources, best-first
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+interface PlaylistState {
+  ok: boolean;
+  seq: number | null;   // #EXT-X-MEDIA-SEQUENCE
+  lastSeg: string;      // last non-comment line (newest segment)
+  segCount: number;
+  endlist: boolean;     // finite (VOD) playlist
+}
+
+/** Fetch a playlist and extract the bits needed to judge whether it's advancing. */
+async function fetchPlaylistState(url: string): Promise<PlaylistState> {
+  const dead: PlaylistState = { ok: false, seq: null, lastSeg: "", segCount: 0, endlist: false };
+  try {
+    const { status, text } = await fetchGet(url, TIMEOUT_LONG);
+    if (status >= 400 || !text.trimStart().startsWith("#EXTM3U")) return dead;
+    let seq: number | null = null;
+    let lastSeg = "";
+    let segCount = 0;
+    let endlist = false;
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.startsWith("#EXT-X-MEDIA-SEQUENCE:")) {
+        const n = parseInt(line.slice(line.indexOf(":") + 1), 10);
+        if (!Number.isNaN(n)) seq = n;
+      } else if (line.startsWith("#EXT-X-ENDLIST")) {
+        endlist = true;
+      } else if (!line.startsWith("#")) {
+        lastSeg = line;
+        segCount++;
+      }
+    }
+    return { ok: true, seq, lastSeg, segCount, endlist };
+  } catch {
+    return dead;
+  }
+}
+
+/**
+ * Liveness: a live edge must advance over time. Sample the playlist twice
+ * LIVENESS_WAIT_MS apart and require progress. Returns true if:
+ *  - the playlist is a finite VOD (ENDLIST) — it plays through, no live edge; or
+ *  - the media-sequence advanced; or
+ *  - (no usable sequence) the newest segment changed.
+ * Returns false if the refresh fails/empties or nothing advanced — that's the
+ * stalled-edge source that buffers ~15s then drops.
+ */
+async function fetchPlaylistStateRetry(url: string, tries: number): Promise<PlaylistState> {
+  let st = await fetchPlaylistState(url);
+  for (let i = 1; i < tries && !st.ok; i++) {
+    await sleep(2500); // transient throttle (relay/proxy under concurrent load) — back off
+    st = await fetchPlaylistState(url);
+  }
+  return st;
+}
+
+async function checkLiveness(url: string): Promise<boolean> {
+  if (LIVENESS_WAIT_MS <= 0) return true; // disabled
+  const a = await fetchPlaylistStateRetry(url, 2);
+  if (!a.ok) return false;
+  if (a.endlist) return true;
+  await sleep(LIVENESS_WAIT_MS);
+  // Retry the second sample: a genuinely dead edge stays empty/static, but a
+  // transiently throttled one recovers — without this, load caused false
+  // negatives (e.g. a live tsn2 link wrongly rejected).
+  const b = await fetchPlaylistStateRetry(url, 3);
+  if (!b.ok) return false;          // still empty after retries → really stalled
+  if (b.endlist) return true;
+  const seqAdvanced = a.seq !== null && b.seq !== null && b.seq > a.seq;
+  const segChanged = b.lastSeg !== "" && b.lastSeg !== a.lastSeg;
+  return seqAdvanced || segChanged; // either signals fresh content
+}
+
+const MAX_CANDIDATES_PER_CHANNEL = 25; // bound work per channel
+const LIVENESS_PROBE_CAP = 8;          // max liveness probes (the 9s cost) per channel
+// No keep-cap here: return ALL loadable links so index.ts can build the sticky
+// active set (≤5) + the unbounded waiting bench. The active/waiting split is the
+// caller's job, not the verifier's.
 
 /**
  * Verify one candidate by fetching its `verifyUrl` (raw upstream is fastest from
  * Node). On success returns a VerifiedSource carrying the browser-playable
  * `storeUrl`, today's `verifiedUtc`, and the preserved `firstSeenUtc`.
  */
-async function verifyCandidate(c: Candidate, nowIso: string): Promise<VerifiedSource | null> {
+async function verifyCandidate(c: Candidate, nowIso: string, doLiveness: boolean): Promise<VerifiedSource | null> {
   const host = hostKey(c.verifyUrl);
   if (deadHosts.has(host)) return null;
 
@@ -235,6 +340,12 @@ async function verifyCandidate(c: Candidate, nowIso: string): Promise<VerifiedSo
   const latencyMs = t2.latencyMs || t1.latencyMs;
   const t3 = await tier3_attempt(c.verifyUrl, latencyMs);
 
+  // Liveness as a RANKING flag, not a gate. The "plays ~15s then drops" source
+  // stalls here (edge doesn't advance) → live:false, so it sorts to the bench;
+  // but we still keep it (it loads) rather than delete a possibly-flaky link.
+  // Only probed for the first few per channel (the 9s cost is bounded by caller).
+  const live = doLiveness ? await checkLiveness(c.verifyUrl) : false;
+
   return {
     url: c.storeUrl,
     tier: t3.tier,
@@ -242,6 +353,7 @@ async function verifyCandidate(c: Candidate, nowIso: string): Promise<VerifiedSo
     verifiedUtc: nowIso,
     firstSeenUtc: c.firstSeenUtc || nowIso,
     origin: c.origin,
+    live,
   };
 }
 
@@ -262,15 +374,19 @@ async function verifyChannelCandidates(
     .slice(0, MAX_CANDIDATES_PER_CHANNEL);
 
   const verified: VerifiedSource[] = [];
+  let liveProbes = 0;
   for (const c of unique) {
-    // Bound each probe — the same undici parser crash can divert a verify fetch's
-    // error to uncaughtException and leave it pending, which would otherwise stall
-    // the whole verify stage (its budget is only checked between batches).
-    const result = await withTimeout(verifyCandidate(c, nowIso), 30000, null);
+    // Bound the expensive liveness probe to the first LIVENESS_PROBE_CAP loadable
+    // links per channel — enough to fill the active 5 with live-verified ones;
+    // the rest are still kept (benched) but not liveness-probed.
+    const doLiveness = liveProbes < LIVENESS_PROBE_CAP;
+    // withTimeout bounds each probe — the undici parser crash can divert a verify
+    // fetch's error to uncaughtException and leave it pending, stalling the stage.
+    const result = await withTimeout(verifyCandidate(c, nowIso, doLiveness), 30000, null);
     if (result) {
+      if (doLiveness) liveProbes++;
       verified.push(result);
-      console.error("  ✓ %s [%s] (tier=%d, latency=%dms)", channelSlug, result.origin, result.tier, result.latencyMs);
-      if (verified.length >= MAX_KEEP_PER_CHANNEL) break;
+      console.error("  %s %s [%s] (tier=%d, latency=%dms)", result.live ? "✓live" : "·load", channelSlug, result.origin, result.tier, result.latencyMs);
     }
   }
 
@@ -312,16 +428,24 @@ export async function verifyCandidateMap(
     for (let j = 0; j < batch.length; j++) {
       const r = batchResults[j];
       if (r) {
-        // Best-first: higher tier, then lower latency.
-        r.sort((a, b) => (b.tier * 100 - b.latencyMs) - (a.tier * 100 - a.latencyMs));
-        results.set(batch[j][0], r.slice(0, MAX_KEEP_PER_CHANNEL));
+        // Rank: live-verified first, then higher tier, then lower latency. Keep
+        // ALL loadable links — index.ts splits into active(≤5) + waiting.
+        r.sort((a, b) =>
+          (b.live ? 1 : 0) - (a.live ? 1 : 0) ||
+          (b.tier * 100 - b.latencyMs) - (a.tier * 100 - a.latencyMs),
+        );
+        results.set(batch[j][0], r);
       }
     }
   }
 
   let totalPassed = 0;
-  for (const sources of results.values()) totalPassed += sources.length;
-  console.error("Verifier: %d working sources kept across %d channels", totalPassed, results.size);
+  let totalLive = 0;
+  for (const sources of results.values()) {
+    totalPassed += sources.length;
+    totalLive += sources.filter((s) => s.live).length;
+  }
+  console.error("Verifier: %d loadable sources (%d live) across %d channels", totalPassed, totalLive, results.size);
 
   return results;
 }
