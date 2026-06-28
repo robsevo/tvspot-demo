@@ -94,7 +94,7 @@ export default function VodSeriesPage() {
         <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/50 to-transparent" />
       </div>
 
-      <div className="px-4">
+      <div className="px-4 max-w-4xl mx-auto">
         <h1 className="text-white text-xl font-bold mb-2">{detail.title}</h1>
         <div className="flex items-center gap-2 mb-3">
           <span className="text-text-muted text-xs">{detail.year || ""}</span>
@@ -234,10 +234,10 @@ export default function VodSeriesPage() {
                                 src={currentSource.url}
                                 allowFullScreen
                                 allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
-                                // Sandbox WITHOUT allow-popups / allow-top-navigation:
-                                // blocks popunders + redirect-hijacks from embed
-                                // providers; allow-scripts/-same-origin keep playback.
-                                sandbox="allow-scripts allow-same-origin allow-presentation"
+                                // Sandbox removed per request — the strict sandbox
+                                // stopped some providers from playing. Trade-off:
+                                // popup/redirect ads can return; "Open" + the source
+                                // switcher remain the escape.
                                 className="w-full h-full aspect-video"
                                 style={{ border: "none" }}
                                 key={currentSource.url}

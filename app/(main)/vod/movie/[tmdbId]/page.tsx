@@ -108,7 +108,7 @@ export default function VodMoviePage() {
       </div>
 
       {/* Info */}
-      <div className="px-4">
+      <div className="px-4 max-w-4xl mx-auto">
         <h1 className="text-white text-xl font-bold mb-2">{detail.title}</h1>
         <div className="flex items-center gap-2 mb-3">
           <span className="text-text-muted text-xs">{detail.year || ""}</span>
@@ -158,11 +158,9 @@ export default function VodMoviePage() {
                   src={current.url}
                   allowFullScreen
                   allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
-                  // Sandbox WITHOUT allow-popups / allow-top-navigation: kills the
-                  // popunders and redirect-hijacks these embed providers inject,
-                  // while allow-scripts/-same-origin keep the player working. In-
-                  // iframe overlay ads can't be blocked here — use "Open" for those.
-                  sandbox="allow-scripts allow-same-origin allow-presentation"
+                  // Sandbox removed per request — the strict sandbox stopped some
+                  // providers from playing. Trade-off: popup/redirect ads can come
+                  // back; the "Open" hatch + source switcher remain the escape.
                   className="w-full h-full aspect-video"
                   style={{ border: "none" }}
                   key={current.url}

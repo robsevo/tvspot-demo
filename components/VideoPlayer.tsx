@@ -59,6 +59,17 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (!video || !src) return;
 
+    // Guard against the source-swap race: when the resolved "HD" sources arrive,
+    // the parent swaps `src`, tearing down this effect. Without this flag a pending
+    // MANIFEST_PARSED could call play() on a now-stale load → "play() interrupted
+    // by a new load request". safePlay() no-ops once the effect is cancelled.
+    let cancelled = false;
+    const safePlay = () => {
+      if (cancelled) return;
+      const p = video.play();
+      if (p) p.catch(() => {});
+    };
+
     // Cancel any pending play() from previous src to avoid race
     video.pause();
 
@@ -117,7 +128,7 @@ export default function VideoPlayer({
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (autoPlay) video.play().catch(() => {});
+        if (autoPlay) safePlay();
       });
       hls.on(Hls.Events.FRAG_BUFFERED, () => { recoverAttempts = 0; });
       hls.on(Hls.Events.ERROR, (_e, data) => {
@@ -144,14 +155,15 @@ export default function VideoPlayer({
     } else if (isHlsUrl && video.canPlayType("application/vnd.apple.mpegurl")) {
       // Native HLS (Safari)
       video.src = src;
-      if (autoPlay) video.play().catch(() => {});
+      if (autoPlay) safePlay();
     } else {
       // Progressive MP4
       video.src = src;
-      if (autoPlay) video.play().catch(() => {});
+      if (autoPlay) safePlay();
     }
 
     return () => {
+      cancelled = true;
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
