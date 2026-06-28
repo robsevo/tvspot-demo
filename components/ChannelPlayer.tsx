@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useChannels } from "@/hooks/useChannels";
 import { getChannelSources } from "@/lib/sources";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
@@ -44,9 +44,21 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // A user-chosen source pins playback. Tracked by URL (not index) so reordering
   // the list as verdicts arrive never changes what the user selected.
   const [pickedUrl, setPickedUrl] = useState<string | null>(null);
-  // Sources that dropped DURING playback (stall watchdog / fatal error). Treated
-  // as dead so we auto-fail-over and don't pick them again this session.
-  const [failedUrls, setFailedUrls] = useState<Set<string>>(new Set());
+  // Sources that dropped DURING playback (stall watchdog / fatal error), mapped
+  // to WHEN they dropped. The relay has ~30-40s GLOBAL outage windows where every
+  // (shared-relay) source 403s at once, then recovers — so a drop is a COOLDOWN,
+  // not a permanent session ban: after FAIL_COOLDOWN_MS the source is eligible
+  // again. This is what turns "held for a while then stopped" into auto-recovery.
+  const [failedAt, setFailedAt] = useState<Record<string, number>>({});
+  const FAIL_COOLDOWN_MS = 60000;
+
+  // Re-evaluate cooldowns on a tick so a recovered source comes back on its own,
+  // even when no other state changed.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 5000);
+    return () => clearInterval(id);
+  }, []);
 
   // Reset selection + playback-failure state when the channel changes (render-time
   // reset pattern — avoids a setState-in-effect and a stale-source flash).
@@ -54,11 +66,14 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   if (channel?.name !== prevName) {
     setPrevName(channel?.name);
     setPickedUrl(null);
-    setFailedUrls(new Set());
+    setFailedAt({});
   }
 
-  // A source is unusable if verification marked it dead OR it dropped while playing.
-  const isDead = (u: string) => statusOf(u) === "dead" || failedUrls.has(u);
+  // A source is unusable if verification marked it dead OR it dropped within the
+  // cooldown window (after which the relay has likely recovered).
+  const isDead = (u: string) =>
+    statusOf(u) === "dead" ||
+    (failedAt[u] !== undefined && Date.now() - failedAt[u] < FAIL_COOLDOWN_MS);
 
   // Buttons: keep usable + still-checking sources (order preserved), hide dead/
   // failed ones, cap the list. If everything is gone, show them anyway so the user
@@ -71,30 +86,32 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     }
     return base;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [probedUrls, statusOf, pickedUrl, failedUrls]);
+  }, [probedUrls, statusOf, pickedUrl, failedAt]);
 
   // Playback: honor a manual pick (unless it has since dropped); otherwise the
-  // first source that isn't dead/failed. During probing nothing is dead yet, so
+  // first source that isn't dead/cooling. During probing nothing is dead yet, so
   // source 1 plays instantly; a dead verdict or a mid-watch drop auto-advances.
-  const pickValid = pickedUrl != null && probedUrls.includes(pickedUrl) && !failedUrls.has(pickedUrl);
+  const pickValid = pickedUrl != null && probedUrls.includes(pickedUrl) && !isDead(pickedUrl);
   const firstAlive = probedUrls.find((u) => !isDead(u));
-  const src = pickValid ? (pickedUrl as string) : (firstAlive ?? "");
+  // If every source is cooling down (a global relay outage), keep trying the
+  // least-recently-failed one instead of blanking to "no stream" — it's the most
+  // likely to have recovered, and the player's own recovery reconnects in place.
+  const fallback =
+    firstAlive ??
+    [...probedUrls].sort((a, b) => (failedAt[a] ?? 0) - (failedAt[b] ?? 0))[0] ??
+    "";
+  const src = pickValid ? (pickedUrl as string) : fallback;
 
-  // The current source dropped — mark it failed so playback fails over to the
-  // next usable source (and don't return to it this session).
+  // The current source dropped — start its cooldown so playback fails over now
+  // but the source can return once the relay recovers.
   const handleSourceFailure = useCallback(() => {
     if (!src) return;
-    setFailedUrls((prev) => {
-      if (prev.has(src)) return prev;
-      const next = new Set(prev);
-      next.add(src);
-      return next;
-    });
+    setFailedAt((prev) => ({ ...prev, [src]: Date.now() }));
   }, [src]);
 
   // Recheck gives both verification AND playback-failed sources another chance.
   const recheckAll = useCallback(() => {
-    setFailedUrls(new Set());
+    setFailedAt({});
     recheck();
   }, [recheck]);
 
@@ -168,8 +185,8 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
 
           <div className="flex gap-2 overflow-x-auto px-1">
             {displayUrls.map((url, i) => {
-              // Show a failed-during-playback source as dead (✗).
-              const status = failedUrls.has(url) ? "dead" : statusOf(url);
+              // Show a failed/cooling source as dead (✗).
+              const status = isDead(url) ? "dead" : statusOf(url);
               const isCurrent = url === src;
               return (
                 <button

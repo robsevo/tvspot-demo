@@ -328,14 +328,25 @@ async function verifyCandidate(c: Candidate, nowIso: string, doLiveness: boolean
   const host = hostKey(c.verifyUrl);
   if (deadHosts.has(host)) return null;
 
-  const t1 = await tier1_check(c.verifyUrl);
-  if (t1.error) {
-    if (isConnectionError(t1.error)) deadHosts.add(host);
-    return null;
+  // Retry the load check. relay.example.com transiently 403s and has ~30-40s
+  // outage windows even on healthy streams (measured 2026-06-28), so a single
+  // shot wrongly rejects live channels mid-blip — the main reason most channels
+  // were missing from the verified list. Retry with backoff; only a
+  // connection-level failure (host genuinely down) short-circuits without retry.
+  let t1: TierResult | undefined;
+  let t2: TierResult | undefined;
+  const LOAD_TRIES = 3;
+  for (let attempt = 1; attempt <= LOAD_TRIES; attempt++) {
+    t1 = await tier1_check(c.verifyUrl);
+    if (t1.error) {
+      if (isConnectionError(t1.error)) { deadHosts.add(host); return null; }
+    } else {
+      t2 = await tier2_parse(c.verifyUrl);
+      if (!t2.error) break; // loaded cleanly
+    }
+    if (attempt < LOAD_TRIES) await sleep(2500); // transient relay blip — back off
   }
-
-  const t2 = await tier2_parse(c.verifyUrl);
-  if (t2.error) return null;
+  if (!t1 || t1.error || !t2 || t2.error) return null;
 
   const latencyMs = t2.latencyMs || t1.latencyMs;
   const t3 = await tier3_attempt(c.verifyUrl, latencyMs);
