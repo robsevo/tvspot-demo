@@ -67,6 +67,28 @@ export interface PipelineMeta {
   channels_matched: number;
   streams_verified: number;
   vod_verified: number;
+  /** ISO timestamp of the last VOD scrape run (for incremental scoping). */
+  last_vod_scrape_utc?: string;
+}
+
+export interface VerifiedVodSource {
+  url: string;
+  provider: string;
+  tier: number;
+  latencyMs: number;
+  verifiedUtc: string;
+  firstSeenUtc: string;
+  quality?: string;
+  subtitles?: { url: string; lang: string }[];
+}
+
+export interface VerifiedVodItem {
+  tmdb_id: number;
+  title: string;
+  type: "movie" | "tv";
+  season?: number;
+  episode?: number;
+  sources: VerifiedVodSource[];
 }
 
 export interface VerifiedSources {
@@ -74,7 +96,26 @@ export interface VerifiedSources {
   channels: Record<string, VerifiedChannel>;
   vod?: {
     movies: Record<string, VerifiedMovie>;
+    /** Keyed by "tmdbId-sS-eE" for episodes, "tmdbId" for series-level entries. */
+    scraped?: Record<string, VerifiedVodItem>;
   };
+}
+
+/** Input shape for VOD provider extractors. */
+export interface VodExtractorInput {
+  tmdbId: number;
+  type: "movie" | "tv";
+  title: string;
+  season?: number;
+  episode?: number;
+}
+
+export interface VodExtractedSource {
+  url: string;
+  provider: string;
+  quality?: string;
+  subtitles?: { url: string; lang: string }[];
+  headers?: Record<string, string>;
 }
 
 // Re-exported for convenience
