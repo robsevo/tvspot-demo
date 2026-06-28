@@ -125,6 +125,11 @@ export default function VodMoviePage() {
                   src={current.url}
                   allowFullScreen
                   allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+                  // Sandbox WITHOUT allow-popups / allow-top-navigation: kills the
+                  // popunders and redirect-hijacks these embed providers inject,
+                  // while allow-scripts/-same-origin keep the player working. In-
+                  // iframe overlay ads can't be blocked here — use "Open" for those.
+                  sandbox="allow-scripts allow-same-origin allow-presentation"
                   className="w-full h-full aspect-video"
                   style={{ border: "none" }}
                   key={idx}

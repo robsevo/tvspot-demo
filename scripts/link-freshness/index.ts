@@ -198,6 +198,20 @@ async function main(): Promise<void> {
 
   log(`  Candidates: ${storeCount} from list, ${backendCount} from backend, ${scrapedCount} scraped across ${candidateMap.size} channels`);
 
+  // Capture meta before releasing heavy stage 1-6 data. The 10K M3U entries,
+  // channel list, matches, credentials, and Reddit posts all live in main()
+  // scope — combined with the verifier's playlist buffers they exceed Node's
+  // 4 GB heap and get OOM-killed mid-verification.
+  const metaPosts = posts.length;
+  const metaCreds = credentials.length;
+  const metaM3u = m3uEntries.length;
+  const metaMatched = matches.length;
+  posts.length = 0;
+  credentials.length = 0;
+  m3uEntries.length = 0;
+  channels.length = 0;
+  matches.length = 0;
+
   // Stage 7: Re-test every candidate; keep the working ones (best-first, ≤6).
   log("Stage 7: Verifying candidates (this may take a while)...");
   let verified: Awaited<ReturnType<typeof verifyCandidateMap>>;
@@ -255,14 +269,20 @@ async function main(): Promise<void> {
 
   log(`  Active ${activeTotal} (≤5/ch) + waiting ${waitingTotal} across ${Object.keys(channelsSection).length} channels`);
 
+  // Release heavy stage 7 data before VOD — verified Map holds all tier results,
+  // candidateMap holds 400+ candidates with metadata. VOD needs its own heap room.
+  verified.clear();
+  candidateMap.clear();
+  nameBySlug.clear();
+
   const output: VerifiedSources = {
     meta: {
       generated_utc: now(),
       pipeline_version: 2,
-      reddit_posts_checked: posts.length,
-      credentials_found: credentials.length,
-      m3u_streams_total: m3uEntries.length,
-      channels_matched: matches.length,
+      reddit_posts_checked: metaPosts,
+      credentials_found: metaCreds,
+      m3u_streams_total: metaM3u,
+      channels_matched: metaMatched,
       streams_verified: totalVerified,
       vod_verified: 0,
     },

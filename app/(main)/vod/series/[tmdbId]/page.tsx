@@ -198,6 +198,10 @@ export default function VodSeriesPage() {
                                 src={currentSource.url}
                                 allowFullScreen
                                 allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+                                // Sandbox WITHOUT allow-popups / allow-top-navigation:
+                                // blocks popunders + redirect-hijacks from embed
+                                // providers; allow-scripts/-same-origin keep playback.
+                                sandbox="allow-scripts allow-same-origin allow-presentation"
                                 className="w-full h-full aspect-video"
                                 style={{ border: "none" }}
                                 key={`${epKey}-${epSrcIdx}`}

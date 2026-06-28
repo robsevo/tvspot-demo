@@ -4,7 +4,7 @@ import { withTimeout } from "./util";
 // Verification is I/O-bound, but the liveness check hammers relay.example.com with
 // two samples per candidate — too much concurrency makes the 2nd sample fail and
 // wrongly reject live links. Configurable so it can be dialed down for accuracy.
-const VERIFY_CONCURRENCY = Number(process.env.VERIFY_CONCURRENCY) || 10;
+const VERIFY_CONCURRENCY = Number(process.env.VERIFY_CONCURRENCY) || 4;
 const TIMEOUT_SHORT = 5000;
 const TIMEOUT_LONG = 8000;
 // Liveness gap: a live HLS edge must produce new segments over time. We sample
