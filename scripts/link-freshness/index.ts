@@ -43,6 +43,7 @@ import { fetchChannels } from "./Origin";
 import { matchChannels } from "./matcher";
 import { verifyCandidateMap } from "./verifier";
 import { writeAtomic, readExisting } from "./store";
+import { scrapeVod } from "./vod";
 import { toPlayableUrl, slugify } from "./playable";
 import type { VerifiedSources, VerifiedChannel, Candidate } from "./types";
 
@@ -232,11 +233,34 @@ async function main(): Promise<void> {
     channels: channelsSection,
   };
 
-  // Stage 8: VOD (optional)
+  // Stage 8: VOD (optional, on-demand)
   if (INCLUDE_VOD) {
-    log("Stage 8: VOD verification disabled (--vod not yet implemented)");
-    // VOD verification requires fetching the full catalog from example.com
-    // and walking all movies/series — will be added in a follow-up.
+    log("Stage 8: Scraping VOD direct-stream links...");
+    try {
+      const vodResult = await scrapeVod();
+      output.meta.vod_verified = vodResult.totalVerified;
+      output.meta.last_vod_scrape_utc = now();
+
+      if (vodResult.items.length > 0) {
+        const scrapedMap: Record<string, any> = {};
+        for (const item of vodResult.items) {
+          const key = item.type === "movie"
+            ? `${item.tmdb_id}`
+            : `${item.tmdb_id}-s${item.season}-e${item.episode}`;
+          scrapedMap[key] = item;
+        }
+        output.vod = {
+          movies: existing?.vod?.movies ?? {},
+          scraped: scrapedMap,
+        };
+      }
+
+      log(
+        `  VOD: ${vodResult.totalExtracted} extracted, ${vodResult.totalVerified} verified across ${vodResult.items.length} items`,
+      );
+    } catch (err) {
+      error("VOD scrape failed (continuing without VOD links)", err);
+    }
   }
 
   const elapsed = Math.round(performance.now() - started);

@@ -1,4 +1,5 @@
 import type { Candidate, VerifiedSource } from "./types";
+import { withTimeout } from "./util";
 
 const VERIFY_CONCURRENCY = 10; // verification is I/O-bound; 4 was the runtime bottleneck
 const TIMEOUT_SHORT = 5000;
@@ -262,7 +263,10 @@ async function verifyChannelCandidates(
 
   const verified: VerifiedSource[] = [];
   for (const c of unique) {
-    const result = await verifyCandidate(c, nowIso);
+    // Bound each probe — the same undici parser crash can divert a verify fetch's
+    // error to uncaughtException and leave it pending, which would otherwise stall
+    // the whole verify stage (its budget is only checked between batches).
+    const result = await withTimeout(verifyCandidate(c, nowIso), 30000, null);
     if (result) {
       verified.push(result);
       console.error("  ✓ %s [%s] (tier=%d, latency=%dms)", channelSlug, result.origin, result.tier, result.latencyMs);
