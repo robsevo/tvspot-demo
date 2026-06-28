@@ -44,34 +44,59 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // A user-chosen source pins playback. Tracked by URL (not index) so reordering
   // the list as verdicts arrive never changes what the user selected.
   const [pickedUrl, setPickedUrl] = useState<string | null>(null);
+  // Sources that dropped DURING playback (stall watchdog / fatal error). Treated
+  // as dead so we auto-fail-over and don't pick them again this session.
+  const [failedUrls, setFailedUrls] = useState<Set<string>>(new Set());
 
-  // Reset the manual pick when the channel changes (render-time reset pattern —
-  // avoids a setState-in-effect and the stale-source flash an effect would cause).
+  // Reset selection + playback-failure state when the channel changes (render-time
+  // reset pattern — avoids a setState-in-effect and a stale-source flash).
   const [prevName, setPrevName] = useState(channel?.name);
   if (channel?.name !== prevName) {
     setPrevName(channel?.name);
     setPickedUrl(null);
+    setFailedUrls(new Set());
   }
 
-  // Buttons: keep working + still-checking sources (best-first order preserved),
-  // hide dead ones, cap the list. If everything is dead, show them anyway so the
-  // user still has something to try. A manual pick stays visible even if it died.
+  // A source is unusable if verification marked it dead OR it dropped while playing.
+  const isDead = (u: string) => statusOf(u) === "dead" || failedUrls.has(u);
+
+  // Buttons: keep usable + still-checking sources (order preserved), hide dead/
+  // failed ones, cap the list. If everything is gone, show them anyway so the user
+  // can still try. A manual pick stays visible even if it died.
   const displayUrls = useMemo(() => {
-    const alive = probedUrls.filter((u) => statusOf(u) !== "dead");
+    const alive = probedUrls.filter((u) => !isDead(u));
     const base = (alive.length > 0 ? alive : probedUrls).slice(0, MAX_SOURCES);
     if (pickedUrl && probedUrls.includes(pickedUrl) && !base.includes(pickedUrl)) {
       return [pickedUrl, ...base].slice(0, MAX_SOURCES);
     }
     return base;
-  }, [probedUrls, statusOf, pickedUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [probedUrls, statusOf, pickedUrl, failedUrls]);
 
-  // Playback: honor a manual pick; otherwise the first source that isn't dead
-  // (during probing nothing is "dead" yet, so source 1 plays instantly; once a
-  // dead verdict lands on it, this auto-fails-over to the first working source).
-  const firstAlive = probedUrls.find((u) => statusOf(u) !== "dead");
-  const src = (pickedUrl && probedUrls.includes(pickedUrl))
-    ? pickedUrl
-    : (firstAlive ?? probedUrls[0] ?? "");
+  // Playback: honor a manual pick (unless it has since dropped); otherwise the
+  // first source that isn't dead/failed. During probing nothing is dead yet, so
+  // source 1 plays instantly; a dead verdict or a mid-watch drop auto-advances.
+  const pickValid = pickedUrl != null && probedUrls.includes(pickedUrl) && !failedUrls.has(pickedUrl);
+  const firstAlive = probedUrls.find((u) => !isDead(u));
+  const src = pickValid ? (pickedUrl as string) : (firstAlive ?? "");
+
+  // The current source dropped — mark it failed so playback fails over to the
+  // next usable source (and don't return to it this session).
+  const handleSourceFailure = useCallback(() => {
+    if (!src) return;
+    setFailedUrls((prev) => {
+      if (prev.has(src)) return prev;
+      const next = new Set(prev);
+      next.add(src);
+      return next;
+    });
+  }, [src]);
+
+  // Recheck gives both verification AND playback-failed sources another chance.
+  const recheckAll = useCallback(() => {
+    setFailedUrls(new Set());
+    recheck();
+  }, [recheck]);
 
   const channelUp = useCallback(() => {
     if (!channel) return;
@@ -114,6 +139,8 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
         channelName={channel.name}
         channelUp={channelUp}
         channelDown={channelDown}
+        onStall={handleSourceFailure}
+        onError={handleSourceFailure}
       />
 
       {/* No auto-switch once playing — user picks a source below. Nudge after 30s. */}
@@ -129,7 +156,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
                 : `${workingCount} of ${probedUrls.length} sources online`}
             </span>
             <button
-              onClick={recheck}
+              onClick={recheckAll}
               disabled={loading}
               className="flex items-center gap-1 text-text-secondary hover:text-white transition-colors disabled:opacity-50 min-h-[32px]"
               aria-label="Re-check sources"
@@ -141,7 +168,8 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
 
           <div className="flex gap-2 overflow-x-auto px-1">
             {displayUrls.map((url, i) => {
-              const status = statusOf(url);
+              // Show a failed-during-playback source as dead (✗).
+              const status = failedUrls.has(url) ? "dead" : statusOf(url);
               const isCurrent = url === src;
               return (
                 <button

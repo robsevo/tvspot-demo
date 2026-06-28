@@ -12,6 +12,9 @@ interface Props {
   onPlay?: () => void;
   onPause?: () => void;
   onError?: (err: string) => void;
+  /** Fired when playback makes no progress for too long (the "plays then drops"
+   *  case) so the parent can fail over to another source. */
+  onStall?: () => void;
   onTimeUpdate?: (time: number) => void;
   onEnded?: () => void;
   channelUp?: () => void;
@@ -26,6 +29,7 @@ export default function VideoPlayer({
   onPlay,
   onPause,
   onError,
+  onStall,
   onTimeUpdate,
   onEnded,
   channelUp,
@@ -131,6 +135,46 @@ export default function VideoPlayer({
       video.removeEventListener("error", onErrorHandler);
     };
   }, [onPlay, onPause, onTimeUpdate, onEnded, onError]);
+
+  // Stall watchdog: a live source can load fine, play a few buffered seconds,
+  // then stop producing segments ("plays ~15s then drops"). The fatal-error path
+  // doesn't always fire for that — playback just freezes. So we poll progress:
+  // if currentTime hasn't advanced for STALL_MS while we should be playing (and
+  // it's not a user pause / seek / legit ended), report a stall so the parent can
+  // fail over to the next source. Re-arms whenever `src` changes.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !src) return;
+
+    const STALL_MS = 7000;
+    let lastTime = video.currentTime;
+    let lastProgressAt = Date.now();
+    let fired = false;
+
+    const id = setInterval(() => {
+      const v = videoRef.current;
+      if (!v) return;
+      // Not expected to be progressing → keep resetting the clock.
+      if (v.paused || v.seeking || v.ended) {
+        lastTime = v.currentTime;
+        lastProgressAt = Date.now();
+        return;
+      }
+      if (v.currentTime > lastTime + 0.05) {
+        lastTime = v.currentTime;
+        lastProgressAt = Date.now();
+        fired = false;
+        return;
+      }
+      // No forward progress while playing — if it persists, it's a stall/drop.
+      if (!fired && Date.now() - lastProgressAt > STALL_MS) {
+        fired = true;
+        onStall?.();
+      }
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [src, onStall]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
