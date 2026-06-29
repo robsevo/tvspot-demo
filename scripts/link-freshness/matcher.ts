@@ -5,9 +5,32 @@ function norm(s: string): string {
   return (s || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
 }
 
-/** Normalize a title for matching: lowercase, drop non-alphanumerics. */
+/** Split camelCase / acronym runs so iptv-org's API channel IDs tokenize against
+ *  Origin's spaced names: "FoxNews" → "Fox News", "CBSSportsNetwork" → "CBS Sports
+ *  Network". Without this, a single-token "foxnews" never overlaps {fox, news} and
+ *  the whole iptv-org API feed (camelCase IDs) silently matches nothing. No-op on
+ *  names that already have separators ("Fox News", "TSN4"). */
+function splitCamel(s: string): string {
+  return (s || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2") // fooBar → foo Bar
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2"); // CBSSports → CBS Sports
+}
+
+/** Normalize a title for matching: split camelCase, lowercase, drop non-alphanumerics. */
 function titleKey(s: string): string {
-  return norm(s).replace(/[^a-z0-9]+/g, " ").trim();
+  return norm(splitCamel(s)).replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** Tokens for a normalized key, PLUS the space-collapsed whole key. The collapsed
+ *  token keeps split names matching their joined counterparts despite Origin's
+ *  inconsistent casing: iptv-org "CityTV"→"city tv" must still match Origin "Citytv"
+ *  →"citytv". It only ever matches when the full names are identical modulo spacing,
+ *  so it can't create spurious cross-channel matches. */
+function keyTokens(key: string, minLen = 1): string[] {
+  const parts = key.split(/\s+/).filter((t) => t.length >= minLen);
+  const collapsed = key.replace(/\s+/g, "");
+  if (collapsed.length >= minLen && !parts.includes(collapsed)) parts.push(collapsed);
+  return parts;
 }
 
 /** Levenshtein distance between two strings — O(n*m). */
@@ -59,8 +82,8 @@ function matchScore(m3uName: string, catalogName: string): number {
     countryBonus = m3uCountry === catalogCountry ? 0.05 : -0.1;
   }
 
-  const m3uTokens = new Set(m3uKey.split(/\s+/));
-  const catalogTokens = new Set(catalogKey.split(/\s+/));
+  const m3uTokens = new Set(keyTokens(m3uKey));
+  const catalogTokens = new Set(keyTokens(catalogKey));
 
   // Quick token overlap check before expensive levenshtein
   let overlap = 0;
@@ -132,7 +155,7 @@ export function matchChannels(m3uEntries: M3uEntry[], channels: Channel[]): Matc
       continue;
     }
     const key = titleKey(m3uEntries[i].channelName.replace(SUFFIX_STRIP_RE, "").trim());
-    const tokens = new Set(key.split(/\s+/).filter((t) => t.length >= 2));
+    const tokens = new Set(keyTokens(key, 2));
 
     for (const t of tokens) {
       const list = tokenIndex.get(t);
@@ -155,7 +178,7 @@ export function matchChannels(m3uEntries: M3uEntry[], channels: Channel[]): Matc
     if (!channel.name) continue;
     const slug = titleKey(channel.name).replace(/\s+/g, "-");
     const catalogKey = titleKey(channel.name.replace(SUFFIX_STRIP_RE, "").trim());
-    const catalogTokens = catalogKey.split(/\s+/).filter((t) => t.length >= 2);
+    const catalogTokens = keyTokens(catalogKey, 2);
 
     // Collect candidate indices using token index
     const candidateSet = new Set<number>();
