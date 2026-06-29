@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useChannels } from "@/hooks/useChannels";
 import { useEvents } from "@/hooks/useEvents";
 import { channelSlug } from "@/lib/sources";
-import { carrierForLeague, type GameEvent, type LeagueEvents } from "@/lib/leagues";
+import { carrierForLeague, broadcastersForLeague, type GameEvent, type LeagueEvents } from "@/lib/leagues";
+import type { Channel } from "@/lib/types";
 import { ChevronLeft, Tv, CalendarDays, Play } from "lucide-react";
 
 /** Kickoff time in Eastern, e.g. "7:00 PM ET". */
@@ -39,7 +40,7 @@ function TeamRow({ name, logo, score, dim }: { name: string; logo?: string; scor
   );
 }
 
-function GameCard({ game, watchSlug }: { game: GameEvent; watchSlug: string | null }) {
+function GameCard({ game, watchSlug, broadcasters }: { game: GameEvent; watchSlug: string | null; broadcasters: Channel[] }) {
   const live = game.state === "in";
   const final = game.state === "post";
   const showScore = live || final;
@@ -72,8 +73,20 @@ function GameCard({ game, watchSlug }: { game: GameEvent; watchSlug: string | nu
         <TeamRow name={game.away.name} logo={game.away.logo} score={showScore ? game.away.score : undefined} />
         <TeamRow name={game.home.name} logo={game.home.logo} score={showScore ? game.home.score : undefined} />
       </div>
-      {game.broadcasts.length > 0 && (
-        <p className="text-text-muted text-[10px] mt-2 truncate">{game.broadcasts.join(" · ")}</p>
+      {(broadcasters.length > 0 || game.broadcasts.length > 0) && (
+        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+          {broadcasters.map((c) => (
+            <span
+              key={c.name}
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-brand/20 text-white ring-1 ring-brand/30"
+            >
+              {c.name}
+            </span>
+          ))}
+          {game.broadcasts.length > 0 && (
+            <span className="text-text-muted text-[10px] truncate">{game.broadcasts.join(" · ")}</span>
+          )}
+        </div>
       )}
     </div>
   );
@@ -91,6 +104,7 @@ function GameCard({ game, watchSlug }: { game: GameEvent; watchSlug: string | nu
 function LeagueSection({ league, channels }: { league: LeagueEvents; channels: ReturnType<typeof useChannels>["channels"] }) {
   const carrier = carrierForLeague(league.key, channels, channelSlug);
   const watchSlug = carrier ? channelSlug(carrier.name) : null;
+  const broadcasters = broadcastersForLeague(league.key, channels, channelSlug);
   return (
     <section className="mb-6">
       <div className="flex items-center gap-2 px-4 mb-2">
@@ -101,7 +115,7 @@ function LeagueSection({ league, channels }: { league: LeagueEvents; channels: R
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 px-4">
         {league.games.map((g) => (
-          <GameCard key={g.id} game={g} watchSlug={watchSlug} />
+          <GameCard key={g.id} game={g} watchSlug={watchSlug} broadcasters={broadcasters} />
         ))}
       </div>
     </section>

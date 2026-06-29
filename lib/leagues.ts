@@ -82,22 +82,61 @@ interface CarrierChannel {
 }
 
 /**
- * Cross-reference a league to one of OUR channels that carries it. Matches by
- * channel-slug prefix (so any TSN1–5 / Sportsnet variant counts), preferring an
- * online channel but falling back to a known carrier even if currently offline
- * (the player runtime-verifies sources anyway). Returns null if we carry none.
+ * All of OUR channels that carry a league, matched by channel-slug prefix (so
+ * every TSN1–5 / Sportsnet variant counts), online channels first. Used to show
+ * the Canadian broadcaster(s) for a game and to filter the Live grid to "what's
+ * carrying this game". Returns [] if we carry none.
+ */
+export function carriersForLeague<T extends CarrierChannel>(
+  leagueKey: string,
+  channels: T[],
+  slugify: (name: string) => string,
+): T[] {
+  const lg = LEAGUES.find((l) => l.key === leagueKey);
+  if (!lg) return [];
+  const matches = channels.filter((c) => {
+    const slug = slugify(c.name);
+    return lg.channels.some((k) => slug.startsWith(k));
+  });
+  // Online first, otherwise preserve lineup order (the player runtime-verifies
+  // sources anyway, so an offline-flagged carrier is still worth offering).
+  return [...matches].sort((a, b) => Number(b.online) - Number(a.online));
+}
+
+/**
+ * One representative carrier channel for a league (online preferred). Thin
+ * wrapper over carriersForLeague for the Events page "Watch" deep-link.
  */
 export function carrierForLeague(
   leagueKey: string,
   channels: CarrierChannel[],
   slugify: (name: string) => string,
 ): CarrierChannel | null {
+  return carriersForLeague(leagueKey, channels, slugify)[0] || null;
+}
+
+/**
+ * Distinct Canadian broadcaster channels for a league — deduped to one channel
+ * per brand (TSN1+TSN5 → just TSN1) so the per-game broadcaster list reads
+ * "TSN1 · Sportsnet · CTV" instead of repeating the same brand five times.
+ */
+export function broadcastersForLeague<T extends CarrierChannel>(
+  leagueKey: string,
+  channels: T[],
+  slugify: (name: string) => string,
+  max = 4,
+): T[] {
   const lg = LEAGUES.find((l) => l.key === leagueKey);
-  if (!lg) return null;
-  const matches = channels.filter((c) => {
+  if (!lg) return [];
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const c of carriersForLeague(leagueKey, channels, slugify)) {
     const slug = slugify(c.name);
-    return lg.channels.some((k) => slug.startsWith(k));
-  });
-  if (!matches.length) return null;
-  return matches.find((c) => c.online) || matches[0];
+    const brand = lg.channels.find((k) => slug.startsWith(k)) || slug;
+    if (seen.has(brand)) continue;
+    seen.add(brand);
+    out.push(c);
+    if (out.length >= max) break;
+  }
+  return out;
 }

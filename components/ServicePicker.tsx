@@ -12,6 +12,10 @@ const VIRTUAL_ICONS: Record<string, LucideIcon> = {
   Other: LayoutGrid,
 };
 
+/** Brands whose wordmark logo (lib/logos SERVICE_WORDMARK_LOGOS) is colored and
+ *  must be rendered WHITE to match the Netflix/Paramount+ SimpleIcons marks. */
+const WHITEN_LOGOS = new Set(["Disney+", "Prime Video", "Hulu", "Peacock", "Crave"]);
+
 const serviceColors: Record<string, string> = {
   "Netflix": "from-violet-800 to-violet-950",
   "Disney+": "from-blue-700 to-blue-950",
@@ -78,7 +82,11 @@ export default function ServicePicker({ onSelectAction }: { onSelectAction: (ser
                 {VIRTUAL_ICONS[service] ? (
                   (() => { const Icon = VIRTUAL_ICONS[service]; return <Icon className="w-5 h-5 text-white" />; })()
                 ) : (
-                  <LogoImage name={service} className="w-full h-full object-contain" />
+                  <LogoImage
+                    name={service}
+                    className="w-full h-full object-contain"
+                    imgClassName={WHITEN_LOGOS.has(service) ? "brightness-0 invert" : ""}
+                  />
                 )}
               </div>
               <div>

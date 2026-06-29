@@ -6,6 +6,8 @@ import { getChannelType } from "@/lib/logos";
 import { LogoImage } from "@/components/LogoImage";
 import { proxyFetch } from "@/lib/api";
 import { channelSlug } from "@/lib/sources";
+import { useEvents } from "@/hooks/useEvents";
+import { carriersForLeague, type GameEvent } from "@/lib/leagues";
 import Link from "next/link";
 import { Tv, CalendarDays } from "lucide-react";
 import type { EpgResponse } from "@/lib/types";
@@ -15,26 +17,27 @@ const NOW_COLOR = "#5B21B6";
 
 const categoryTabs = ["All", "Sports", "Entertainment", "Movies", "News", "Kids", "Music", "Lifestyle"];
 
-const genreTabs = ["All", "Movies", "Sports", "News", "Entertainment", "Kids", "Music", "Documentary"];
-
-/** Rough genre detection from program title text */
-function guessGenre(title: string): string[] {
-  const t = title.toLowerCase();
-  const matches: string[] = [];
-  if (/\b(movie|film|cinema|action|thriller|sci.fy|horror|comedy|drama|romance)\b/.test(t)) matches.push("Movies");
-  if (/\b(sport|game|match|race|cup|championship|final|derby|olympic|nfl|nba|mlb|nhl|espn|fight|boxing|ufc|soccer|football|hockey|basketball|baseball|tennis|golf|f1|grand prix|playoff|tournament|stadium|arena|vs\.|vs )\b/.test(t)) matches.push("Sports");
-  if (/\b(news|report|update|weather|today|hour|breaking|alert|live now)\b/.test(t)) matches.push("News");
-  if (/\b(kid|child|cartoon|animation|preschool|toddler|nick|jr|disney junior|paw patrol|bluey|sesame)\b/.test(t)) matches.push("Kids");
-  if (/\b(music|concert|live|song|band|dj|remix|award|billboard|mtv)\b/.test(t)) matches.push("Music");
-  if (/\b(documentary|doc|nature|wildlife|history|explore|planet|ocean|science|discover)\b/.test(t)) matches.push("Documentary");
-  if (/\b(entertainment|talk|show|variety|lifestyle|reality|cooking|food|home|garden|makeover|fashion|celebrity)\b/.test(t)) matches.push("Entertainment");
-  return matches;
+/** Live → within-the-hour → later-today → finished, for the events filter row. */
+type GameStatus = "live" | "soon" | "upcoming" | "done";
+function gameStatus(state: GameEvent["state"], startMs: number, nowMs: number): GameStatus {
+  if (state === "in") return "live";
+  if (state === "post") return "done";
+  return (startMs - nowMs) / 60000 <= 60 ? "soon" : "upcoming";
 }
+/** Pill accent per status: green=live, amber=within 1h, grey=later, red=done. */
+const STATUS_STYLE: Record<GameStatus, { dot: string; ring: string; text: string }> = {
+  live: { dot: "bg-green-400", ring: "ring-green-400/50", text: "text-green-300" },
+  soon: { dot: "bg-amber-400", ring: "ring-amber-400/50", text: "text-amber-300" },
+  upcoming: { dot: "bg-gray-500", ring: "ring-white/10", text: "text-text-muted" },
+  done: { dot: "bg-red-500", ring: "ring-red-500/40", text: "text-red-300" },
+};
+const teamAbbr = (t: GameEvent["home"]): string => t.abbrev || t.name.slice(0, 3).toUpperCase();
 
 export default function LivePage() {
   const { channels, loading } = useChannels();
+  const { data: eventsData } = useEvents();
   const [activeCat, setActiveCat] = useState("All");
-  const [activeGenre, setActiveGenre] = useState("All");
+  const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
   const [epgData, setEpgData] = useState<Record<string, { title: string; start: Date; end: Date }[]>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const timeRulerRef = useRef<HTMLDivElement>(null);
@@ -145,38 +148,38 @@ export default function LivePage() {
       : channelsByType.filter((ch) => getChannelType(ch.name) === activeCat);
   }, [channelsByType, activeCat]);
 
-  // Genre counts from EPG data using keyword detection
-  const genreCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const genre of genreTabs) {
-      if (genre === "All") continue;
-      counts[genre] = 0;
+  // Today's games we actually carry, for the events filter row: live first, then
+  // by kickoff. Each entry keeps the lineup channels that broadcast it so a tap
+  // narrows the grid to exactly those channels.
+  const games = useMemo(() => {
+    const list: { game: GameEvent; carriers: typeof channels }[] = [];
+    for (const lg of eventsData?.leagues || []) {
+      const carriers = carriersForLeague(lg.key, channels, channelSlug);
+      if (!carriers.length) continue; // skip games we can't tune to
+      for (const game of lg.games) list.push({ game, carriers });
     }
-    for (const ch of filteredByCat) {
-      const progs = epgData[ch.name] || [];
-      const nowShowing = progs.filter((p) => p.start <= now && p.end > now);
-      const genresFound = new Set<string>();
-      for (const p of nowShowing) {
-        for (const g of guessGenre(p.title)) {
-          genresFound.add(g);
-        }
-      }
-      for (const g of genresFound) {
-        if (counts[g] !== undefined) counts[g]++;
-      }
-    }
-    return counts;
-  }, [filteredByCat, epgData, now]);
-
-  const filteredChannels = useMemo(() => {
-    if (activeGenre === "All") return filteredByCat;
-    return filteredByCat.filter((ch) => {
-      const progs = epgData[ch.name] || [];
-      return progs.some(
-        (p) => p.start <= now && p.end > now && guessGenre(p.title).includes(activeGenre)
-      );
+    const rank: Record<string, number> = { in: 0, pre: 1, post: 2 };
+    list.sort((a, b) => {
+      const r = (rank[a.game.state] ?? 1) - (rank[b.game.state] ?? 1);
+      return r !== 0 ? r : new Date(a.game.dateUtc).getTime() - new Date(b.game.dateUtc).getTime();
     });
-  }, [filteredByCat, activeGenre, epgData, now]);
+    return list;
+  }, [eventsData, channels]);
+
+  const selectedEntry = useMemo(
+    () => games.find((x) => x.game.id === selectedGameId) || null,
+    [games, selectedGameId],
+  );
+
+  // Grid channels: a selected game narrows to its broadcasters; otherwise the
+  // category tab applies.
+  const filteredChannels = useMemo(() => {
+    if (selectedEntry) {
+      const names = new Set(selectedEntry.carriers.map((c) => c.name));
+      return channelsByType.filter((ch) => names.has(ch.name));
+    }
+    return filteredByCat;
+  }, [selectedEntry, channelsByType, filteredByCat]);
 
   if (loading) {
     return (
@@ -193,7 +196,7 @@ export default function LivePage() {
   return (
     <div className="hud-grid-bg pt-12 min-h-screen pb-20 animate-page-rise">
       {/* Header */}
-      <div className="px-4 mb-3 flex items-center justify-between">
+      <div className="px-4 mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-3xl bg-gradient-to-br from-brand to-cyan-400 flex items-center justify-center hud-glow">
             <Tv className="w-4 h-4 text-white" />
@@ -219,7 +222,7 @@ export default function LivePage() {
       </div>
 
       {/* Category tabs — horizontal scroll */}
-      <div className="flex gap-2 overflow-x-auto px-4 mb-3 poster-rail">
+      <div className="flex gap-2.5 overflow-x-auto px-4 mb-3.5 poster-rail">
         {categoryTabs.map((cat) => {
           const count = cat === "All" ? channels.length : channels.filter((ch) => getChannelType(ch.name) === cat).length;
           if (count === 0 && cat !== "All") return null;
@@ -227,9 +230,9 @@ export default function LivePage() {
             <button
               key={cat}
               onClick={() => setActiveCat(cat)}
-              className={`flex-shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all ${
+              className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all ${
                 activeCat === cat
-                  ? "bg-brand text-white hud-glow"
+                  ? "brand-sheen text-white hud-glow"
                   : "glass-card text-text-secondary hover:text-white"
               }`}
             >
@@ -239,40 +242,60 @@ export default function LivePage() {
         })}
       </div>
 
-      {/* Genre pills — horizontal scroll */}
-      <div className="flex gap-2 overflow-x-auto px-4 mb-4 poster-rail">
-        {genreTabs.map((genre) => {
-          const count = genre === "All" ? filteredByCat.length : genreCounts[genre] || 0;
-          if (count === 0 && genre !== "All") return null;
-          return (
-          <button
-            key={genre}
-            onClick={() => setActiveGenre(genre)}
-            className={`flex-shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 ${
-              activeGenre === genre
-                ? "bg-brand text-white hud-glow"
-                : "glass-card text-text-secondary hover:text-white"
-            }`}
-          >
-            {genre}
-            {count > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-xl ${
-                activeGenre === genre
-                  ? "bg-white/20 text-white"
-                  : "bg-white/10 text-text-muted"
-              }`}>
-                {count}
-              </span>
-            )}
-          </button>
-          );
-        })}
+      {/* Today's sporting events — status-colored (grey=later · amber=within 1h ·
+          green=live · red=done). Tap to filter the grid to channels carrying it. */}
+      <div className="flex gap-2.5 overflow-x-auto px-4 mb-5 poster-rail items-center">
+        <button
+          onClick={() => setSelectedGameId(null)}
+          className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all ${
+            !selectedEntry
+              ? "brand-sheen text-white hud-glow"
+              : "glass-card text-text-secondary hover:text-white"
+          }`}
+        >
+          All
+        </button>
+        {games.length === 0 ? (
+          <span className="flex-shrink-0 text-text-muted text-[11px] px-1">No games on today</span>
+        ) : (
+          games.map(({ game }) => {
+            const status = gameStatus(game.state, new Date(game.dateUtc).getTime(), now.getTime());
+            const s = STATUS_STYLE[status];
+            const active = selectedGameId === game.id;
+            const suffix =
+              status === "live"
+                ? game.detail || "LIVE"
+                : status === "done"
+                  ? "FINAL"
+                  : new Date(game.dateUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+            return (
+              <button
+                key={game.id}
+                onClick={() => setSelectedGameId(active ? null : game.id)}
+                title={`${game.away.name} vs ${game.home.name}`}
+                className={`flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ring-1 ${
+                  active
+                    ? `brand-sheen text-white hud-glow ${s.ring}`
+                    : `glass-card ${s.ring} text-text-secondary hover:text-white`
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${status === "live" ? "live-dot" : ""}`} />
+                <span className="whitespace-nowrap">
+                  {teamAbbr(game.away)} <span className="text-text-muted">v</span> {teamAbbr(game.home)}
+                </span>
+                <span className={`text-[10px] whitespace-nowrap ${active ? "text-white/80" : s.text}`}>
+                  {suffix}
+                </span>
+              </button>
+            );
+          })
+        )}
       </div>
 
       {/* EPG Grid */}
-      {filteredChannels.length === 0 && activeGenre !== "All" ? (
+      {filteredChannels.length === 0 && selectedEntry ? (
         <div className="flex items-center justify-center min-h-[200px]">
-          <p className="text-text-muted text-sm">No {activeGenre} programming right now</p>
+          <p className="text-text-muted text-sm">No channels carrying this game right now</p>
         </div>
       ) : (
       <div className="relative">
@@ -341,7 +364,7 @@ export default function LivePage() {
                 className="absolute top-0 bottom-0 w-0.5 z-20"
                 style={{ left: nowOffset, backgroundColor: NOW_COLOR, boxShadow: "0 0 8px rgba(91,33,182,0.6)" }}
               >
-                <div className="absolute -top-0 left-1/2 -translate-x-1/2 bg-brand text-white text-[8px] px-1.5 py-0.5 rounded-b font-bold hud-glow">
+                <div className="absolute -top-0 left-1/2 -translate-x-1/2 brand-sheen text-white text-[8px] px-1.5 py-0.5 rounded-b font-bold hud-glow">
                   NOW
                 </div>
               </div>
@@ -373,7 +396,7 @@ export default function LivePage() {
                                 href={`/live/${channelSlug(ch.name)}`}
                                 className={`rounded-md flex items-center px-2 overflow-hidden ${
                                   isNow
-                                    ? "bg-brand/25 ring-1 ring-brand/50 z-10"
+                                    ? "bg-gradient-to-r from-brand/45 to-violet-500/20 ring-1 ring-violet-400/50 z-10"
                                     : "bg-card/70 hover:bg-card"
                                 }`}
                                 style={{

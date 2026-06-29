@@ -141,6 +141,23 @@ const SIMPLEICONS_SLUGS: Record<string, string> = {
   "Crunchyroll": "crunchyroll",
 };
 
+/**
+ * Crisp transparent wordmark logos for streaming brands SimpleIcons has REMOVED
+ * (disneyplus/primevideo/hulu/peacock/crave all 404 there now). Rendered WHITE
+ * on the colored provider cards (ServicePicker applies a brightness-0/invert
+ * filter) so they sit cleanly alongside the Netflix/Paramount+ SimpleIcons marks
+ * instead of falling through to tiny mismatched color favicons. Direct Wikimedia
+ * upload URLs (like SHOW_LOGO_URLS); if one breaks, getLogoCandidates falls
+ * through to the favicon cleanly.
+ */
+const SERVICE_WORDMARK_LOGOS: Record<string, string> = {
+  "Disney+": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/Disney%2B_logo.svg/960px-Disney%2B_logo.svg.png",
+  "Prime Video": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/11/Amazon_Prime_Video_logo.svg/960px-Amazon_Prime_Video_logo.svg.png",
+  "Hulu": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f9/Hulu_logo_%282018%29.svg/960px-Hulu_logo_%282018%29.svg.png",
+  "Peacock": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fb/NBCUniversal_Peacock_Logo_%282020%E2%80%932026%29.svg/960px-NBCUniversal_Peacock_Logo_%282020%E2%80%932026%29.svg.png",
+  "Crave": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/06/Crave_2018_logo.svg/960px-Crave_2018_logo.svg.png",
+};
+
 /** Google's favicon service — 128px, follows redirects, works for any domain. */
 function googleFavicon(domain: string): string {
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
@@ -226,6 +243,8 @@ export function getLogoCandidates(name: string): string[] {
   if (showUrl) out.push(showUrl);
   const slug = SIMPLEICONS_SLUGS[name];
   if (slug) out.push(`https://cdn.simpleicons.org/${slug}/white`);
+  const wordmark = SERVICE_WORDMARK_LOGOS[name];
+  if (wordmark) out.push(wordmark);
   const domain = domainFor(name);
   if (domain) out.push(googleFavicon(domain));
   return out;
