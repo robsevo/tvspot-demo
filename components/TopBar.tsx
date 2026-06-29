@@ -30,29 +30,37 @@ export default function TopBar() {
 
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-40 h-12 safe-area-top transition-all duration-300 ${
-        showBg ? "bg-header/95 backdrop-blur-sm" : "bg-transparent"
+      className={`fixed top-0 left-0 right-0 z-40 h-10 safe-area-top transition-all duration-300 ${
+        showBg
+          ? "bg-gradient-to-b from-[#1a0a2e] via-[#0d0415] to-[#050010] shadow-lg shadow-brand/10 backdrop-blur-sm"
+          : "bg-transparent"
       }`}
     >
+      {/* Animated brand sheen bottom edge */}
+      <div className={`absolute bottom-0 left-0 right-0 h-[1.5px] transition-opacity duration-500 ${
+        showBg ? "opacity-100" : "opacity-0"
+      }`}>
+        <div className="h-full brand-sheen" />
+      </div>
       <div className="flex items-center justify-between h-full w-full max-w-screen-2xl mx-auto px-4">
-        <Link href="/" className="flex items-center gap-2">
-          <img src="/tvspot-logo.svg" alt="TVSpot" className="w-6 h-6" />
-          <span className="text-white font-bold text-sm tracking-tight">TVSpot</span>
+        <Link
+          href="/search"
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-white/70 hover:text-white hover:bg-white/5 transition-all hover:scale-110 active:scale-90"
+          aria-label="Search"
+        >
+          <SearchIcon className="w-4 h-4" />
+        </Link>
+        <Link href="/" className="flex items-center gap-2 group">
+          <img src="/tvspot-logo.svg" alt="TVSpot" className="w-6 h-6 transition-transform group-hover:scale-110" />
+          <span className="text-white font-bold text-sm tracking-tight group-hover:hud-text-glow transition-all">TVSpot</span>
         </Link>
         <div className="flex items-center gap-2">
-          <Link
-            href="/search"
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-white/70 hover:text-white hover:bg-white/5 transition-colors"
-            aria-label="Search"
-          >
-            <SearchIcon className="w-4 h-4" />
-          </Link>
           {username && (
             <span className="text-text-muted text-xs hidden sm:block pl-1">{username}</span>
           )}
           <button
             onClick={handleLogout}
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-white/70 hover:text-white hover:bg-white/5 transition-colors"
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-white/70 hover:text-white hover:bg-white/5 transition-all hover:scale-110 active:scale-90"
             aria-label="Logout"
           >
             <LogOut className="w-4 h-4" />

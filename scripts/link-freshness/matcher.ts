@@ -68,6 +68,34 @@ function levenshtein(a: string, b: string): number {
 const SUFFIX_STRIP_RE =
   /\b(HD|FHD|UHD|4K|8K|1080p|720p|2160p|SD|HQ|HEVC|H265|H264|50fps|60fps|US|UK|CA|AU|NZ|VIP|RAW|BACKUP|ALT)\s*$/i;
 
+/** Location/language prefix tokens that IPTV playlists prepend to channel names
+ *  ("CA-VIP TSN HD 1", "US: ESPN"). These add noise without distinguishing the
+ *  actual network. Strip them repeatedly from the start so the real name can
+ *  survive the first-char gate and reach token overlap. */
+const PREFIX_STRIP_RE = /^(US|UK|CA|AU|NZ|VIP|RAW|BACKUP|ALT)\b\s*[-:]?\s*/i;
+
+/** Quality tokens that can appear ANYWHERE in the name, separating the network
+ *  name from its channel number: "TSN HD 1" → "TSN 1" so number-merging in
+ *  keyTokens produces "tsn1" instead of "hd1". */
+const QUALITY_STRIP_RE = /\b(HD|FHD|UHD|4K|8K|1080p|720p|2160p|SD|HQ|HEVC|H265|H264|50fps|60fps)\b\s*/gi;
+
+/** Strip noise tokens (location prefixes, quality markers, suffixes) so what
+ *  remains is the actual network name + optional channel number. */
+function cleanName(s: string): string {
+  let name = s;
+  // Strip prefix tokens until no more match
+  for (;;) {
+    const prev = name;
+    name = name.replace(PREFIX_STRIP_RE, "");
+    if (name === prev) break;
+  }
+  // Strip quality tokens anywhere
+  name = name.replace(QUALITY_STRIP_RE, "");
+  // Strip suffix tokens
+  name = name.replace(SUFFIX_STRIP_RE, "");
+  return name.trim();
+}
+
 /** Extract country codes from brackets/parens. */
 function extractCountry(s: string): string {
   const m = s.match(/[\[\(](US|UK|CA|AU|NZ|IN|DE|FR|ES|IT|NL|BR|MX|JP|KR|RU)[\]\)]/i);
@@ -76,8 +104,8 @@ function extractCountry(s: string): string {
 
 /** Score how well an M3U channel name matches a example.com channel name. */
 function matchScore(m3uName: string, catalogName: string): number {
-  const m3uStripped = m3uName.replace(SUFFIX_STRIP_RE, "").trim();
-  const catalogStripped = catalogName.replace(SUFFIX_STRIP_RE, "").trim();
+  const m3uStripped = cleanName(m3uName);
+  const catalogStripped = cleanName(catalogName);
 
   const m3uKey = titleKey(m3uStripped);
   const catalogKey = titleKey(catalogStripped);
@@ -167,7 +195,7 @@ export function matchChannels(m3uEntries: M3uEntry[], channels: Channel[]): Matc
       skippedNonEnglish++;
       continue;
     }
-    const key = titleKey(m3uEntries[i].channelName.replace(SUFFIX_STRIP_RE, "").trim());
+    const key = titleKey(cleanName(m3uEntries[i].channelName));
     const tokens = new Set(keyTokens(key, 2));
 
     for (const t of tokens) {
@@ -190,7 +218,7 @@ export function matchChannels(m3uEntries: M3uEntry[], channels: Channel[]): Matc
   for (const channel of channels) {
     if (!channel.name) continue;
     const slug = titleKey(channel.name).replace(/\s+/g, "-");
-    const catalogKey = titleKey(channel.name.replace(SUFFIX_STRIP_RE, "").trim());
+    const catalogKey = titleKey(cleanName(channel.name));
     const catalogTokens = keyTokens(catalogKey, 2);
 
     // Collect candidate indices using token index

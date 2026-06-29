@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { Play, Info, ChevronLeft, ChevronRight, Star, Sparkles, Clock } from "lucide-react";
+import { Play, Info, Star, Sparkles, Clock } from "lucide-react";
 import { getServiceColor } from "@/lib/logos";
 import type { CatalogItem } from "@/lib/types";
 import type { EventTeam } from "@/lib/leagues";
@@ -87,7 +87,7 @@ export default function HeroBanner({ items, events = [] }: Props) {
 
   return (
     <div
-      className="hud-scan relative w-full aspect-[16/9] sm:aspect-[21/9] max-h-[70vh] mb-6 rounded-b-2xl overflow-hidden bg-black"
+      className="hud-scan relative w-full aspect-[16/9] sm:aspect-[21/9] max-h-[70vh] mt-11 mb-6 rounded-b-2xl overflow-hidden bg-black"
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
@@ -131,25 +131,11 @@ export default function HeroBanner({ items, events = [] }: Props) {
         />
       </div>
 
-      <div className="absolute inset-0 bg-gradient-to-t from-surface via-surface/40 to-transparent" />
+      <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/60 to-transparent pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-t from-surface/80 via-surface/20 to-transparent" />
       <div className="absolute inset-0 bg-gradient-to-r from-surface/60 via-transparent to-transparent" />
 
-      {count > 1 && (
-        <div className="absolute top-3 right-3 flex gap-1.5 z-10">
-          {slides.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => handleDotClick(i)}
-              className={`h-1 rounded-full transition-all duration-300 ${
-                i === current ? "w-6 bg-brand" : "w-1.5 bg-white/40 hover:bg-white/60"
-              }`}
-              aria-label={`Slide ${i + 1}`}
-            />
-          ))}
-        </div>
-      )}
-
-      <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 max-w-screen-lg">
+      <div className="absolute bottom-2 left-0 right-0 px-4 sm:px-6 max-w-screen-lg">
         <div key={current} className="animate-fade-in-up">
           {slide.type === "catalog" ? (
             <CatalogContent item={slide.item} />
@@ -157,26 +143,22 @@ export default function HeroBanner({ items, events = [] }: Props) {
             <EventContent ev={slide.ev} />
           )}
         </div>
+        {count > 1 && (
+          <div className="flex justify-center gap-1.5 mt-5">
+            {slides.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => handleDotClick(i)}
+                className={`h-1 rounded-full transition-all duration-300 ${
+                  i === current ? "w-6 bg-brand" : "w-1.5 bg-white/40 hover:bg-white/60"
+                }`}
+                aria-label={`Slide ${i + 1}`}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {count > 1 && (
-        <>
-          <button
-            onClick={() => { restart(); prev(); }}
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center hover:bg-black/60 transition-all md:opacity-0 md:hover:opacity-100"
-            aria-label="Previous"
-          >
-            <ChevronLeft className="w-4 h-4 text-white" />
-          </button>
-          <button
-            onClick={() => { restart(); next(); }}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center hover:bg-black/60 transition-all md:opacity-0 md:hover:opacity-100"
-            aria-label="Next"
-          >
-            <ChevronRight className="w-4 h-4 text-white" />
-          </button>
-        </>
-      )}
     </div>
   );
 }
@@ -185,7 +167,7 @@ function CatalogContent({ item }: { item: CatalogItem }) {
   const href = item.category === "series" ? `/vod/series/${item.tmdb_id}` : `/vod/movie/${item.tmdb_id}`;
   return (
     <>
-      <h1 className="text-white text-2xl font-bold mb-1 hero-text-shadow">{item.title}</h1>
+      <h1 className="text-white text-xl sm:text-2xl font-bold mb-1 hero-text-shadow truncate">{item.title}</h1>
       <div className="flex items-center gap-3 mb-2">
         {item.year && <span className="text-white/70 text-xs">{item.year}</span>}
         {item.vote_average && Number(item.vote_average) > 0 && (

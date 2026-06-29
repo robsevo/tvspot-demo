@@ -48,7 +48,6 @@ export default function VideoPlayer({
   const [airPlaySupported, setAirPlaySupported] = useState(false);
   const controlsTimer = useRef<NodeJS.Timeout | null>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const mountedRef = useRef(true);
 
   // Proactively load Cast SDK so button appears
   useEffect(() => {
@@ -128,9 +127,30 @@ export default function VideoPlayer({
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (autoPlay) safePlay();
+        if (!autoPlay) return;
+        const p = video.play();
+        if (p) {
+          p.catch(() => {
+            // Play failed — typically segments haven't buffered yet (slow
+            // CDN or transient network delay). Retry once after a short wait;
+            // this is what the user does manually when they see the still
+            // frame and press play.
+            if (cancelled) return;
+            setTimeout(() => {
+              if (cancelled) return;
+              video.play().catch(() => {});
+            }, 2000);
+          });
+        }
       });
-      hls.on(Hls.Events.FRAG_BUFFERED, () => { recoverAttempts = 0; });
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        recoverAttempts = 0;
+        // If video isn't playing yet (initial play() failed because segments
+        // weren't ready), retry now that we have buffered content.
+        if (video.paused && autoPlay && !cancelled) {
+          video.play().catch(() => {});
+        }
+      });
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (!data.fatal) return;
         const now = Date.now();
