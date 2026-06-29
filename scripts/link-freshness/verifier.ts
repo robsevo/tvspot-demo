@@ -4,7 +4,7 @@ import { withTimeout } from "./util";
 // Verification is I/O-bound, but the liveness check hammers relay.example.com with
 // two samples per candidate — too much concurrency makes the 2nd sample fail and
 // wrongly reject live links. Configurable so it can be dialed down for accuracy.
-const VERIFY_CONCURRENCY = Number(process.env.VERIFY_CONCURRENCY) || 4;
+const VERIFY_CONCURRENCY = Number(process.env.VERIFY_CONCURRENCY) || 1;
 const TIMEOUT_SHORT = 5000;
 const TIMEOUT_LONG = 8000;
 // Liveness gap: a live HLS edge must produce new segments over time. We sample
@@ -20,11 +20,27 @@ const LIVENESS_WAIT_MS = process.env.LIVENESS_WAIT_MS !== undefined
 // whatever passed so far instead of being killed. Tune via VERIFY_BUDGET_MS.
 const VERIFY_BUDGET_MS = Number(process.env.VERIFY_BUDGET_MS) || 600_000;
 
-// Circuit breaker: once a host fails at the connection level (DNS/refused/timeout),
-// every other candidate on that same host is skipped instantly instead of paying
-// the full per-URL timeout again. Dead hosts dominate the candidate set, so this
-// is what collapses the stage from minutes to seconds.
-const deadHosts = new Set<string>();
+// Circuit breaker, STRIKE-TOLERANT. Skipping a host after a single connection
+// blip used to drop ~65 live channels at once: Origin's 94 channels share just 3
+// upstream hosts (an upstream host.ddns.net=65, an upstream host.an upstream host.co=22, bgdc.live=7),
+// so one transient timeout on a shared upstream blacklisted its entire lineup
+// untried — the main reason only 26 of 95 channels survived. Now a host is only
+// skipped after DEAD_HOST_STRIKES *separate candidates* fully fail on it (each
+// after its own retries). A genuinely-dead scraped host still fails its few
+// candidates and gets skipped fast; a shared upstream survives transient blips.
+const DEAD_HOST_STRIKES = 3;
+const hostStrikes = new Map<string, number>();
+function isDeadHost(host: string): boolean {
+  return (hostStrikes.get(host) || 0) >= DEAD_HOST_STRIKES;
+}
+function strikeHost(host: string): void {
+  hostStrikes.set(host, (hostStrikes.get(host) || 0) + 1);
+}
+function deadHostCount(): number {
+  let n = 0;
+  for (const v of hostStrikes.values()) if (v >= DEAD_HOST_STRIKES) n++;
+  return n;
+}
 
 // Shared proxy fronts that wrap MANY distinct upstreams as `?u=<upstream>`. We
 // must NOT circuit-break on these — one dead upstream would blacklist the whole
@@ -384,8 +400,8 @@ async function segmentLoads(playlistUrl: string): Promise<boolean> {
   }
 }
 
-const MAX_CANDIDATES_PER_CHANNEL = 25; // bound work per channel
-const LIVENESS_PROBE_CAP = 8;          // max liveness probes (the 9s cost) per channel
+const MAX_CANDIDATES_PER_CHANNEL = 10; // bound work + heap per channel
+const LIVENESS_PROBE_CAP = 3;          // max liveness probes per channel
 // No keep-cap here: return ALL loadable links so index.ts can build the sticky
 // active set (≤5) + the unbounded waiting bench. The active/waiting split is the
 // caller's job, not the verifier's.
@@ -397,37 +413,56 @@ const LIVENESS_PROBE_CAP = 8;          // max liveness probes (the 9s cost) per 
  */
 async function verifyCandidate(c: Candidate, nowIso: string, doLiveness: boolean): Promise<VerifiedSource | null> {
   const host = hostKey(c.verifyUrl);
-  if (deadHosts.has(host)) return null;
+  if (isDeadHost(host)) return null;
 
   // Retry the load check. relay.example.com transiently 403s and has ~30-40s
   // outage windows even on healthy streams (measured 2026-06-28), so a single
   // shot wrongly rejects live channels mid-blip — the main reason most channels
-  // were missing from the verified list. Retry with backoff; only a
-  // connection-level failure (host genuinely down) short-circuits without retry.
+  // were missing from the verified list. Retry with backoff; connection-level
+  // failures count as a strike against the host (skipped only after several
+  // separate candidates fail — see DEAD_HOST_STRIKES).
   let t1: TierResult | undefined;
   let t2: TierResult | undefined;
+  let connErr = false;
   const LOAD_TRIES = 3;
   for (let attempt = 1; attempt <= LOAD_TRIES; attempt++) {
+    // Another candidate may have pushed this host over the strike limit mid-loop.
+    if (isDeadHost(host)) return null;
     t1 = await tier1_check(c.verifyUrl);
     if (t1.error) {
-      if (isConnectionError(t1.error)) { deadHosts.add(host); return null; }
+      connErr = isConnectionError(t1.error);
     } else {
+      connErr = false;
       t2 = await tier2_parse(c.verifyUrl);
       if (!t2.error) break; // loaded cleanly
     }
     if (attempt < LOAD_TRIES) await sleep(2500); // transient relay blip — back off
   }
-  if (!t1 || t1.error || !t2 || t2.error) return null;
+  if (!t1 || t1.error || !t2 || t2.error) {
+    // One strike per candidate that failed at the connection level (not per
+    // retry) — so a 65-channel shared upstream isn't killed by a single blip.
+    if (connErr) strikeHost(host);
+    return null;
+  }
 
   const latencyMs = t2.latencyMs || t1.latencyMs;
   const t3 = await tier3_attempt(c.verifyUrl, latencyMs);
 
   // BLOCKING segment gate: a playlist that parses + advances but whose segments
-  // 404 is dead for the player (the 24/7 mains.services case). Drop it so we
-  // never store an unplayable "live-looking" source. Only run on the bounded
+  // 404 is dead for the player (the scraped 24/7 mains.services case). Drop it so
+  // we never store an unplayable "live-looking" source. Only run on the bounded
   // liveness-probed set (it's an extra fetch); benched/extra links keep the old
   // load-only bar so we don't over-prune the reserve.
-  if (doLiveness && !(await segmentLoads(c.verifyUrl))) return null;
+  //
+  // EXCEPTION: Origin's OWN curated links (origin "backend") are what example.com
+  // itself serves and plays — they're vouched-for. Their per-segment probe still
+  // transiently 403s/times-out under relay throttle (many channels share 3
+  // upstreams), which was wrongly dropping ~60 live channels. So for backend
+  // origin, tier1+tier2 (playlist loads with real segments) is the bar; the
+  // segment fetch only RANKS (sets `live`), never gates. Scraped/untrusted
+  // origins keep the strict blocking gate.
+  const trusted = c.origin === "backend";
+  if (doLiveness && !trusted && !(await segmentLoads(c.verifyUrl))) return null;
 
   // Liveness as a RANKING flag, not a gate. The "plays ~15s then drops" source
   // stalls here (edge doesn't advance) → live:false, so it sorts to the bench;
@@ -493,13 +528,14 @@ export async function verifyCandidateMap(
   const startMs = performance.now();
   const nowIso = new Date().toISOString();
   const entries = [...map.entries()];
+  let total = entries.length;
 
-  for (let i = 0; i < entries.length; i += VERIFY_CONCURRENCY) {
+  for (let i = 0; i < total; i += VERIFY_CONCURRENCY) {
     const elapsed = performance.now() - startMs;
     if (elapsed > VERIFY_BUDGET_MS) {
       console.error(
         "Verifier: hit %ds budget after %d/%d channels — returning %d verified so far (skipping the rest)",
-        Math.round(VERIFY_BUDGET_MS / 1000), i, entries.length, results.size,
+        Math.round(VERIFY_BUDGET_MS / 1000), i, total, results.size,
       );
       break;
     }
@@ -507,7 +543,7 @@ export async function verifyCandidateMap(
     const batch = entries.slice(i, i + VERIFY_CONCURRENCY);
     console.error(
       "Verifier: batch %d/%d (%d channels, %d dead hosts skipped)",
-      Math.floor(i / VERIFY_CONCURRENCY) + 1, Math.ceil(entries.length / VERIFY_CONCURRENCY), batch.length, deadHosts.size,
+      Math.floor(i / VERIFY_CONCURRENCY) + 1, Math.ceil(total / VERIFY_CONCURRENCY), batch.length, deadHostCount(),
     );
 
     const batchResults = await Promise.all(
@@ -517,8 +553,6 @@ export async function verifyCandidateMap(
     for (let j = 0; j < batch.length; j++) {
       const r = batchResults[j];
       if (r) {
-        // Rank: live-verified first, then higher tier, then lower latency. Keep
-        // ALL loadable links — index.ts splits into active(≤5) + waiting.
         r.sort((a, b) =>
           (b.live ? 1 : 0) - (a.live ? 1 : 0) ||
           (b.tier * 100 - b.latencyMs) - (a.tier * 100 - a.latencyMs),
@@ -526,6 +560,12 @@ export async function verifyCandidateMap(
         results.set(batch[j][0], r);
       }
     }
+
+    // Null out processed entries + candidate arrays so GC can reclaim them.
+    for (let j = 0; j < batch.length && i + j < total; j++) entries[i + j] = null as any;
+    for (const [slug] of batch) map.delete(slug);
+
+    if (typeof gc === "function") gc();
   }
 
   let totalPassed = 0;

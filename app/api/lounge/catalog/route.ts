@@ -39,55 +39,86 @@ function normalizeItems(items: any[]): any[] {
 const TMDB_PAGES = 18;
 
 /**
- * Popularity scored by what's actually popular in the US + Canada, English-only.
- * Uses TMDB discover with watch_region=US and CA (sort by popularity), so titles
- * trending for US/CA viewers rank first site-wide. A title popular in either
- * region scores high (we take the max), and earlier ranks score higher. Titles
- * absent from US/CA results aren't in the map → the caller falls back to rating.
- * Responses are cached (revalidate) so this doesn't re-hit TMDB every request.
+ * US/CA, English-only TMDB signal for a kind. Returns two things from ONE cached
+ * discover crawl:
+ *  - `scores`: a recency/popularity rank from US+CA `discover` (drives ordering).
+ *  - `allow`:  the set of tmdb_ids TMDB positively confirms are US/CA-origin and
+ *              English. This is the USA/CANADA-ONLY gate: the backend service
+ *              catalogs (Netflix, Crave, …) mix in Korean/Japanese/Thai/Indian
+ *              dramas whose romanized titles pass a script check, so ranking
+ *              alone never removes them — the caller DROPS anything not in `allow`.
+ *
+ * Both axes (popularity AND vote_average) are crawled so the allowlist covers
+ * currently-trending *and* acclaimed US/CA titles — "Top Rated" pulls the latter,
+ * which a popularity-only crawl misses. Responses are cached (revalidate) so this
+ * doesn't re-hit TMDB every request.
  */
-async function fetchRegionPopularity(kind: "movie" | "tv"): Promise<Map<number, number>> {
+async function fetchRegionData(
+  kind: "movie" | "tv",
+): Promise<{ scores: Map<number, number>; allow: Set<number> }> {
   const tmdbToken = process.env.TMDB_ACCESS_TOKEN;
-  if (!tmdbToken) return new Map();
-
   const scores = new Map<number, number>();
-  const reqs: Promise<{ results?: { id: number }[] }>[] = [];
-  for (const region of ["US", "CA"]) {
-    for (let page = 1; page <= TMDB_PAGES; page++) {
-      const url =
-        `https://api.themoviedb.org/3/discover/${kind}` +
-        `?language=en-US&watch_region=${region}&with_original_language=en` +
-        `&sort_by=popularity.desc&vote_count.gte=50&page=${page}`;
-      reqs.push(
-        fetch(url, {
-          headers: { Authorization: `Bearer ${tmdbToken}` },
-          next: { revalidate: 3600 },
-        })
-          .then((r) => r.json())
-          .catch(() => ({ results: [] })),
-      );
-    }
-  }
+  const allow = new Set<number>();
+  if (!tmdbToken) return { scores, allow };
 
   // US is weighted slightly above CA: a CA placement is penalized by ~half a page
   // of ranks, so US wins ties and a US-only title edges out a same-rank CA-only
   // title, while a strongly-popular CA title still beats a weak US one.
   const REGION_PENALTY: Record<string, number> = { US: 0, CA: 30 };
 
+  // Pin origin to US/CA (not just watch_region) so a foreign-origin title that
+  // merely streams in the US can't sneak in. Two sort axes build the allowlist.
+  const SORTS = ["popularity.desc", "vote_average.desc"];
+  const reqs: { region: string; sort: string; page: number; p: Promise<{ results?: { id: number }[] }> }[] = [];
+  for (const region of ["US", "CA"]) {
+    for (const sort of SORTS) {
+      for (let page = 1; page <= TMDB_PAGES; page++) {
+        // Lift the vote floor for the rating crawl so a 10-vote fluke can't be
+        // "top rated"; keep it low for the popularity crawl to cover breadth.
+        const voteFloor = sort === "vote_average.desc" ? 200 : 50;
+        const url =
+          `https://api.themoviedb.org/3/discover/${kind}` +
+          `?language=en-US&watch_region=${region}&with_original_language=en&with_origin_country=US%7CCA` +
+          `&sort_by=${sort}&vote_count.gte=${voteFloor}&page=${page}`;
+        reqs.push({
+          region,
+          sort,
+          page,
+          p: fetch(url, { headers: { Authorization: `Bearer ${tmdbToken}` }, next: { revalidate: 3600 } })
+            .then((r) => r.json())
+            .catch(() => ({ results: [] })),
+        });
+      }
+    }
+  }
+
   try {
-    const pages = await Promise.all(reqs);
-    pages.forEach((pageData, idx) => {
-      const region = idx < TMDB_PAGES ? "US" : "CA"; // first TMDB_PAGES reqs are US
-      const pageNum = idx % TMDB_PAGES; // 0-based page within a region
+    const settled = await Promise.all(reqs.map((r) => r.p));
+    settled.forEach((pageData, idx) => {
+      const { region, sort, page } = reqs[idx];
       for (const [i, r] of (pageData.results || []).entries()) {
-        const rank = pageNum * 20 + i; // global rank within region, 0 = most popular
-        const score = 100000 - rank - REGION_PENALTY[region];
-        scores.set(r.id, Math.max(scores.get(r.id) || 0, score));
+        allow.add(r.id); // both crawls feed the US/CA-en allowlist
+        if (sort === "popularity.desc") {
+          const rank = (page - 1) * 20 + i; // 0 = most popular in region
+          const score = 100000 - rank - REGION_PENALTY[region];
+          scores.set(r.id, Math.max(scores.get(r.id) || 0, score));
+        }
       }
     });
   } catch {}
 
-  return scores;
+  return { scores, allow };
+}
+
+/**
+ * USA/CANADA ONLY gate. Keep a catalog item only if TMDB confirms it's US/CA-en
+ * (in `allow`), OR it's one of our own TMDB-discover supplements (those are
+ * US/CA-en by construction — see fetchDiscover). Everything else — the foreign
+ * dramas the backend service catalogs inject — is dropped.
+ */
+function isUsCa(item: any, allow: Set<number>): boolean {
+  if (item.service === "Popular Movies" || item.service === "Popular Series") return true;
+  return allow.has(item.tmdb_id);
 }
 
 /**
@@ -213,14 +244,21 @@ export async function GET(request: NextRequest) {
     }
 
     // Enrich + rank by US/CA popularity (writes score onto item.popularity).
-    const [movieScores, seriesScores] = await Promise.all([
-      fetchRegionPopularity("movie"),
-      fetchRegionPopularity("tv"),
+    const [movieRegion, seriesRegion] = await Promise.all([
+      fetchRegionData("movie"),
+      fetchRegionData("tv"),
     ]);
-    applyRegionScores(allMovies, movieScores);
-    applyRegionScores(allSeries, seriesScores);
+    applyRegionScores(allMovies, movieRegion.scores);
+    applyRegionScores(allSeries, seriesRegion.scores);
 
-    return NextResponse.json({ movies: allMovies, series: allSeries, sorted_by: "tmdb_popularity_us_ca" });
+    // USA/CANADA ONLY: the backend service catalogs mix in foreign dramas (K/J/
+    // Thai/Indian) whose romanized titles pass a script check; drop anything TMDB
+    // doesn't confirm as US/CA-origin English. Our own discover supplements are
+    // US/CA-en by construction and always kept (see isUsCa).
+    const usCaMovies = allMovies.filter((m) => isUsCa(m, movieRegion.allow));
+    const usCaSeries = allSeries.filter((s) => isUsCa(s, seriesRegion.allow));
+
+    return NextResponse.json({ movies: usCaMovies, series: usCaSeries, sorted_by: "tmdb_popularity_us_ca" });
   }
 
   if (service) {
@@ -235,14 +273,16 @@ export async function GET(request: NextRequest) {
       series: normalizeItems(data.series || []),
     };
 
-    // Enrich + rank this service's titles by US/CA popularity (writes score onto
-    // item.popularity so the client keeps the region order).
-    const [movieScores, seriesScores] = await Promise.all([
-      fetchRegionPopularity("movie"),
-      fetchRegionPopularity("tv"),
+    // Enrich + rank this service's titles by US/CA popularity, then drop non-US/CA
+    // titles so a service page is USA/Canada-only too (matches the home rails).
+    const [movieRegion, seriesRegion] = await Promise.all([
+      fetchRegionData("movie"),
+      fetchRegionData("tv"),
     ]);
-    applyRegionScores(normalized.movies || [], movieScores);
-    applyRegionScores(normalized.series || [], seriesScores);
+    applyRegionScores(normalized.movies || [], movieRegion.scores);
+    applyRegionScores(normalized.series || [], seriesRegion.scores);
+    normalized.movies = (normalized.movies || []).filter((m: any) => isUsCa(m, movieRegion.allow));
+    normalized.series = (normalized.series || []).filter((s: any) => isUsCa(s, seriesRegion.allow));
 
     return NextResponse.json(normalized);
   }
