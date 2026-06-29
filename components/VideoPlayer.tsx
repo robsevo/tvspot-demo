@@ -44,6 +44,10 @@ export default function VideoPlayer({
   const [volume, setVolume] = useState(1);
   const [progress, setProgress] = useState(0);
   const [controlsVisible, setControlsVisible] = useState(true);
+  // Rebuffering UX: `buffering` drives the on-screen ring; `bufferNotice` is the
+  // sustained-rebuffer banner (the "freezes ~30s then resumes" case).
+  const [buffering, setBuffering] = useState(false);
+  const [bufferNotice, setBufferNotice] = useState(false);
   const [castAvailable, setCastAvailable] = useState(false);
   const [airPlaySupported, setAirPlaySupported] = useState(false);
   const controlsTimer = useRef<NodeJS.Timeout | null>(null);
@@ -220,6 +224,43 @@ export default function VideoPlayer({
       video.removeEventListener("error", onErrorHandler);
     };
   }, [onPlay, onPause, onTimeUpdate, onEnded, onError]);
+
+  // Rebuffer feedback + recovery. Some sources play, then freeze ~30s while the
+  // edge restocks, then resume. We (1) show a ring immediately, (2) surface an
+  // on-page notice if it's sustained, and (3) nudge hls to pull segments forward
+  // so it rebuilds the buffer (maxBufferLength=45 → grabs well past 15s ahead)
+  // instead of idling. With no hls (native/MP4) there's nothing to nudge — the
+  // ring just shows while it waits it out.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !src) return;
+    let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearNotice = () => { if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; } };
+
+    const onWaiting = () => {
+      setBuffering(true);
+      try { hlsRef.current?.startLoad(); } catch {} // pull segments forward, don't idle
+      clearNotice();
+      noticeTimer = setTimeout(() => setBufferNotice(true), 2500); // only if sustained
+    };
+    const onResume = () => {
+      setBuffering(false);
+      setBufferNotice(false);
+      clearNotice();
+    };
+
+    video.addEventListener("waiting", onWaiting);
+    video.addEventListener("stalled", onWaiting);
+    video.addEventListener("playing", onResume);
+    video.addEventListener("canplaythrough", onResume);
+    return () => {
+      video.removeEventListener("waiting", onWaiting);
+      video.removeEventListener("stalled", onWaiting);
+      video.removeEventListener("playing", onResume);
+      video.removeEventListener("canplaythrough", onResume);
+      clearNotice();
+    };
+  }, [src]);
 
   // Stall watchdog: a live source can load fine, play a few buffered seconds,
   // then stop producing segments ("plays ~15s then drops"). The fatal-error path
@@ -413,6 +454,21 @@ export default function VideoPlayer({
         onClick={togglePlay}
         x-webkit-airplay="allow"
       />
+
+      {/* Buffering ring — shown whenever the stream is rebuffering */}
+      {buffering && playing && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+          <div className="w-14 h-14 rounded-full border-[3px] border-white/15 border-t-cyan-400 border-r-brand animate-spin" />
+        </div>
+      )}
+
+      {/* Sustained-rebuffer notice */}
+      {bufferNotice && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-black/75 backdrop-blur-sm text-white text-xs font-medium px-3 py-1.5 rounded-full animate-fade-in">
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 live-dot" />
+          Buffering — rebuilding the stream…
+        </div>
+      )}
 
       {/* Channel name overlay */}
       {channelName && controlsVisible && (
