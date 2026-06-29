@@ -27,7 +27,17 @@ function titleKey(s: string): string {
  *  →"citytv". It only ever matches when the full names are identical modulo spacing,
  *  so it can't create spurious cross-channel matches. */
 function keyTokens(key: string, minLen = 1): string[] {
-  const parts = key.split(/\s+/).filter((t) => t.length >= minLen);
+  // Merge a standalone channel number into the preceding word so the number stays
+  // significant: "tsn 1" → "tsn1", "ca tsn 1" → ["ca","tsn1"]. Without this the
+  // 1-char number is dropped by the length filter and TSN1/TSN2/RDS 2 all collapse
+  // to their base name (and never match a prefixed iptv variant like "CA: TSN 1").
+  const raw = key.split(/\s+/).filter(Boolean);
+  const merged: string[] = [];
+  for (const t of raw) {
+    if (/^\d{1,3}$/.test(t) && merged.length > 0) merged[merged.length - 1] += t;
+    else merged.push(t);
+  }
+  const parts = merged.filter((t) => t.length >= minLen);
   const collapsed = key.replace(/\s+/g, "");
   if (collapsed.length >= minLen && !parts.includes(collapsed)) parts.push(collapsed);
   return parts;
@@ -51,9 +61,12 @@ function levenshtein(a: string, b: string): number {
   return prev[n];
 }
 
-/** Common suffixes that don't help with matching. */
+/** Common suffixes that don't help with matching. NOTE: no bare 2|3 here — those
+ *  are real channel numbers ("RDS 2", "TSN 3"), and stripping them collapsed every
+ *  numbered feed onto its base name (RDS 2 → RDS). Quality dupes are covered by the
+ *  HD/FHD/SD/… tokens instead. */
 const SUFFIX_STRIP_RE =
-  /\b(HD|FHD|UHD|4K|8K|1080p|720p|2160p|SD|HQ|HEVC|H265|H264|50fps|60fps|US|UK|CA|AU|NZ|VIP|RAW|BACKUP|ALT|2|3)\s*$/i;
+  /\b(HD|FHD|UHD|4K|8K|1080p|720p|2160p|SD|HQ|HEVC|H265|H264|50fps|60fps|US|UK|CA|AU|NZ|VIP|RAW|BACKUP|ALT)\s*$/i;
 
 /** Extract country codes from brackets/parens. */
 function extractCountry(s: string): string {
