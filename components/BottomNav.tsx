@@ -16,7 +16,11 @@ export default function BottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-header/80 backdrop-blur-xl border-t border-brand/15 safe-area-bottom animate-fade-in-up">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-gradient-to-b from-[#0c1426] via-[#080a16] to-[#04050a] backdrop-blur-xl border-t border-cyan-500/10 safe-area-bottom animate-fade-in-up">
+      {/* Brand sheen top edge — matches TopBar bottom edge */}
+      <div className="absolute top-0 left-0 right-0 h-[1.5px]">
+        <div className="h-full brand-sheen" />
+      </div>
       <div className="flex items-center justify-around h-14 max-w-lg mx-auto">
         {tabs.map((tab) => {
           const isActive =

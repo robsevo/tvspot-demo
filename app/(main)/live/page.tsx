@@ -302,7 +302,7 @@ export default function LivePage() {
         {/* Sticky channel column + scrollable grid */}
         <div className="flex">
           {/* Channel logos — fixed column */}
-          <div className="flex-shrink-0 w-[72px] bg-surface z-20 border-r border-white/5">
+          <div className="flex-shrink-0 w-[72px] bg-[#0c1426] z-20 border-r border-white/5">
             {/* Empty top-left corner (aligns with time ruler) */}
             <div className="h-8 border-b border-white/5" />
             {/* Channel rows */}
@@ -345,7 +345,7 @@ export default function LivePage() {
             {/* Time ruler */}
             <div
               ref={timeRulerRef}
-              className="sticky top-0 z-10 h-8 bg-header/95 border-b border-white/5 flex items-end overflow-hidden"
+              className="sticky top-0 z-10 h-8 bg-[#0a1222]/95 border-b border-white/5 flex items-end overflow-hidden"
               style={{ width: totalWidth + 32 }}
             >
               {windowHours.map((h, i) => (
@@ -384,7 +384,7 @@ export default function LivePage() {
                       {is247 ? (
                         <Link
                           href={`/live/${channelSlug(ch.name)}`}
-                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-gradient-to-r from-brand/45 to-cyan-500/25 ring-1 ring-cyan-400/40 flex items-center px-3"
+                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-[#15223a] ring-1 ring-white/10 flex items-center px-3"
                         >
                           <span className="text-[11px] truncate font-medium text-white">
                             24 hour {ch.name.replace(/^24\/7\s+/i, "")}
@@ -406,8 +406,8 @@ export default function LivePage() {
                                 href={`/live/${channelSlug(ch.name)}`}
                                 className={`rounded-md flex items-center px-2 overflow-hidden ${
                                   isNow
-                                    ? "bg-gradient-to-r from-brand/45 to-cyan-500/25 ring-1 ring-cyan-400/40 z-10"
-                                    : "bg-card/70 hover:bg-card"
+                                    ? "bg-[#1a3050] ring-1 ring-white/10 z-10"
+                                    : "bg-[#0f1d30]/80 hover:bg-[#132840]/80"
                                 }`}
                                 style={{
                                   position: "absolute",
@@ -426,7 +426,7 @@ export default function LivePage() {
                       ) : (
                         <Link
                           href={`/live/${channelSlug(ch.name)}`}
-                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-card/30 border border-white/5 flex items-center px-3 hover:bg-card/60 transition-colors"
+                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-[#0f1d30]/40 border border-white/5 flex items-center px-3 hover:bg-[#132840]/60 transition-colors"
                         >
                           <span className="text-text-muted text-[11px]">No schedule data</span>
                         </Link>

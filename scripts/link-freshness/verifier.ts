@@ -4,7 +4,7 @@ import { withTimeout } from "./util";
 // Verification is I/O-bound, but the liveness check hammers relay.example.com with
 // two samples per candidate — too much concurrency makes the 2nd sample fail and
 // wrongly reject live links. Configurable so it can be dialed down for accuracy.
-const VERIFY_CONCURRENCY = Number(process.env.VERIFY_CONCURRENCY) || 1;
+const VERIFY_CONCURRENCY = Number(process.env.VERIFY_CONCURRENCY) || 10; // high — liveness sleep is idle time, and the hosted runner budget is 900s
 const TIMEOUT_SHORT = 5000;
 const TIMEOUT_LONG = 8000;
 // Liveness gap: a live HLS edge must produce new segments over time. We sample
@@ -18,7 +18,7 @@ const LIVENESS_WAIT_MS = process.env.LIVENESS_WAIT_MS !== undefined
 // Hard wall-clock ceiling for the whole verify stage. Against dead hosts the
 // stage could otherwise run 10+ min and get SIGKILL'd (exit 137); this returns
 // whatever passed so far instead of being killed. Tune via VERIFY_BUDGET_MS.
-const VERIFY_BUDGET_MS = Number(process.env.VERIFY_BUDGET_MS) || 1_200_000; // 20 min — enough to verify ~90 channels incl. liveness probes
+const VERIFY_BUDGET_MS = Number(process.env.VERIFY_BUDGET_MS) || 2_400_000; // 40 min — reach all 90+ channels with liveness probes
 
 // Circuit breaker, STRIKE-TOLERANT. Skipping a host after a single connection
 // blip used to drop ~65 live channels at once: Origin's 94 channels share just 3
@@ -503,7 +503,10 @@ async function verifyChannelCandidates(
     // Bound the expensive liveness probe to the first LIVENESS_PROBE_CAP loadable
     // links per channel — enough to fill the active 5 with live-verified ones;
     // the rest are still kept (benched) but not liveness-probed.
-    const doLiveness = liveProbes < LIVENESS_PROBE_CAP;
+    // Store-origin candidates already passed liveness in a prior run — skip it
+    // entirely (just tier1+tier2 to confirm they still load) so we don't burn
+    // 9s of budget per stale entry that's already known-good.
+    const doLiveness = c.origin !== "store" && liveProbes < LIVENESS_PROBE_CAP;
     // withTimeout bounds each probe — the undici parser crash can divert a verify
     // fetch's error to uncaughtException and leave it pending, stalling the stage.
     const result = await withTimeout(verifyCandidate(c, nowIso, doLiveness), 30000, null);
@@ -527,7 +530,11 @@ export async function verifyCandidateMap(
   const results = new Map<string, VerifiedSource[]>();
   const startMs = performance.now();
   const nowIso = new Date().toISOString();
-  const entries = [...map.entries()];
+  // Reverse: scraped/backend entries first (most likely to add new sources),
+  // store entries last (already carried forward by sticky logic). This way
+  // the budget prioritizes discovering NEW working sources over re-confirming
+  // ones we already know about.
+  const entries = [...map.entries()].reverse();
   let total = entries.length;
 
   for (let i = 0; i < total; i += VERIFY_CONCURRENCY) {
