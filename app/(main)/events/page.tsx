@@ -129,7 +129,7 @@ export default function EventsPage() {
   const leagues = data?.leagues || [];
 
   return (
-    <div className="hud-grid-bg pt-12 min-h-screen pb-20 animate-page-rise">
+    <div className="hud-grid-bg pt-14 min-h-screen pb-20 animate-page-rise">
       {/* Header — mirrors the Live page header, with a toggle back to Live TV */}
       <div className="px-4 mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">

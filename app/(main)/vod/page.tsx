@@ -98,7 +98,7 @@ export default function VodPage() {
   // place of the rails view; back returns to the rails for the same provider.
   if (selectedService && seeAll && !loading && !isEmpty) {
     return (
-      <div className="hud-grid-bg pt-12 min-h-screen pb-20 animate-page-rise">
+      <div className="hud-grid-bg pt-14 min-h-screen pb-20 animate-page-rise">
         <CatalogBrowser
           items={seeAll === "movie" ? sortedMovies : sortedSeries}
           kind={seeAll}
@@ -110,7 +110,7 @@ export default function VodPage() {
   }
 
   return (
-    <div className="hud-grid-bg pt-12 min-h-screen pb-20 animate-page-rise">
+    <div className="hud-grid-bg pt-14 min-h-screen pb-20 animate-page-rise">
       {/* Header */}
       <div className="px-4 mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">

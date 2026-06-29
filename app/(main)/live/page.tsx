@@ -194,7 +194,7 @@ export default function LivePage() {
   }
 
   return (
-    <div className="hud-grid-bg pt-12 min-h-screen pb-20 animate-page-rise">
+    <div className="hud-grid-bg pt-14 min-h-screen pb-20 animate-page-rise">
       {/* Header */}
       <div className="px-4 mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -313,15 +313,15 @@ export default function LivePage() {
                   href={`/live/${channelSlug(ch.name)}`}
                   className="flex flex-col items-center justify-center gap-0.5 h-14 border-b border-white/5 hover:bg-card/50 transition-colors"
                 >
-                  <div className="w-11 h-9 rounded-lg bg-white flex items-center justify-center overflow-hidden relative p-1 ring-1 ring-white/10">
+                  <div className="w-11 h-9 rounded-lg bg-gradient-to-br from-zinc-200/90 via-zinc-400/75 to-zinc-600/70 backdrop-blur-sm flex items-center justify-center overflow-hidden relative p-1 ring-1 ring-white/15">
                     <LogoImage
                       name={ch.name}
                       logoUrl={ch.logo_url || ch.logo}
                       className="w-full h-full object-contain"
-                      fallbackClassName="text-gray-700"
+                      fallbackClassName="text-gray-800"
                     />
-                    {/* Glass casing — glossy overlay over the logo */}
-                    <div className="absolute inset-0 rounded-lg pointer-events-none bg-gradient-to-br from-white/30 via-brand/15 to-brand/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.35),inset_0_-1px_1px_rgba(91,33,182,0.10)] ring-1 ring-white/15" />
+                    {/* Smoked-glass casing — frosted gradient + violet underglow */}
+                    <div className="absolute inset-0 rounded-lg pointer-events-none bg-gradient-to-br from-white/15 via-transparent to-brand/30 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_-2px_3px_rgba(91,33,182,0.22)] ring-1 ring-white/10" />
                     {ch.online && (
                       <div className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-500 ring-1 ring-white" />
                     )}
@@ -373,6 +373,7 @@ export default function LivePage() {
             {/* Program rows */}
             <div style={{ width: totalWidth + 32 }}>
               {filteredChannels.map((ch) => {
+                const is247 = /^24\/7\s+/i.test(ch.name);
                 const progs = epgData[ch.name] || [];
                 return (
                   <div
@@ -380,7 +381,16 @@ export default function LivePage() {
                     className="h-14 border-b border-white/5 relative"
                   >
                     <div className="absolute inset-y-0 left-0 right-8 flex items-center">
-                      {progs.length > 0 ? (
+                      {is247 ? (
+                        <Link
+                          href={`/live/${channelSlug(ch.name)}`}
+                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-gradient-to-r from-brand/45 to-violet-500/20 ring-1 ring-violet-400/50 flex items-center px-3"
+                        >
+                          <span className="text-[11px] truncate font-medium text-white">
+                            24 hour {ch.name.replace(/^24\/7\s+/i, "")}
+                          </span>
+                        </Link>
+                      ) : progs.length > 0 ? (
                         progs
                           .filter((p) => p.end > windowStart && p.start < windowEnd)
                           .map((p, i) => {

@@ -6,6 +6,11 @@ const BACKEND = process.env.BACKEND_API_URL || "https://api.example.com";
 // Services to scan when deriving classics from the backend catalog (no token).
 const SCAN_SERVICES = ["Netflix", "HBO Max", "Prime Video", "Disney+", "Paramount+"];
 
+/** Era-defining titles to GUARANTEE in Classics — the named requests plus reality
+ *  staples that discover misses on low vote counts. TMDB ids, verified. */
+const CLASSIC_MOVIE_PICKS = [816, 817, 818, 2105, 2770]; // Austin Powers x3, American Pie 1 & 2
+const CLASSIC_TV_PICKS = [31343]; // Jersey Shore
+
 function fixImageUrl(url: string | undefined | null, size = "w500"): string {
   if (!url) return "";
   if (url.startsWith("/api/images")) return url;
@@ -96,37 +101,57 @@ export async function GET(request: NextRequest) {
         .then((r) => r.json())
         .then((d) => d.results || [])
         .catch(() => []);
+    // Fetch a specific title by id, for the guaranteed picks (returns null on miss).
+    const getById = (kind: "movie" | "tv", id: number) =>
+      fetch(`https://api.themoviedb.org/3/${kind}/${id}?language=en-US`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` }, next: { revalidate: 86400 } })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
 
-    // US/CA English, 1980–2009. Multiple axes + a dedicated COMEDY pass so beloved
-    // comedies (Austin Powers, American Pie, The Mask, Me, Myself & Irene) surface —
-    // a single vote_count.desc page only returned prestige blockbusters and missed
-    // the comedies entirely.
+    // US/CA English, 1980–2009. Multiple axes + a dedicated COMEDY pass (incl. a
+    // lower-floor sweep for raunchy/teen comedies) and a REALITY pass so beloved
+    // comedies (Austin Powers, American Pie) and reality staples (Jersey Shore,
+    // The Hills) surface — a single vote_count.desc page only returned prestige
+    // blockbusters and missed the comedies/reality entirely.
     const M = "https://api.themoviedb.org/3/discover/movie?language=en-US&with_original_language=en&with_origin_country=US%7CCA&release_date.gte=1980-01-01&release_date.lte=2009-12-31";
     const TV = "https://api.themoviedb.org/3/discover/tv?language=en-US&with_original_language=en&with_origin_country=US%7CCA&first_air_date.gte=1980-01-01&first_air_date.lte=2009-12-31";
     const movieReqs = [
       ...[1, 2, 3].map((p) => get(`${M}&sort_by=popularity.desc&vote_count.gte=500&page=${p}`)),
       ...[1, 2].map((p) => get(`${M}&sort_by=vote_count.desc&vote_count.gte=1000&page=${p}`)),
       ...[1, 2, 3].map((p) => get(`${M}&with_genres=35&sort_by=popularity.desc&vote_count.gte=300&page=${p}`)), // comedy
+      ...[4, 5].map((p) => get(`${M}&with_genres=35&sort_by=popularity.desc&vote_count.gte=120&page=${p}`)), // more comedy (raunchy/teen)
     ];
     const tvReqs = [
       ...[1, 2].map((p) => get(`${TV}&sort_by=popularity.desc&vote_count.gte=200&page=${p}`)),
       get(`${TV}&sort_by=vote_count.desc&vote_count.gte=400&page=1`),
+      ...[1, 2].map((p) => get(`${TV}&with_genres=10764&sort_by=popularity.desc&vote_count.gte=20&page=${p}`)), // reality (Jersey Shore, The Hills, …)
     ];
 
-    const dedupeSorted = (pages: any[][], kind: "movie" | "series") => {
+    // picks (fetched by id) lead the pool so they sort naturally, and are force-kept
+    // past the slice so the named titles always appear.
+    const dedupeSorted = (pages: any[][], picks: any[], kind: "movie" | "series", limit: number) => {
       const seen = new Set<number>();
       const out: any[] = [];
+      for (const p of picks) if (p?.id && !seen.has(p.id)) { seen.add(p.id); out.push(mapItem(p, kind)); }
       for (const page of pages) for (const m of page) {
         if (m.id && !seen.has(m.id)) { seen.add(m.id); out.push(mapItem(m, kind)); }
       }
-      return out.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+      out.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+      const sliced = out.slice(0, limit);
+      const present = new Set(sliced.map((x) => x.tmdb_id));
+      for (const p of picks) if (p?.id && !present.has(p.id)) sliced.push(mapItem(p, kind));
+      return sliced;
     };
 
-    const [moviePages, tvPages] = await Promise.all([Promise.all(movieReqs), Promise.all(tvReqs)]);
+    const [moviePages, tvPages, moviePicks, tvPicks] = await Promise.all([
+      Promise.all(movieReqs),
+      Promise.all(tvReqs),
+      Promise.all(CLASSIC_MOVIE_PICKS.map((id) => getById("movie", id))),
+      Promise.all(CLASSIC_TV_PICKS.map((id) => getById("tv", id))),
+    ]);
 
     return NextResponse.json({
-      movies: dedupeSorted(moviePages, "movie").slice(0, 80),
-      series: dedupeSorted(tvPages, "series").slice(0, 60),
+      movies: dedupeSorted(moviePages, moviePicks.filter(Boolean), "movie", 100),
+      series: dedupeSorted(tvPages, tvPicks.filter(Boolean), "series", 80),
       source: "tmdb",
     });
   } catch {

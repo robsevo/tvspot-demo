@@ -166,9 +166,9 @@ video::-webkit-media-controls { display: none !important; }
   background: linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.6) 50%, transparent 100%);
 }
 
-/* Genre gradient for VOD detail */
+/* Genre gradient for VOD detail — violet with a tad of indigo/blue to match. */
 .genre-gradient {
-  background: linear-gradient(135deg, rgba(91,33,182,0.15) 0%, transparent 100%);
+  background: linear-gradient(135deg, rgba(91,33,182,0.15) 0%, rgba(79,70,229,0.10) 45%, transparent 100%);
 }
 
 /* Smooth in-page scrolling (rail arrows, anchor jumps) */
@@ -223,7 +223,9 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
   100% { background-position: 200% 50%; }
 }
 .brand-sheen {
-  background: linear-gradient(110deg, #5B21B6, #8b5cf6, #5B21B6);
+  /* Violet stays dominant, with an indigo/blue stop so accents pick up the logo's
+     blue (the logo gradient is brand→cyan). Just a tad — purple still rules. */
+  background: linear-gradient(110deg, #5B21B6, #7c3aed, #4f46e5, #8b5cf6, #5B21B6);
   background-size: 200% 100%;
   animation: brandSheen 3s linear infinite;
 }

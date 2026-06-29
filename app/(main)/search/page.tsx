@@ -115,7 +115,7 @@ export default function SearchPage() {
   const noResults = hasQuery && !corpusLoading && results.movies.length === 0 && results.series.length === 0;
 
   return (
-    <div className="hud-grid-bg pt-12 min-h-screen pb-20 animate-page-rise">
+    <div className="hud-grid-bg pt-14 min-h-screen pb-20 animate-page-rise">
       <div className="px-4 mb-3">
         <div className="flex items-center gap-2 mb-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-cyan-400 flex items-center justify-center hud-glow">

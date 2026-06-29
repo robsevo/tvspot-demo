@@ -43,6 +43,10 @@ export function useCatalog() {
         ...(data.summary || {}),
         "Classics": { movies_count: 30, series_count: 30, preview: "Classic movies and series before 2010" },
         "Theater": { movies_count: 30, series_count: 0, preview: "Now playing and upcoming in theaters" },
+        // "Other" returns nothing from the backend (count 0) but useServiceCatalog
+        // populates it from the trending corpus (~40 movies + 40 series). Override
+        // the summary so the card's count matches what actually opens.
+        ...(realServices.includes("Other") ? { "Other": { movies_count: 40, series_count: 40, preview: "Popular right now" } } : {}),
       };
       setServices(allServices);
       setSummary(allSummary);

@@ -2,6 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 
 const BACKEND = process.env.BACKEND_API_URL || "https://api.example.com";
 
+/**
+ * Globally-iconic non-US/CA titles that BYPASS the USA/Canada-only language gate.
+ * The gate exists to drop the long tail of foreign (K/J/Thai/Indian) dramas the
+ * backend service catalogs inject, but a handful of megahits (Squid Game, Money
+ * Heist, Parasite, …) should still surface. TMDB ids, verified. Kept regardless
+ * of original_language/origin, and injected into trending so they always appear.
+ */
+const BYPASS_TV_IDS = [93405, 71446, 70523, 110316, 99966, 96648, 210905, 96677];
+const BYPASS_MOVIE_IDS = [496243, 396535, 670];
+const BYPASS_IDS = new Set<number>([...BYPASS_TV_IDS, ...BYPASS_MOVIE_IDS]);
+
 /** Normalize backend items: backend uses `name` not `title`, `rating` not `vote_average` */
 function fixImageUrl(url: string | undefined | null, size: string = "w500"): string {
   if (!url) return "";
@@ -118,6 +129,7 @@ async function fetchRegionData(
  */
 function isUsCa(item: any, allow: Set<number>): boolean {
   if (item.service === "Popular Movies" || item.service === "Popular Series") return true;
+  if (BYPASS_IDS.has(item.tmdb_id)) return true; // global megahit (Squid Game, …)
   return allow.has(item.tmdb_id);
 }
 
@@ -194,6 +206,46 @@ async function fetchDiscover(
 }
 
 /**
+ * Fetch specific TMDB titles by id (the BYPASS megahits) and map them to our item
+ * shape so they can be injected into the trending corpus even if no backend
+ * service catalog carries them. Tagged "Popular …" so they survive the US/CA gate.
+ */
+async function fetchTmdbByIds(kind: "movie" | "tv", ids: number[]): Promise<any[]> {
+  const tmdbToken = process.env.TMDB_ACCESS_TOKEN;
+  if (!tmdbToken) return [];
+  const out = await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const r = await fetch(`https://api.themoviedb.org/3/${kind}/${id}?language=en-US`, {
+          headers: { Authorization: `Bearer ${tmdbToken}` },
+          next: { revalidate: 86400 },
+        });
+        if (!r.ok) return null;
+        const m = await r.json();
+        return {
+          tmdb_id: m.id,
+          title: m.title || m.name || "",
+          name: m.title || m.name || "",
+          year: (m.release_date || m.first_air_date || "").slice(0, 4),
+          rating: m.vote_average || 0,
+          vote_average: m.vote_average || 0,
+          poster: m.poster_path ? `/api/images?url=${encodeURIComponent(`https://image.tmdb.org/t/p/w500${m.poster_path}`)}` : "",
+          backdrop: m.backdrop_path ? `/api/images?url=${encodeURIComponent(`https://image.tmdb.org/t/p/w1280${m.backdrop_path}`)}` : "",
+          overview: m.overview || "",
+          service: kind === "movie" ? "Popular Movies" : "Popular Series",
+          category: kind === "movie" ? "movie" : "series",
+          genre_ids: (m.genres || []).map((g: any) => g.id),
+          popularity: m.popularity || 0,
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return out.filter(Boolean);
+}
+
+/**
  * Per-title US/CA-English check via TMDB details (cached 24h). The discover
  * allowlist only covers the ~top popular/top-rated titles, so genuine but
  * lower-profile US/CA English titles get wrongly dropped. The backend catalog
@@ -228,7 +280,7 @@ async function filterUsCaEn(items: any[], kind: "movie" | "tv", allow: Set<numbe
   const out: any[] = [];
   const toCheck: any[] = [];
   for (const it of items) {
-    if (it.service === "Popular Movies" || it.service === "Popular Series" || allow.has(it.tmdb_id)) out.push(it);
+    if (it.service === "Popular Movies" || it.service === "Popular Series" || allow.has(it.tmdb_id) || BYPASS_IDS.has(it.tmdb_id)) out.push(it);
     else toCheck.push(it);
   }
   const CONC = 24;
@@ -287,6 +339,19 @@ export async function GET(request: NextRequest) {
       if (!seenIds.has(m.tmdb_id)) { seenIds.add(m.tmdb_id); allMovies.push(m); }
     }
     for (const s of [...supSeries, ...supAnimation]) {
+      if (!seenIds.has(s.tmdb_id)) { seenIds.add(s.tmdb_id); allSeries.push(s); }
+    }
+
+    // Inject the global-megahit bypass titles (Squid Game, …) so they appear even
+    // if no backend service catalog carries them. Deduped against the above.
+    const [bypassMovies, bypassSeries] = await Promise.all([
+      fetchTmdbByIds("movie", BYPASS_MOVIE_IDS),
+      fetchTmdbByIds("tv", BYPASS_TV_IDS),
+    ]);
+    for (const m of bypassMovies) {
+      if (!seenIds.has(m.tmdb_id)) { seenIds.add(m.tmdb_id); allMovies.push(m); }
+    }
+    for (const s of bypassSeries) {
       if (!seenIds.has(s.tmdb_id)) { seenIds.add(s.tmdb_id); allSeries.push(s); }
     }
 

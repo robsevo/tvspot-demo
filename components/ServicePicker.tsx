@@ -49,7 +49,7 @@ export default function ServicePicker({ onSelectAction }: { onSelectAction: (ser
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 px-4 stagger-children">
       {services.map((service) => {
         const s = summary[service];
-        const gradient = serviceColors[service] || "from-brand to-violet-950";
+        const gradient = serviceColors[service] || "from-brand via-indigo-800 to-violet-950";
         // Backend summaries carry a few sample items — use the first poster as a
         // backdrop so each provider card previews its content (virtual services
         // use a description string, so guard with Array.isArray).
