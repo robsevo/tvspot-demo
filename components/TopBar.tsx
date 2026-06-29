@@ -34,25 +34,25 @@ export default function TopBar() {
         showBg ? "bg-header/95 backdrop-blur-sm" : "bg-transparent"
       }`}
     >
-      <div className="flex items-center justify-between h-full max-w-lg mx-auto px-4">
+      <div className="flex items-center justify-between h-full w-full max-w-screen-2xl mx-auto px-4">
         <Link href="/" className="flex items-center gap-2">
           <img src="/tvspot-logo.svg" alt="TVSpot" className="w-6 h-6" />
           <span className="text-white font-bold text-sm tracking-tight">TVSpot</span>
         </Link>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           <Link
             href="/search"
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-white/70 hover:text-white"
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-white/70 hover:text-white hover:bg-white/5 transition-colors"
             aria-label="Search"
           >
             <SearchIcon className="w-4 h-4" />
           </Link>
           {username && (
-            <span className="text-text-muted text-xs mr-1 hidden sm:block">{username}</span>
+            <span className="text-text-muted text-xs hidden sm:block pl-1">{username}</span>
           )}
           <button
             onClick={handleLogout}
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-white/70 hover:text-white"
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-white/70 hover:text-white hover:bg-white/5 transition-colors"
             aria-label="Logout"
           >
             <LogOut className="w-4 h-4" />

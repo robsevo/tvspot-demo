@@ -7,7 +7,7 @@ import { LogoImage } from "@/components/LogoImage";
 import { proxyFetch } from "@/lib/api";
 import { channelSlug } from "@/lib/sources";
 import Link from "next/link";
-import { Tv, Sparkles } from "lucide-react";
+import { Tv, CalendarDays } from "lucide-react";
 import type { EpgResponse } from "@/lib/types";
 
 const HOUR_WIDTH = 240; // pixels per hour
@@ -203,9 +203,18 @@ export default function LivePage() {
             <p className="text-text-muted text-[11px]">{channels.length} channels</p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 text-brand text-xs font-medium bg-brand/10 px-2.5 py-1 rounded-xl">
-          <span className="w-1.5 h-1.5 rounded-xl bg-brand live-dot" />
-          <span>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/events"
+            className="flex items-center gap-1.5 glass-card text-text-secondary hover:text-white text-xs font-medium px-3 py-2 rounded-xl transition-colors"
+          >
+            <CalendarDays className="w-4 h-4" />
+            Events
+          </Link>
+          <div className="flex items-center gap-1.5 text-brand text-xs font-medium bg-brand/10 px-2.5 py-1 rounded-xl">
+            <span className="w-1.5 h-1.5 rounded-xl bg-brand live-dot" />
+            <span>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+          </div>
         </div>
       </div>
 

@@ -2,9 +2,13 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { proxyFetch } from "@/lib/api";
-import HeroBanner from "@/components/HeroBanner";
+import HeroBanner, { type HeroEvent } from "@/components/HeroBanner";
 import PosterRail from "@/components/PosterRail";
 import { PageSkeleton } from "@/components/LoadingSkeleton";
+import { useEvents } from "@/hooks/useEvents";
+import { useChannels } from "@/hooks/useChannels";
+import { channelSlug } from "@/lib/sources";
+import { carrierForLeague } from "@/lib/leagues";
 import { curate, trendingScore, trendingNow, topRated, adultAnimation } from "@/lib/discovery";
 import type { CatalogItem } from "@/lib/types";
 
@@ -19,6 +23,8 @@ export default function HomePage() {
   const [movies, setMovies] = useState<CatalogItem[]>([]);
   const [series, setSeries] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const { data: eventsData } = useEvents();
+  const { channels } = useChannels();
 
   useEffect(() => {
     proxyFetch<{ movies: CatalogItem[]; series: CatalogItem[] }>(
@@ -47,6 +53,33 @@ export default function HomePage() {
         .slice(0, 8),
     [movies, series],
   );
+
+  // Hero events: up to 2 of today's games, live first then soonest upcoming, each
+  // cross-referenced to one of our channels for a direct "Watch" link.
+  const heroEvents: HeroEvent[] = useMemo(() => {
+    const all = (eventsData?.leagues || []).flatMap((lg) => lg.games.map((g) => ({ lg, g })));
+    const rank = (s: string) => (s === "in" ? 0 : s === "pre" ? 1 : 2);
+    all.sort(
+      (a, b) =>
+        rank(a.g.state) - rank(b.g.state) ||
+        new Date(a.g.dateUtc).getTime() - new Date(b.g.dateUtc).getTime(),
+    );
+    return all.slice(0, 2).map(({ lg, g }) => {
+      const carrier = carrierForLeague(lg.key, channels, channelSlug);
+      return {
+        id: g.id,
+        leagueName: lg.name,
+        leagueLogo: lg.logo,
+        home: g.home,
+        away: g.away,
+        dateUtc: g.dateUtc,
+        state: g.state,
+        detail: g.detail,
+        watchSlug: carrier ? channelSlug(carrier.name) : null,
+        watchName: carrier ? carrier.name : null,
+      };
+    });
+  }, [eventsData, channels]);
 
   // Trending = real US/CA current popularity first (movies/series already curated).
   const trendingMovies = useMemo(() => trendingNow(movies).slice(0, 18), [movies]);
@@ -80,7 +113,7 @@ export default function HomePage() {
 
   return (
     <div className="hud-grid-bg min-h-screen pb-4 animate-page-rise">
-      <HeroBanner items={heroItems} />
+      <HeroBanner items={heroItems} events={heroEvents} />
 
       {trendingMovies.length > 0 && (
         <PosterRail title="Trending Movies" items={trendingMovies} kind="movie" />
