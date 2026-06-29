@@ -47,7 +47,10 @@ export default function ChannelPage() {
 
   return (
     <div className="min-h-screen pb-20 animate-fade-in">
-      <ChannelPlayer channelName={channelName} />
+      {/* Centered, width-capped column so the player is a tidy panel on desktop
+          instead of a stretched-edge-to-edge video. Full-width on mobile. */}
+      <div className="mx-auto w-full max-w-5xl">
+        <ChannelPlayer channelName={channelName} />
 
       {channel.programs && channel.programs.length > 0 && (
         <div className="px-4 mt-4">
@@ -79,6 +82,7 @@ export default function ChannelPage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

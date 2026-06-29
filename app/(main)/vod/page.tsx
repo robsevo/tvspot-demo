@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { useCatalog, useServiceCatalog } from "@/hooks/useCatalog";
 import ServicePicker from "@/components/ServicePicker";
 import PosterRail from "@/components/PosterRail";
+import CatalogBrowser from "@/components/CatalogBrowser";
 import { PageSkeleton } from "@/components/LoadingSkeleton";
 import { Film, Sparkles, ChevronLeft } from "lucide-react";
 import { GENRE_MAP, detectGenre } from "@/lib/types";
@@ -32,6 +33,8 @@ export default function VodPage() {
   const { services } = useCatalog();
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [selectedGenre, setSelectedGenre] = useState("All");
+  // "See all" full-catalog view for one kind within the selected provider.
+  const [seeAll, setSeeAll] = useState<"movie" | "series" | null>(null);
   const { movies, series, loading, label } = useServiceCatalog(selectedService);
 
   // Sort by current US/CA popularity (curate writes-back), English + no-holiday,
@@ -73,11 +76,13 @@ export default function VodPage() {
 
   const handleServiceSelect = (service: string) => {
     setSelectedGenre("All");
+    setSeeAll(null);
     setSelectedService(service);
   };
 
   const handleBack = () => {
     setSelectedGenre("All");
+    setSeeAll(null);
     setSelectedService(null);
   };
 
@@ -88,6 +93,21 @@ export default function VodPage() {
 
   const filteredMovies = filterByGenre(sortedMovies);
   const filteredSeries = filterByGenre(sortedSeries);
+
+  // "See all" — full provider catalog for one kind, with search + sort. Shown in
+  // place of the rails view; back returns to the rails for the same provider.
+  if (selectedService && seeAll && !loading && !isEmpty) {
+    return (
+      <div className="hud-grid-bg pt-12 min-h-screen pb-20 animate-page-rise">
+        <CatalogBrowser
+          items={seeAll === "movie" ? sortedMovies : sortedSeries}
+          kind={seeAll}
+          serviceLabel={label || selectedService}
+          onBack={() => setSeeAll(null)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="hud-grid-bg pt-12 min-h-screen pb-20 animate-page-rise">
@@ -165,10 +185,20 @@ export default function VodPage() {
           )}
 
           {filteredMovies.length > 0 && (
-            <PosterRail title={`${label || selectedService} Movies`} items={filteredMovies} kind="movie" />
+            <PosterRail
+              title={`${label || selectedService} Movies`}
+              items={filteredMovies}
+              kind="movie"
+              onSeeAll={() => setSeeAll("movie")}
+            />
           )}
           {filteredSeries.length > 0 && (
-            <PosterRail title={`${label || selectedService} Series`} items={filteredSeries} kind="series" />
+            <PosterRail
+              title={`${label || selectedService} Series`}
+              items={filteredSeries}
+              kind="series"
+              onSeeAll={() => setSeeAll("series")}
+            />
           )}
         </div>
       )}

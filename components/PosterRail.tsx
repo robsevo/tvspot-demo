@@ -10,9 +10,11 @@ interface Props {
   items: CatalogItem[];
   kind: "movie" | "series";
   children?: ReactNode;
+  /** When set, render a "See all" button in the header that opens the full grid. */
+  onSeeAll?: () => void;
 }
 
-export default function PosterRail({ title, items, kind, children }: Props) {
+export default function PosterRail({ title, items, kind, children, onSeeAll }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   if (items.length === 0) return null;
@@ -29,6 +31,15 @@ export default function PosterRail({ title, items, kind, children }: Props) {
       <div className="flex items-center gap-2 px-4 mb-2">
         <span className="inline-block w-1 h-4 rounded-full bg-brand hud-glow" />
         <h2 className="text-white text-[15px] font-bold tracking-tight uppercase">{title}</h2>
+        {onSeeAll && (
+          <button
+            onClick={onSeeAll}
+            className="ml-auto flex items-center gap-0.5 text-text-secondary hover:text-white text-xs font-medium transition-colors min-h-[32px]"
+          >
+            See all
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
       </div>
       {children}
       <div className="relative">

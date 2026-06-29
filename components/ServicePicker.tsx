@@ -24,8 +24,8 @@ export default function ServicePicker({ onSelectAction }: { onSelectAction: (ser
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 gap-3 px-4 pt-2">
-        {Array.from({ length: 8 }).map((_, i) => (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 px-4 pt-2">
+        {Array.from({ length: 12 }).map((_, i) => (
           <div key={i} className="h-32 hud-skeleton rounded-2xl" />
         ))}
       </div>
@@ -33,7 +33,7 @@ export default function ServicePicker({ onSelectAction }: { onSelectAction: (ser
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 px-4 stagger-children">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 px-4 stagger-children">
       {services.map((service) => {
         const s = summary[service];
         const gradient = serviceColors[service] || "from-brand to-violet-950";
