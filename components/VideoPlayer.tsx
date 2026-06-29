@@ -255,7 +255,10 @@ export default function VideoPlayer({
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) video.play();
+    // play() returns a promise that REJECTS (AbortError) if a load/pause
+    // interrupts it before it resolves — e.g. a source swap mid-tap. Always
+    // swallow it so it never surfaces as an unhandled rejection in the console.
+    if (video.paused) { const p = video.play(); if (p) p.catch(() => {}); }
     else video.pause();
   }, []);
 
