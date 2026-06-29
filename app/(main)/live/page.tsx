@@ -198,7 +198,7 @@ export default function LivePage() {
       {/* Header */}
       <div className="px-4 mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-3xl bg-[#132840] flex items-center justify-center">
+          <div className="w-9 h-9 rounded-3xl bg-white/[0.07] flex items-center justify-center">
             <Tv className="w-4 h-4 text-white" />
           </div>
           <div>
@@ -232,7 +232,7 @@ export default function LivePage() {
               onClick={() => setActiveCat(cat)}
               className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all ${
                 activeCat === cat
-                  ? "bg-[#1a3050] text-white ring-1 ring-white/10"
+                  ? "bg-white/[0.07] text-white ring-1 ring-white/10"
                   : "glass-card text-text-secondary hover:text-white"
               }`}
             >
@@ -249,7 +249,7 @@ export default function LivePage() {
           onClick={() => setSelectedGameId(null)}
           className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all ${
             !selectedEntry
-              ? "bg-[#1a3050] text-white ring-1 ring-white/10"
+              ? "bg-white/[0.07] text-white ring-1 ring-white/10"
               : "glass-card text-text-secondary hover:text-white"
           }`}
         >
@@ -275,7 +275,7 @@ export default function LivePage() {
                 title={`${game.away.name} vs ${game.home.name}`}
                 className={`flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ring-1 ${
                   active
-                    ? `bg-[#1a3050] text-white ring-1 ring-white/10 ${s.ring}`
+                    ? `bg-white/[0.07] text-white ring-1 ring-white/10 ${s.ring}`
                     : `glass-card ${s.ring} text-text-secondary hover:text-white`
                 }`}
               >
@@ -364,7 +364,7 @@ export default function LivePage() {
                 className="absolute top-0 bottom-0 w-0.5 z-20"
                 style={{ left: nowOffset, backgroundColor: NOW_COLOR, boxShadow: "0 0 8px rgba(56,189,248,0.6)" }}
               >
-                <div className="absolute -top-0 left-1/2 -translate-x-1/2 bg-[#1a3050] text-cyan-300 text-[8px] px-1.5 py-0.5 rounded-b font-bold ring-1 ring-cyan-400/30">
+                <div className="absolute -top-0 left-1/2 -translate-x-1/2 bg-white/[0.07] text-cyan-300 text-[8px] px-1.5 py-0.5 rounded-b font-bold ring-1 ring-cyan-400/30">
                   NOW
                 </div>
               </div>
@@ -384,7 +384,7 @@ export default function LivePage() {
                       {is247 ? (
                         <Link
                           href={`/live/${channelSlug(ch.name)}`}
-                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-[#15223a] ring-1 ring-white/10 flex items-center px-3"
+                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-white/[0.05] ring-1 ring-white/10 flex items-center px-3"
                         >
                           <span className="text-[11px] truncate font-medium text-white">
                             24 hour {ch.name.replace(/^24\/7\s+/i, "")}
@@ -406,8 +406,8 @@ export default function LivePage() {
                                 href={`/live/${channelSlug(ch.name)}`}
                                 className={`rounded-md flex items-center px-2 overflow-hidden ${
                                   isNow
-                                    ? "bg-[#1a3050] ring-1 ring-white/10 z-10"
-                                    : "bg-[#0f1d30]/80 hover:bg-[#132840]/80"
+                                    ? "bg-white/[0.07] ring-1 ring-white/10 z-10"
+                                    : "bg-white/[0.04] hover:bg-white/[0.06]"
                                 }`}
                                 style={{
                                   position: "absolute",
@@ -426,7 +426,7 @@ export default function LivePage() {
                       ) : (
                         <Link
                           href={`/live/${channelSlug(ch.name)}`}
-                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-[#0f1d30]/40 border border-white/5 flex items-center px-3 hover:bg-[#132840]/60 transition-colors"
+                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-white/[0.02] border border-white/5 flex items-center px-3 hover:bg-white/[0.05] transition-colors"
                         >
                           <span className="text-text-muted text-[11px]">No schedule data</span>
                         </Link>
