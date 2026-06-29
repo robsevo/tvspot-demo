@@ -3,12 +3,11 @@
  * TVSpot Link Freshness Pipeline
  *
  * Daily automated pipeline that:
- * 1. Scrapes r/REDACTED_SOURCE for base64-encoded IPTV credentials
- * 2. Decodes credentials and downloads M3U playlists
- * 3. Fuzzy-matches streams to example.com channels
- * 4. Verifies streams with 4-tier testing
- * 5. Optionally verifies VOD links
- * 6. Writes verified-sources.json atomically
+ * 1. Runs source adapters (iptv-org, GitHub M3U, Reddit) in parallel
+ * 2. Fetches example.com channels and fuzzy-matches streams
+ * 3. Verifies streams with tiered testing (existing list + backend + matched)
+ * 4. Optionally verifies VOD links
+ * 5. Writes verified-sources.json atomically
  *
  * Usage:
  *   npx tsx scripts/link-freshness/index.ts            # full pipeline
@@ -36,9 +35,9 @@ try {
   // .env.local is optional
 }
 
-import { scrapeReddit } from "./reddit";
-import { decodeCredentials } from "./credentials";
-import { downloadM3us } from "./m3u";
+import { fetchIptvOrg } from "./sources/iptv-org";
+import { fetchGithubM3u } from "./sources/github-m3u";
+import { fetchReddit } from "./reddit";
 import { fetchChannels } from "./Origin";
 import { matchChannels } from "./matcher";
 import { verifyCandidateMap } from "./verifier";
@@ -95,39 +94,54 @@ async function main(): Promise<void> {
   // the backend's links below. So scrape failures degrade to "no fresh links"
   // rather than aborting the whole nightly refresh.
 
-  // Stage 1: Reddit scrape
-  log("Stage 1: Scraping Reddit...");
-  let posts: Awaited<ReturnType<typeof scrapeReddit>> = [];
-  try {
-    posts = await scrapeReddit();
-  } catch (err) {
-    error("Reddit scrape failed (continuing without fresh links)", err);
-  }
-  log(`  Found ${posts.length} posts with base64 content`);
+  // Stage 1: Run all source adapters in parallel, best-effort.
+  log("Stage 1: Running source adapters (iptv-org, GitHub M3U, Reddit)...");
+  const sourceAdapters = [
+    { name: "iptv_org", label: "iptv-org", fetch: fetchIptvOrg },
+    { name: "github", label: "GitHub M3U", fetch: fetchGithubM3u },
+    { name: "reddit", label: "Reddit", fetch: fetchReddit },
+  ];
 
-  // Stage 2: Decode credentials
-  log("Stage 2: Decoding credentials...");
-  let credentials: Awaited<ReturnType<typeof decodeCredentials>> = [];
-  try {
-    credentials = await decodeCredentials(posts);
-  } catch (err) {
-    error("Credential decoding failed (continuing without fresh links)", err);
-  }
-  log(`  Found ${credentials.length} credential sets`);
+  const results = await Promise.allSettled(
+    sourceAdapters.map(async (s) => {
+      const entries = await s.fetch();
+      // Tag every entry with its origin source
+      for (const e of entries) {
+        e.attrs.source = s.name;
+      }
+      return { name: s.name, label: s.label, entries };
+    }),
+  );
 
-  // Stage 3: Download M3Us
-  log("Stage 3: Downloading M3U playlists...");
-  let m3uEntries: Awaited<ReturnType<typeof downloadM3us>> = [];
-  if (credentials.length > 0) {
-    try {
-      m3uEntries = await downloadM3us(credentials);
-    } catch (err) {
-      error("M3U download failed (continuing without fresh links)", err);
+  // Per-source stats for PipelineMeta
+  const sourceStats: Record<string, { entries: number; status: "ok" | "failed" }> = {};
+  for (let i = 0; i < sourceAdapters.length; i++) {
+    const r = results[i];
+    if (r.status === "fulfilled") {
+      sourceStats[r.value.name] = { entries: r.value.entries.length, status: "ok" };
+    } else {
+      sourceStats[sourceAdapters[i].name] = { entries: 0, status: "failed" };
+      error(`  ${sourceAdapters[i].label} failed: ${String(r.reason)}`);
     }
-  } else {
-    log("  No credentials — skipping scrape download.");
   }
-  log(`  Downloaded ${m3uEntries.length} unique stream entries`);
+
+  // Merge and dedupe by stream URL
+  const seen = new Set<string>();
+  const m3uEntries = [];
+  for (const r of results) {
+    if (r.status !== "fulfilled") continue;
+    for (const e of r.value.entries) {
+      if (!seen.has(e.streamUrl)) {
+        seen.add(e.streamUrl);
+        m3uEntries.push(e);
+      }
+    }
+  }
+
+  for (const [name, stat] of Object.entries(sourceStats)) {
+    log(`  ${name}: ${stat.entries} entries (${stat.status})`);
+  }
+  log(`  Merged: ${m3uEntries.length} unique streams from ${sourceAdapters.length} sources`);
 
   // Stage 4: Fetch example.com channels (the links currently on site).
   log("Stage 4: Fetching example.com channels...");
@@ -184,30 +198,24 @@ async function main(): Promise<void> {
     }
   }
 
-  // 3) Freshly scraped links — raw upstream verified for speed, stored wrapped
-  //    (api.example.com/stream-proxy) so they actually play in the browser.
+  // 3) Freshly matched links from source adapters — raw upstream verified for speed,
+  //    stored wrapped (api.example.com/stream-proxy) so they play in the browser.
   let scrapedCount = 0;
   for (const match of matches) {
     const slug = slugify(match.channelName);
     if (!nameBySlug.has(slug)) nameBySlug.set(slug, match.channelName);
     for (const e of match.candidates.slice(0, MAX_SCRAPED_PER_CHANNEL)) {
-      add(slug, { verifyUrl: e.streamUrl, storeUrl: toPlayableUrl(e.streamUrl), origin: "scraped" });
+      const origin = (e.attrs.source as Candidate["origin"]) || "iptv_org";
+      add(slug, { verifyUrl: e.streamUrl, storeUrl: toPlayableUrl(e.streamUrl), origin });
       scrapedCount++;
     }
   }
 
   log(`  Candidates: ${storeCount} from list, ${backendCount} from backend, ${scrapedCount} scraped across ${candidateMap.size} channels`);
 
-  // Capture meta before releasing heavy stage 1-6 data. The 10K M3U entries,
-  // channel list, matches, credentials, and Reddit posts all live in main()
-  // scope — combined with the verifier's playlist buffers they exceed Node's
-  // 4 GB heap and get OOM-killed mid-verification.
-  const metaPosts = posts.length;
-  const metaCreds = credentials.length;
-  const metaM3u = m3uEntries.length;
-  const metaMatched = matches.length;
-  posts.length = 0;
-  credentials.length = 0;
+  // Release heavy stage 1-6 data before verification. The merged M3U entries,
+  // channel list, and matches all live in main() scope — combined with the
+  // verifier's playlist buffers they exceed Node's 4 GB heap and get OOM-killed.
   m3uEntries.length = 0;
   channels.length = 0;
   matches.length = 0;
@@ -279,10 +287,7 @@ async function main(): Promise<void> {
     meta: {
       generated_utc: now(),
       pipeline_version: 2,
-      reddit_posts_checked: metaPosts,
-      credentials_found: metaCreds,
-      m3u_streams_total: metaM3u,
-      channels_matched: metaMatched,
+      sources: sourceStats,
       streams_verified: totalVerified,
       vod_verified: 0,
     },

@@ -30,9 +30,9 @@ export interface VerifiedSource {
   verifiedUtc: string;
   /** First time this URL ever passed (ISO) — preserved across nightly runs. */
   firstSeenUtc?: string;
-  /** Where the link came from: the backend channel list, the Reddit scrape,
+  /** Where the link came from: the backend channel list, a specific source adapter,
    *  or carried over from a previous run's store. */
-  origin?: "backend" | "scraped" | "store";
+  origin?: "iptv_org" | "github" | "reddit" | "backend" | "store";
   /** Passed the liveness check (edge advanced over time) on the last run. Used to
    *  RANK (live-first) — NOT to delete: a flaky 9s snapshot must not drop a
    *  loadable link, or we'd remove currently-working channels. */
@@ -45,7 +45,7 @@ export interface Candidate {
   verifyUrl: string;
   /** Browser-playable URL to persist if the test passes. */
   storeUrl: string;
-  origin: "backend" | "scraped" | "store";
+  origin: "iptv_org" | "github" | "reddit" | "backend" | "store";
   /** Carried forward from a prior run, if this URL was already in the store. */
   firstSeenUtc?: string;
 }
@@ -70,10 +70,8 @@ export interface VerifiedMovie {
 export interface PipelineMeta {
   generated_utc: string;
   pipeline_version: number;
-  reddit_posts_checked: number;
-  credentials_found: number;
-  m3u_streams_total: number;
-  channels_matched: number;
+  /** Per-source breakdown: N entries ingested, N matched to channels, status. */
+  sources: Record<string, { entries: number; status: "ok" | "failed" }>;
   streams_verified: number;
   vod_verified: number;
   /** ISO timestamp of the last VOD scrape run (for incremental scoping). */

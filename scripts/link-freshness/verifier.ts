@@ -18,7 +18,7 @@ const LIVENESS_WAIT_MS = process.env.LIVENESS_WAIT_MS !== undefined
 // Hard wall-clock ceiling for the whole verify stage. Against dead hosts the
 // stage could otherwise run 10+ min and get SIGKILL'd (exit 137); this returns
 // whatever passed so far instead of being killed. Tune via VERIFY_BUDGET_MS.
-const VERIFY_BUDGET_MS = Number(process.env.VERIFY_BUDGET_MS) || 120_000;
+const VERIFY_BUDGET_MS = Number(process.env.VERIFY_BUDGET_MS) || 600_000;
 
 // Circuit breaker: once a host fails at the connection level (DNS/refused/timeout),
 // every other candidate on that same host is skipped instantly instead of paying

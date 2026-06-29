@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { useState, useEffect, useMemo } from "react";
 import { proxyFetch } from "@/lib/api";
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Play } from "lucide-react";
 import VideoPlayer from "@/components/VideoPlayer";
 import { providerName } from "@/lib/sources";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
@@ -16,6 +16,10 @@ export default function VodMoviePage() {
   const [detail, setDetail] = useState<VodDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [sourceIndex, setSourceIndex] = useState(0);
+  // Click-to-play gate: the embed iframe autoplays on mount no matter what allow/
+  // sandbox we set, so we DON'T mount it until the user taps play. Tracked by the
+  // source URL so switching sources re-gates (render-time derive, no setState-in-effect).
+  const [startedUrl, setStartedUrl] = useState<string | null>(null);
   // Clean direct HLS streams resolved on-demand (ad-free, played in our own
   // VideoPlayer). Empty until /api/vod-extract returns; embed is the fallback.
   const [resolved, setResolved] = useState<string[]>([]);
@@ -154,17 +158,31 @@ export default function VodMoviePage() {
             </div>
             <div className="rounded-xl overflow-hidden bg-black">
               {current.kind === "embed" ? (
-                <iframe
-                  src={current.url}
-                  allowFullScreen
-                  allow="fullscreen; encrypted-media; picture-in-picture"
-                  // Sandbox removed per request — the strict sandbox stopped some
-                  // providers from playing. Trade-off: popup/redirect ads can come
-                  // back; the "Open" hatch + source switcher remain the escape.
-                  className="w-full h-full aspect-video"
-                  style={{ border: "none" }}
-                  key={current.url}
-                />
+                startedUrl === current.url ? (
+                  <iframe
+                    src={current.url}
+                    allowFullScreen
+                    allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+                    // Mounted only after the user taps play, so this is a user-gesture
+                    // start (not autoplay). Sandbox stays off so providers play.
+                    className="w-full h-full aspect-video"
+                    style={{ border: "none" }}
+                    key={current.url}
+                  />
+                ) : (
+                  <button
+                    onClick={() => setStartedUrl(current.url)}
+                    className="relative w-full aspect-video bg-black flex items-center justify-center group"
+                    aria-label="Play"
+                  >
+                    {detail.backdrop && (
+                      <img src={detail.backdrop} alt="" className="absolute inset-0 w-full h-full object-cover opacity-40" />
+                    )}
+                    <span className="relative w-16 h-16 rounded-full bg-brand/90 flex items-center justify-center group-hover:scale-105 transition-transform">
+                      <Play className="w-8 h-8 text-white fill-white" />
+                    </span>
+                  </button>
+                )
               ) : (
                 <VideoPlayer
                   src={current.url}

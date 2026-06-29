@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { proxyFetch } from "@/lib/api";
 import Link from "next/link";
-import { ChevronLeft, ChevronDown } from "lucide-react";
+import { ChevronLeft, ChevronDown, Play } from "lucide-react";
 import VideoPlayer from "@/components/VideoPlayer";
 import { providerName } from "@/lib/sources";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
@@ -21,6 +21,9 @@ export default function VodSeriesPage() {
   // our own VideoPlayer). Keyed by "S-E". Empty/absent → embed iframe fallback.
   const [resolvedByEp, setResolvedByEp] = useState<Record<string, string[]>>({});
   const inFlight = useRef<Set<string>>(new Set());
+  // Click-to-play gate for embeds (they autoplay on mount otherwise). Tracks the
+  // started embed URL; switching source/episode re-gates. Render-time derive.
+  const [startedUrl, setStartedUrl] = useState<string | null>(null);
   // Seasons start COLLAPSED — tap a season header to expand its episodes.
   const [expandedSeasons, setExpandedSeasons] = useState<Record<number, boolean>>({});
   const toggleSeason = (n: number) =>
@@ -230,18 +233,31 @@ export default function VodSeriesPage() {
                           </div>
                           <div className="rounded-xl overflow-hidden bg-black">
                             {currentSource.kind === "embed" ? (
-                              <iframe
-                                src={currentSource.url}
-                                allowFullScreen
-                                allow="fullscreen; encrypted-media; picture-in-picture"
-                                // Sandbox removed per request — the strict sandbox
-                                // stopped some providers from playing. Trade-off:
-                                // popup/redirect ads can return; "Open" + the source
-                                // switcher remain the escape.
-                                className="w-full h-full aspect-video"
-                                style={{ border: "none" }}
-                                key={currentSource.url}
-                              />
+                              startedUrl === currentSource.url ? (
+                                <iframe
+                                  src={currentSource.url}
+                                  allowFullScreen
+                                  allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+                                  // Mounted only after a play tap = user-gesture start,
+                                  // not autoplay. Sandbox stays off so providers play.
+                                  className="w-full h-full aspect-video"
+                                  style={{ border: "none" }}
+                                  key={currentSource.url}
+                                />
+                              ) : (
+                                <button
+                                  onClick={() => setStartedUrl(currentSource.url)}
+                                  className="relative w-full aspect-video bg-black flex items-center justify-center group"
+                                  aria-label="Play"
+                                >
+                                  {ep.still_url && (
+                                    <img src={ep.still_url} alt="" className="absolute inset-0 w-full h-full object-cover opacity-40" />
+                                  )}
+                                  <span className="relative w-14 h-14 rounded-full bg-brand/90 flex items-center justify-center group-hover:scale-105 transition-transform">
+                                    <Play className="w-7 h-7 text-white fill-white" />
+                                  </span>
+                                </button>
+                              )
                             ) : (
                               <VideoPlayer
                                 src={currentSource.url}
