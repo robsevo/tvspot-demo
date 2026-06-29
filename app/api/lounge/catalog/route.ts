@@ -193,6 +193,53 @@ async function fetchDiscover(
   return items;
 }
 
+/**
+ * Per-title US/CA-English check via TMDB details (cached 24h). The discover
+ * allowlist only covers the ~top popular/top-rated titles, so genuine but
+ * lower-profile US/CA English titles get wrongly dropped. The backend catalog
+ * items carry NO language/country metadata, so we resolve it from TMDB by id:
+ * keep original_language === "en" AND origin/production country in {US, CA}.
+ */
+async function fetchTitleUsCaEn(kind: "movie" | "tv", id: number): Promise<boolean> {
+  const tmdbToken = process.env.TMDB_ACCESS_TOKEN;
+  if (!tmdbToken || !id) return false;
+  try {
+    const r = await fetch(`https://api.themoviedb.org/3/${kind}/${id}?language=en-US`, {
+      headers: { Authorization: `Bearer ${tmdbToken}` },
+      next: { revalidate: 86400 },
+    });
+    if (!r.ok) return false;
+    const d = await r.json();
+    if (d.original_language !== "en") return false;
+    const countries: string[] = [
+      ...(d.origin_country || []),
+      ...((d.production_countries || []).map((c: any) => c.iso_3166_1)),
+    ];
+    return countries.includes("US") || countries.includes("CA");
+  } catch {
+    return false;
+  }
+}
+
+/** Keep US/CA-English titles: fast-path the discover allowlist, then confirm the
+ *  rest individually against TMDB (so we don't drop non-hit US/CA English titles).
+ *  Bounded concurrency keeps the cold-cache TMDB burst civil. */
+async function filterUsCaEn(items: any[], kind: "movie" | "tv", allow: Set<number>): Promise<any[]> {
+  const out: any[] = [];
+  const toCheck: any[] = [];
+  for (const it of items) {
+    if (it.service === "Popular Movies" || it.service === "Popular Series" || allow.has(it.tmdb_id)) out.push(it);
+    else toCheck.push(it);
+  }
+  const CONC = 24;
+  for (let i = 0; i < toCheck.length; i += CONC) {
+    const batch = toCheck.slice(i, i + CONC);
+    const ok = await Promise.all(batch.map((it) => fetchTitleUsCaEn(kind, it.tmdb_id)));
+    batch.forEach((it, j) => { if (ok[j]) out.push(it); });
+  }
+  return out;
+}
+
 export async function GET(request: NextRequest) {
   const service = request.nextUrl.searchParams.get("service");
   const trending = request.nextUrl.searchParams.get("trending");
@@ -281,8 +328,13 @@ export async function GET(request: NextRequest) {
     ]);
     applyRegionScores(normalized.movies || [], movieRegion.scores);
     applyRegionScores(normalized.series || [], seriesRegion.scores);
-    normalized.movies = (normalized.movies || []).filter((m: any) => isUsCa(m, movieRegion.allow));
-    normalized.series = (normalized.series || []).filter((s: any) => isUsCa(s, seriesRegion.allow));
+    // Keep ALL US/CA-English titles (not just the popularity allowlist): confirm
+    // the long tail against TMDB by id. This is what lifts a service from ~67 to
+    // the full set of its genuine US/CA English titles.
+    [normalized.movies, normalized.series] = await Promise.all([
+      filterUsCaEn(normalized.movies || [], "movie", movieRegion.allow),
+      filterUsCaEn(normalized.series || [], "tv", seriesRegion.allow),
+    ]);
 
     return NextResponse.json(normalized);
   }

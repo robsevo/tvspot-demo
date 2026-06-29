@@ -77,17 +77,6 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [classicMovies, classicTv] = await Promise.all([
-      fetch(
-        "https://api.themoviedb.org/3/discover/movie?language=en-US&with_original_language=en&sort_by=vote_count.desc&vote_count.gte=2000&release_date.lte=2009-12-31&page=1",
-        { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } },
-      ).then((r) => r.json()).catch(() => ({ results: [] })),
-      fetch(
-        "https://api.themoviedb.org/3/discover/tv?language=en-US&with_original_language=en&sort_by=vote_count.desc&vote_count.gte=500&first_air_date.lte=2009-12-31&page=1",
-        { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } },
-      ).then((r) => r.json()).catch(() => ({ results: [] })),
-    ]);
-
     const mapItem = (m: any, kind: "movie" | "series") => ({
       tmdb_id: m.id,
       title: m.title || m.name,
@@ -102,9 +91,42 @@ export async function GET(request: NextRequest) {
       popularity: m.popularity,
     });
 
+    const get = (url: string) =>
+      fetch(url, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` }, next: { revalidate: 86400 } })
+        .then((r) => r.json())
+        .then((d) => d.results || [])
+        .catch(() => []);
+
+    // US/CA English, 1980–2009. Multiple axes + a dedicated COMEDY pass so beloved
+    // comedies (Austin Powers, American Pie, The Mask, Me, Myself & Irene) surface —
+    // a single vote_count.desc page only returned prestige blockbusters and missed
+    // the comedies entirely.
+    const M = "https://api.themoviedb.org/3/discover/movie?language=en-US&with_original_language=en&with_origin_country=US%7CCA&release_date.gte=1980-01-01&release_date.lte=2009-12-31";
+    const TV = "https://api.themoviedb.org/3/discover/tv?language=en-US&with_original_language=en&with_origin_country=US%7CCA&first_air_date.gte=1980-01-01&first_air_date.lte=2009-12-31";
+    const movieReqs = [
+      ...[1, 2, 3].map((p) => get(`${M}&sort_by=popularity.desc&vote_count.gte=500&page=${p}`)),
+      ...[1, 2].map((p) => get(`${M}&sort_by=vote_count.desc&vote_count.gte=1000&page=${p}`)),
+      ...[1, 2, 3].map((p) => get(`${M}&with_genres=35&sort_by=popularity.desc&vote_count.gte=300&page=${p}`)), // comedy
+    ];
+    const tvReqs = [
+      ...[1, 2].map((p) => get(`${TV}&sort_by=popularity.desc&vote_count.gte=200&page=${p}`)),
+      get(`${TV}&sort_by=vote_count.desc&vote_count.gte=400&page=1`),
+    ];
+
+    const dedupeSorted = (pages: any[][], kind: "movie" | "series") => {
+      const seen = new Set<number>();
+      const out: any[] = [];
+      for (const page of pages) for (const m of page) {
+        if (m.id && !seen.has(m.id)) { seen.add(m.id); out.push(mapItem(m, kind)); }
+      }
+      return out.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+    };
+
+    const [moviePages, tvPages] = await Promise.all([Promise.all(movieReqs), Promise.all(tvReqs)]);
+
     return NextResponse.json({
-      movies: (classicMovies.results || []).slice(0, 30).map((m: any) => mapItem(m, "movie")),
-      series: (classicTv.results || []).slice(0, 30).map((s: any) => mapItem(s, "series")),
+      movies: dedupeSorted(moviePages, "movie").slice(0, 80),
+      series: dedupeSorted(tvPages, "series").slice(0, 60),
       source: "tmdb",
     });
   } catch {

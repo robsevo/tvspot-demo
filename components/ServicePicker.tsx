@@ -2,6 +2,15 @@
 
 import { useCatalog } from "@/hooks/useCatalog";
 import { LogoImage } from "./LogoImage";
+import { Award, Clapperboard, LayoutGrid, type LucideIcon } from "lucide-react";
+
+/** Virtual (non-provider) services get a lucide icon instead of a brand logo,
+ *  which would otherwise fall through to ugly letter-initials. */
+const VIRTUAL_ICONS: Record<string, LucideIcon> = {
+  Classics: Award,
+  Theater: Clapperboard,
+  Other: LayoutGrid,
+};
 
 const serviceColors: Record<string, string> = {
   "Netflix": "from-violet-800 to-violet-950",
@@ -66,7 +75,11 @@ export default function ServicePicker({ onSelectAction }: { onSelectAction: (ser
             {/* Content */}
             <div className="relative z-10 p-4 flex flex-col justify-between h-full">
               <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center backdrop-blur-sm overflow-hidden p-1.5">
-                <LogoImage name={service} className="w-full h-full object-contain" />
+                {VIRTUAL_ICONS[service] ? (
+                  (() => { const Icon = VIRTUAL_ICONS[service]; return <Icon className="w-5 h-5 text-white" />; })()
+                ) : (
+                  <LogoImage name={service} className="w-full h-full object-contain" />
+                )}
               </div>
               <div>
                 <span className="text-white text-sm font-bold block leading-tight drop-shadow">{service}</span>
