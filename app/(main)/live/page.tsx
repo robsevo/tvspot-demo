@@ -13,7 +13,7 @@ import { Tv, CalendarDays } from "lucide-react";
 import type { EpgResponse } from "@/lib/types";
 
 const HOUR_WIDTH = 240; // pixels per hour
-const NOW_COLOR = "#5B21B6";
+const NOW_COLOR = "#38bdf8";
 
 const categoryTabs = ["All", "Sports", "Entertainment", "Movies", "News", "Kids", "Music", "Lifestyle"];
 
@@ -198,7 +198,7 @@ export default function LivePage() {
       {/* Header */}
       <div className="px-4 mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-3xl bg-gradient-to-br from-brand to-cyan-400 flex items-center justify-center hud-glow">
+          <div className="w-9 h-9 rounded-3xl bg-[#132840] flex items-center justify-center">
             <Tv className="w-4 h-4 text-white" />
           </div>
           <div>
@@ -214,8 +214,8 @@ export default function LivePage() {
             <CalendarDays className="w-4 h-4" />
             Events
           </Link>
-          <div className="flex items-center gap-1.5 text-brand text-xs font-medium bg-brand/10 px-2.5 py-1 rounded-xl">
-            <span className="w-1.5 h-1.5 rounded-xl bg-brand live-dot" />
+          <div className="flex items-center gap-1.5 text-cyan-400 text-xs font-medium bg-cyan-400/10 px-2.5 py-1 rounded-xl">
+            <span className="w-1.5 h-1.5 rounded-xl bg-cyan-400 live-dot" />
             <span>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
           </div>
         </div>
@@ -232,7 +232,7 @@ export default function LivePage() {
               onClick={() => setActiveCat(cat)}
               className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all ${
                 activeCat === cat
-                  ? "brand-sheen text-white hud-glow"
+                  ? "bg-[#1a3050] text-white ring-1 ring-white/10"
                   : "glass-card text-text-secondary hover:text-white"
               }`}
             >
@@ -249,7 +249,7 @@ export default function LivePage() {
           onClick={() => setSelectedGameId(null)}
           className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all ${
             !selectedEntry
-              ? "brand-sheen text-white hud-glow"
+              ? "bg-[#1a3050] text-white ring-1 ring-white/10"
               : "glass-card text-text-secondary hover:text-white"
           }`}
         >
@@ -275,7 +275,7 @@ export default function LivePage() {
                 title={`${game.away.name} vs ${game.home.name}`}
                 className={`flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ring-1 ${
                   active
-                    ? `brand-sheen text-white hud-glow ${s.ring}`
+                    ? `bg-[#1a3050] text-white ring-1 ring-white/10 ${s.ring}`
                     : `glass-card ${s.ring} text-text-secondary hover:text-white`
                 }`}
               >
@@ -321,7 +321,7 @@ export default function LivePage() {
                       fallbackClassName="text-gray-800"
                     />
                     {/* Smoked-glass casing — frosted gradient + violet underglow */}
-                    <div className="absolute inset-0 rounded-lg pointer-events-none bg-gradient-to-br from-white/15 via-transparent to-brand/30 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_-2px_3px_rgba(91,33,182,0.22)] ring-1 ring-white/10" />
+                    <div className="absolute inset-0 rounded-lg pointer-events-none bg-gradient-to-br from-white/15 via-transparent to-cyan-500/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_-2px_3px_rgba(56,189,248,0.22)] ring-1 ring-white/10" />
                     {ch.online && (
                       <div className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-500 ring-1 ring-white" />
                     )}
@@ -362,9 +362,9 @@ export default function LivePage() {
               {/* Now line on ruler */}
               <div
                 className="absolute top-0 bottom-0 w-0.5 z-20"
-                style={{ left: nowOffset, backgroundColor: NOW_COLOR, boxShadow: "0 0 8px rgba(91,33,182,0.6)" }}
+                style={{ left: nowOffset, backgroundColor: NOW_COLOR, boxShadow: "0 0 8px rgba(56,189,248,0.6)" }}
               >
-                <div className="absolute -top-0 left-1/2 -translate-x-1/2 brand-sheen text-white text-[8px] px-1.5 py-0.5 rounded-b font-bold hud-glow">
+                <div className="absolute -top-0 left-1/2 -translate-x-1/2 bg-[#1a3050] text-cyan-300 text-[8px] px-1.5 py-0.5 rounded-b font-bold ring-1 ring-cyan-400/30">
                   NOW
                 </div>
               </div>
