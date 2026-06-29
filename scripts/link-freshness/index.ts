@@ -62,7 +62,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 /** Per-channel cap on scraped candidates fed into verification. */
-const MAX_SCRAPED_PER_CHANNEL = 10;
+const MAX_SCRAPED_PER_CHANNEL = 6;
 
 function now(): string {
   return new Date().toISOString();
@@ -143,6 +143,9 @@ async function main(): Promise<void> {
   }
   log(`  Merged: ${m3uEntries.length} unique streams from ${sourceAdapters.length} sources`);
 
+  // Release adapter result arrays — the merged m3uEntries is all we need now.
+  results.length = 0;
+
   // Stage 4: Fetch example.com channels (the links currently on site).
   log("Stage 4: Fetching example.com channels...");
   let channels: Awaited<ReturnType<typeof fetchChannels>> = [];
@@ -220,6 +223,12 @@ async function main(): Promise<void> {
   channels.length = 0;
   matches.length = 0;
 
+  // candidateMap holds only Candidate strings (verifyUrl/storeUrl/origin), never
+  // the heavy M3uEntry objects — those became unreachable when m3uEntries/matches
+  // were cleared above. Hint a GC so they're reclaimed before the memory-heavier
+  // verification stage. Requires --expose-gc; a harmless no-op otherwise.
+  if (typeof gc === "function") gc();
+
   // Stage 7: Re-test every candidate; keep the working ones (best-first, ≤6).
   log("Stage 7: Verifying candidates (this may take a while)...");
   let verified: Awaited<ReturnType<typeof verifyCandidateMap>>;
@@ -275,10 +284,42 @@ async function main(): Promise<void> {
     };
   }
 
+  // Persistence / grace window. relay.example.com routinely 403s healthy streams
+  // for 30-40s, so a channel can fail THIS run yet be perfectly live — dropping
+  // it makes the published list thrash DOWN on every transient blip (one refresh
+  // just shrank it 26 → 21). Carry forward any channel that verified within
+  // GRACE_DAYS but produced nothing this run, keeping its last-known-good active
+  // sources, so the list only grows as more channels get a clean verification.
+  // Genuinely-dead channels age out once they've failed for the whole window.
+  const GRACE_DAYS = 3;
+  const GRACE_MS = GRACE_DAYS * 24 * 60 * 60 * 1000;
+  const nowMs = Date.now();
+  let carriedChannels = 0;
+  if (existing?.channels) {
+    for (const [slug, vc] of Object.entries(existing.channels)) {
+      if (channelsSection[slug]) continue; // already (re)verified fresh this run
+      const fresh = (vc.sources || []).filter((s) => {
+        const t = Date.parse(s.verifiedUtc || s.firstSeenUtc || "");
+        return Number.isFinite(t) && nowMs - t < GRACE_MS;
+      });
+      if (!fresh.length) continue; // nothing recent enough — let it age out
+      channelsSection[slug] = {
+        name: vc.name,
+        sources: fresh,
+        ...(vc.waiting?.length ? { waiting: vc.waiting } : {}),
+      };
+      activeTotal += fresh.length;
+      carriedChannels++;
+    }
+  }
+  if (carriedChannels) {
+    log(`  Carried ${carriedChannels} recently-verified channels forward (blipped this run, within ${GRACE_DAYS}d)`);
+  }
+
   log(`  Active ${activeTotal} (≤5/ch) + waiting ${waitingTotal} across ${Object.keys(channelsSection).length} channels`);
 
-  // Release heavy stage 7 data before VOD — verified Map holds all tier results,
-  // candidateMap holds 400+ candidates with metadata. VOD needs its own heap room.
+  // Release heavy stage 7 data before VOD — verified holds all tier results,
+  // candidateMap holds the candidate metadata. VOD needs its own heap room.
   verified.clear();
   candidateMap.clear();
   nameBySlug.clear();
