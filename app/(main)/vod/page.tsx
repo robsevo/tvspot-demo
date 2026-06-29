@@ -173,7 +173,7 @@ export default function VodPage() {
                     onClick={() => setSelectedGenre(genre)}
                     className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
                       selectedGenre === genre
-                        ? "bg-brand text-white hud-glow"
+                        ? "brand-sheen text-white hud-glow"
                         : "glass-card text-text-secondary hover:text-white"
                     }`}
                   >

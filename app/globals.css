@@ -2,9 +2,12 @@
 
 @theme inline {
   --color-brand: #5B21B6;
+  /* Logo's second color — cyan. The brand IS the violet→cyan logo gradient, so
+     accents pair violet with this cyan instead of being purple-dominant. */
+  --color-accent: #22d3ee;
   --color-surface: #0a0a0a;
   --color-card: #181818;
-  --color-header: #0d0415;
+  --color-header: #080a16;
   --color-text-primary: #ffffff;
   --color-text-secondary: #b3b3b3;
   --color-text-muted: #808080;
@@ -166,9 +169,9 @@ video::-webkit-media-controls { display: none !important; }
   background: linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.6) 50%, transparent 100%);
 }
 
-/* Genre gradient for VOD detail — violet with a tad of indigo/blue to match. */
+/* Genre gradient for VOD detail — the logo's violet → cyan wash. */
 .genre-gradient {
-  background: linear-gradient(135deg, rgba(91,33,182,0.15) 0%, rgba(79,70,229,0.10) 45%, transparent 100%);
+  background: linear-gradient(135deg, rgba(91,33,182,0.18) 0%, rgba(34,211,238,0.12) 55%, transparent 100%);
 }
 
 /* Smooth in-page scrolling (rail arrows, anchor jumps) */
@@ -223,17 +226,17 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
   100% { background-position: 200% 50%; }
 }
 .brand-sheen {
-  /* Violet stays dominant, with an indigo/blue stop so accents pick up the logo's
-     blue (the logo gradient is brand→cyan). Just a tad — purple still rules. */
-  background: linear-gradient(110deg, #5B21B6, #7c3aed, #4f46e5, #8b5cf6, #5B21B6);
+  /* THE logo gradient, animated: violet → cyan. This is the site's signature
+     accent — violet and cyan share the spotlight (not purple-dominant). */
+  background: linear-gradient(110deg, #5B21B6, #4338ca, #22d3ee, #4338ca, #5B21B6);
   background-size: 200% 100%;
   animation: brandSheen 3s linear infinite;
 }
 
 /* Soft neon ring for "now/live" emphasis — uses brand color, opt-in. */
 @keyframes neonPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(91,33,182,0.45); }
-  50% { box-shadow: 0 0 0 4px rgba(91,33,182,0.0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34,211,238,0.45); }
+  50% { box-shadow: 0 0 0 4px rgba(34,211,238,0.0); }
 }
 .neon-pulse { animation: neonPulse 2s ease-in-out infinite; }
 
@@ -259,10 +262,12 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
    ════════════════════════════════════════════════════════════════════════ */
 :root {
   --br: 91; --bg: 33; --bb: 182;            /* brand violet rgb (violet-800) */
-  --hud-corner: rgba(91,33,182,0.55);
-  --hud-glow-sm: 0 0 8px rgba(91,33,182,0.40);
-  --hud-glow-md: 0 0 18px rgba(91,33,182,0.35);
-  --hud-glow-lg: 0 0 36px rgba(91,33,182,0.25);
+  /* Glows lean BLUE/cyan (logo's second color) so the UI reads violet+cyan, not
+     purple-dominant. Sky-400 (56,189,248) sits between the logo's violet & cyan. */
+  --hud-corner: rgba(56,189,248,0.55);
+  --hud-glow-sm: 0 0 8px rgba(56,189,248,0.40);
+  --hud-glow-md: 0 0 18px rgba(56,189,248,0.35);
+  --hud-glow-lg: 0 0 36px rgba(56,189,248,0.25);
   --hud-grid:
     repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 34px),
     repeating-linear-gradient(90deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 34px);
@@ -303,8 +308,8 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 
 /* Live pulse — red glowing dot/border for "LIVE"/now. */
 @keyframes livePulseRed {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(91,33,182,0.55); }
-  50%      { box-shadow: 0 0 0 5px rgba(91,33,182,0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34,211,238,0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(34,211,238,0); }
 }
 .live-dot { animation: livePulseRed 1.8s ease-in-out infinite; }
 
@@ -320,7 +325,7 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 
 /* Brand glow utility for accent chips/headers. */
 .hud-glow { box-shadow: var(--hud-glow-sm); }
-.hud-text-glow { text-shadow: 0 0 14px rgba(91,33,182,0.5); }
+.hud-text-glow { text-shadow: 0 0 14px rgba(56,189,248,0.55); }
 
 /* Shimmer skeleton in brand tint (loading states feel intentional). */
 @keyframes hudShimmer { 0% { background-position: -150% 0; } 100% { background-position: 150% 0; } }

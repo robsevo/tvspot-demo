@@ -384,7 +384,7 @@ export default function LivePage() {
                       {is247 ? (
                         <Link
                           href={`/live/${channelSlug(ch.name)}`}
-                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-gradient-to-r from-brand/45 to-violet-500/20 ring-1 ring-violet-400/50 flex items-center px-3"
+                          className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-gradient-to-r from-brand/45 to-cyan-500/25 ring-1 ring-cyan-400/40 flex items-center px-3"
                         >
                           <span className="text-[11px] truncate font-medium text-white">
                             24 hour {ch.name.replace(/^24\/7\s+/i, "")}
@@ -406,7 +406,7 @@ export default function LivePage() {
                                 href={`/live/${channelSlug(ch.name)}`}
                                 className={`rounded-md flex items-center px-2 overflow-hidden ${
                                   isNow
-                                    ? "bg-gradient-to-r from-brand/45 to-violet-500/20 ring-1 ring-violet-400/50 z-10"
+                                    ? "bg-gradient-to-r from-brand/45 to-cyan-500/25 ring-1 ring-cyan-400/40 z-10"
                                     : "bg-card/70 hover:bg-card"
                                 }`}
                                 style={{

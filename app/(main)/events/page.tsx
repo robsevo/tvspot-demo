@@ -28,7 +28,7 @@ function TeamRow({ name, logo, score, dim }: { name: string; logo?: string; scor
     <div className="flex items-center gap-2 min-w-0">
       {logo ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={logo} alt="" loading="lazy" referrerPolicy="no-referrer" className="w-6 h-6 object-contain flex-shrink-0" />
+        <img src={logo} alt="" loading="lazy" referrerPolicy="no-referrer" className="w-6 h-6 object-contain flex-shrink-0 rounded-md" />
       ) : (
         <span className="w-6 h-6 rounded-full bg-card flex-shrink-0" />
       )}
@@ -109,7 +109,7 @@ function LeagueSection({ league, channels }: { league: LeagueEvents; channels: R
     <section className="mb-6">
       <div className="flex items-center gap-2 px-4 mb-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={league.logo} alt="" loading="lazy" referrerPolicy="no-referrer" className="w-6 h-6 object-contain" />
+        <img src={league.logo} alt="" loading="lazy" referrerPolicy="no-referrer" className="w-6 h-6 object-contain rounded-md" />
         <h2 className="text-white text-[15px] font-bold tracking-tight">{league.name}</h2>
         <span className="text-text-muted text-[11px]">{league.games.length}</span>
       </div>
