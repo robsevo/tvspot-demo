@@ -18,7 +18,7 @@ const LIVENESS_WAIT_MS = process.env.LIVENESS_WAIT_MS !== undefined
 // Hard wall-clock ceiling for the whole verify stage. Against dead hosts the
 // stage could otherwise run 10+ min and get SIGKILL'd (exit 137); this returns
 // whatever passed so far instead of being killed. Tune via VERIFY_BUDGET_MS.
-const VERIFY_BUDGET_MS = Number(process.env.VERIFY_BUDGET_MS) || 600_000;
+const VERIFY_BUDGET_MS = Number(process.env.VERIFY_BUDGET_MS) || 1_200_000; // 20 min — enough to verify ~90 channels incl. liveness probes
 
 // Circuit breaker, STRIKE-TOLERANT. Skipping a host after a single connection
 // blip used to drop ~65 live channels at once: Origin's 94 channels share just 3
