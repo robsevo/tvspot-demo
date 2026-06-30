@@ -131,6 +131,21 @@ export default function VodMoviePage() {
         </div>
         <p className="text-text-secondary text-sm mb-4">{detail.overview}</p>
 
+        {/* No source yet: show resolving feedback (gap titles take ~10-13s via the
+            ad-free provider-a resolver) or an honest message — never a blank screen. */}
+        {sources.length === 0 && (
+          <div className="mb-6 rounded-xl bg-black/40 aspect-video flex items-center justify-center">
+            {resolving ? (
+              <span className="text-text-muted text-xs flex items-center gap-2">
+                <span className="w-4 h-4 rounded-full border-2 border-white/15 border-t-brand animate-spin" />
+                finding clean stream…
+              </span>
+            ) : (
+              <span className="text-text-muted text-xs">No source available for this title</span>
+            )}
+          </div>
+        )}
+
         {sources.length > 0 && (
           <div className="mb-6">
             <h2 className="text-white text-sm font-semibold mb-2 flex items-center gap-2">

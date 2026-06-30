@@ -159,11 +159,18 @@ export default function VodSeriesPage() {
                       ].slice(0, 6);
                       const epSrcIdx = Math.min(episodeSourceIdx[epKey] ?? 0, Math.max(0, sources.length - 1));
                       const currentSource = sources[epSrcIdx];
-                      const hasSources = sources.length > 0;
+                      // Clean streams resolve on-demand when the row is tapped, so the
+                      // WHOLE row is always tappable — no source needs to pre-exist
+                      // (vidlink, the old always-present fallback, is gone).
                       return (
                       <div key={i}>
-                      <div
-                        className="flex items-center gap-3 glass-card rounded-xl px-3 py-2.5"
+                      <button
+                        onClick={() => {
+                          const opening = !isPlaying;
+                          setPlayingEpisode(isPlaying ? null : epKey);
+                          if (opening) resolveEpisode(epKey, season.season_number, ep.episode_number);
+                        }}
+                        className="w-full flex items-center gap-3 glass-card rounded-xl px-3 py-2.5 text-left hover:bg-card/60 transition-colors"
                       >
                         {ep.still_url ? (
                           <img
@@ -188,21 +195,24 @@ export default function VodSeriesPage() {
                             </p>
                           )}
                         </div>
-                        {hasSources && (
-                          <button
-                            onClick={() => {
-                              const opening = !isPlaying;
-                              setPlayingEpisode(isPlaying ? null : epKey);
-                              if (opening) resolveEpisode(epKey, season.season_number, ep.episode_number);
-                            }}
-                            className="flex-shrink-0 w-7 h-7 rounded-full bg-brand/20 flex items-center justify-center hover:bg-brand/40 transition-colors"
-                          >
-                            <svg className="w-3.5 h-3.5 text-brand" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M8 5v14l11-7z"/>
-                            </svg>
-                          </button>
-                        )}
-                      </div>
+                        <span className="flex-shrink-0 w-7 h-7 rounded-full bg-brand/20 flex items-center justify-center">
+                          <svg className={`w-3.5 h-3.5 text-brand transition-transform ${isPlaying ? "rotate-90" : ""}`} fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z"/>
+                          </svg>
+                        </span>
+                      </button>
+                      {isPlaying && !currentSource && (
+                        <div className="mt-2 rounded-xl bg-black/40 aspect-video flex items-center justify-center">
+                          {resolvedByEp[epKey] === undefined ? (
+                            <span className="text-text-muted text-xs flex items-center gap-2">
+                              <span className="w-4 h-4 rounded-full border-2 border-white/15 border-t-brand animate-spin" />
+                              finding clean stream…
+                            </span>
+                          ) : (
+                            <span className="text-text-muted text-xs">No source for this episode</span>
+                          )}
+                        </div>
+                      )}
                       {isPlaying && currentSource && (
                         <div className="mt-2 space-y-2">
                           {/* Source switcher + open-in-new-tab escape hatch */}
