@@ -14,7 +14,11 @@ export async function middleware(request: NextRequest) {
     // when installing to the home screen (no auth cookie at that point).
     pathname.startsWith("/icon-") ||
     pathname.startsWith("/apple-icon") ||
-    pathname === "/manifest.webmanifest"
+    pathname === "/manifest.webmanifest" ||
+    // Public root static assets (the TVSpot logo etc.) must load on the LOGIN page,
+    // where there's no auth cookie — otherwise the <img> request gets redirected to
+    // /login (HTML) and renders as a broken image.
+    pathname.endsWith(".svg")
   ) {
     return NextResponse.next();
   }
