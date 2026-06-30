@@ -80,6 +80,25 @@ const PROVIDER_NAMES: Record<string, string> = {
   "vidsrc.cc": "VidSrc",
 };
 
+/**
+ * Embed providers we refuse to surface. Vidlink (vidlink.pro) is pulled per the
+ * "take out vidlink" call — its in-iframe ad overlays survive our sandboxing and
+ * the clean direct-stream resolver (provider-a via Origin + IPTV) now covers its slot.
+ */
+const BLOCKED_EMBED_HOSTS = new Set(["vidlink.pro"]);
+
+/** Drop blocked embed providers (e.g. vidlink) from a backend embed_urls list. */
+export function filterEmbeds(urls: string[] | undefined | null): string[] {
+  return (urls || []).filter((u) => {
+    try {
+      const host = new URL(u).hostname.replace(/^www\./, "").toLowerCase();
+      return !BLOCKED_EMBED_HOSTS.has(host);
+    } catch {
+      return false;
+    }
+  });
+}
+
 /** Human-friendly provider name for an embed URL, e.g. "Vidlink". */
 export function providerName(url: string): string {
   try {

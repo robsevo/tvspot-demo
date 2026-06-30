@@ -6,7 +6,7 @@ import { proxyFetch } from "@/lib/api";
 import Link from "next/link";
 import { ChevronLeft, ChevronDown, Play } from "lucide-react";
 import VideoPlayer from "@/components/VideoPlayer";
-import { providerName } from "@/lib/sources";
+import { providerName, filterEmbeds } from "@/lib/sources";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { ExternalLink } from "lucide-react";
 import type { SeriesDetail } from "@/lib/types";
@@ -150,12 +150,12 @@ export default function VodSeriesPage() {
                           kind: "stream" as const,
                           label: `Source ${n + 1}`,
                         })).slice(0, 4),
-                        ...(ep.embed_urls ?? []).map((url) => ({
+                        ...filterEmbeds(ep.embed_urls).map((url) => ({
                           url,
                           kind: "embed" as const,
                           label: providerName(url),
                         })),
-                      ].slice(0, 5);
+                      ].slice(0, 6);
                       const epSrcIdx = Math.min(episodeSourceIdx[epKey] ?? 0, Math.max(0, sources.length - 1));
                       const currentSource = sources[epSrcIdx];
                       const hasSources = sources.length > 0;

@@ -6,7 +6,7 @@ import { proxyFetch } from "@/lib/api";
 import Link from "next/link";
 import { ChevronLeft, Play } from "lucide-react";
 import VideoPlayer from "@/components/VideoPlayer";
-import { providerName } from "@/lib/sources";
+import { providerName, filterEmbeds } from "@/lib/sources";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { ExternalLink } from "lucide-react";
 import type { VodDetail } from "@/lib/types";
@@ -64,10 +64,10 @@ export default function VodMoviePage() {
     const streams = (detail?.stream_urls ?? []).map((url, i) => ({
       url, kind: "stream" as const, label: `Source ${i + 1}`,
     }));
-    const embeds = (detail?.embed_urls ?? []).map((url) => ({
+    const embeds = filterEmbeds(detail?.embed_urls).map((url) => ({
       url, kind: "embed" as const, label: providerName(url),
     }));
-    return [...clean, ...streams.slice(0, 4), ...embeds].slice(0, 5);
+    return [...clean, ...streams.slice(0, 4), ...embeds].slice(0, 6);
   }, [detail, resolved]);
   const idx = Math.min(sourceIndex, Math.max(0, sources.length - 1));
   const current = sources[idx];
