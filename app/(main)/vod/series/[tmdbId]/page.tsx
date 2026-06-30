@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ChevronLeft, ChevronDown, Play } from "lucide-react";
 import VideoPlayer from "@/components/VideoPlayer";
 import { providerName, filterEmbeds } from "@/lib/sources";
+import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { ExternalLink } from "lucide-react";
 import type { SeriesDetail } from "@/lib/types";
@@ -36,15 +37,15 @@ export default function VodSeriesPage() {
     (epKey: string, season: number, episode: number) => {
       if (!tmdbId) return;
       if (resolvedByEp[epKey] !== undefined || inFlight.current.has(epKey)) return;
+      // Instant if a poster prewarm already resolved this episode (S1E1).
+      const warm = getPrewarmed("series", tmdbId, season, episode);
+      if (warm) {
+        setResolvedByEp((prev) => ({ ...prev, [epKey]: warm }));
+        return;
+      }
       inFlight.current.add(epKey);
-      fetch(`/api/vod-extract?type=tv&tmdb=${tmdbId}&s=${season}&e=${episode}`)
-        .then((r) => (r.ok ? r.json() : { stream_urls: [] }))
-        .then((d) =>
-          setResolvedByEp((prev) => ({
-            ...prev,
-            [epKey]: Array.isArray(d?.stream_urls) ? d.stream_urls : [],
-          })),
-        )
+      resolveVod("series", tmdbId, season, episode)
+        .then((urls) => setResolvedByEp((prev) => ({ ...prev, [epKey]: urls })))
         .catch(() => setResolvedByEp((prev) => ({ ...prev, [epKey]: [] })))
         .finally(() => inFlight.current.delete(epKey));
     },

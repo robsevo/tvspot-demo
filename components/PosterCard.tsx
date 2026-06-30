@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Film, Play } from "lucide-react";
+import { prewarmVod } from "@/lib/vodPrewarm";
 
 interface Props {
   tmdbId: number;
@@ -31,9 +32,16 @@ export default function PosterCard({ tmdbId, title, poster, kind }: Props) {
     ? `/vod/series/${tmdbId}`
     : `/vod/movie/${tmdbId}`;
 
+  // Prewarm the clean-stream resolve the moment the user shows intent (press on
+  // mobile, hover on desktop), so the 10-13s provider-a resolve is already running —
+  // or done — by the time the detail page mounts. Fire-and-forget + deduped.
+  const prewarm = () => prewarmVod(kind, tmdbId);
+
   return (
     <Link
       href={href}
+      onPointerDown={prewarm}
+      onPointerEnter={prewarm}
       className="block w-full group focus:outline-none focus:ring-1 focus:ring-brand/50 rounded-md"
     >
       <div className="hud-card hud-corners relative aspect-[2/3] rounded-lg overflow-hidden bg-card ring-1 ring-white/5">

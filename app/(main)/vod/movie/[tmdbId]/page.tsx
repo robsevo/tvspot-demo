@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ChevronLeft, Play } from "lucide-react";
 import VideoPlayer from "@/components/VideoPlayer";
 import { providerName, filterEmbeds } from "@/lib/sources";
+import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { ExternalLink } from "lucide-react";
 import type { VodDetail } from "@/lib/types";
@@ -34,18 +35,25 @@ export default function VodMoviePage() {
       .finally(() => setLoading(false));
   }, [tmdbId]);
 
-  // Resolve a clean direct stream in parallel with the detail fetch.
+  // Resolve a clean direct stream in parallel with the detail fetch. Goes through
+  // the shared prewarm cache: if a poster press/hover already resolved this title
+  // it paints instantly; otherwise it dedupes onto the in-flight request so we
+  // never double-resolve.
   useEffect(() => {
     if (!tmdbId) return;
     let cancelled = false;
+    const warm = getPrewarmed("movie", tmdbId);
+    if (warm) {
+      setResolved(warm);
+      setResolving(false);
+      return;
+    }
     setResolving(true);
     setResolved([]);
-    fetch(`/api/vod-extract?type=movie&tmdb=${tmdbId}`)
-      .then((r) => (r.ok ? r.json() : { stream_urls: [] }))
-      .then((d) => {
-        if (!cancelled) setResolved(Array.isArray(d?.stream_urls) ? d.stream_urls : []);
+    resolveVod("movie", tmdbId)
+      .then((urls) => {
+        if (!cancelled) setResolved(urls);
       })
-      .catch(() => {})
       .finally(() => {
         if (!cancelled) setResolving(false);
       });

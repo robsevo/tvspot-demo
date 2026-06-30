@@ -10,6 +10,7 @@ import { useChannels } from "@/hooks/useChannels";
 import { channelSlug } from "@/lib/sources";
 import { carrierForLeague } from "@/lib/leagues";
 import { curate, trendingScore, trendingNow, topRated, adultAnimation } from "@/lib/discovery";
+import { prewarmVod } from "@/lib/vodPrewarm";
 import type { CatalogItem } from "@/lib/types";
 
 /** Check whether a catalog item belongs to a genre by name or TMDB genre_id. */
@@ -84,6 +85,14 @@ export default function HomePage() {
   // Trending = real US/CA current popularity first (movies/series already curated).
   const trendingMovies = useMemo(() => trendingNow(movies).slice(0, 18), [movies]);
   const trendingSeries = useMemo(() => trendingNow(series).slice(0, 18), [series]);
+
+  // Prewarm the clean-stream resolve for the top few trending titles so the first
+  // tap is instant. Bounded (top 4 each) + throttled + 30min-deduped in vodPrewarm,
+  // so it can't fan out into sustained background load on the 2GB box.
+  useEffect(() => {
+    trendingMovies.slice(0, 4).forEach((m) => prewarmVod("movie", m.tmdb_id));
+    trendingSeries.slice(0, 4).forEach((s) => prewarmVod("series", s.tmdb_id));
+  }, [trendingMovies, trendingSeries]);
 
   // Top Rated = acclaimed AND recent (not 40-year-old classics).
   const topRatedMovies = useMemo(() => topRated(movies).slice(0, 18), [movies]);
