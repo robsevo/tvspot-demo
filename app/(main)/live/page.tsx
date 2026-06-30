@@ -320,7 +320,7 @@ export default function LivePage() {
                       className="w-full h-full object-contain"
                       fallbackClassName="text-gray-800"
                     />
-                    {/* Smoked-glass casing — frosted gradient + violet underglow */}
+                    {/* Smoked-glass casing — frosted gradient + sky-blue underglow */}
                     <div className="absolute inset-0 rounded-lg pointer-events-none bg-gradient-to-br from-white/15 via-transparent to-cyan-500/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_-2px_3px_rgba(56,189,248,0.22)] ring-1 ring-white/10" />
                     {ch.online && (
                       <div className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-500 ring-1 ring-white" />

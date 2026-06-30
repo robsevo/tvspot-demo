@@ -1,9 +1,10 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-brand: #5B21B6;
-  /* Logo's second color — cyan. The brand IS the violet→cyan logo gradient, so
-     accents pair violet with this cyan instead of being purple-dominant. */
+  /* Blue theme (de-purpled 2026-06-30). Brand is a clean blue (NOT violet, NOT
+     navy) on the existing dark surfaces; it pairs with the cyan accent for a
+     blue→cyan identity with zero purple. */
+  --color-brand: #2563eb;
   --color-accent: #22d3ee;
   --color-surface: #0a0a0a;
   --color-card: #181818;
@@ -148,7 +149,7 @@ video::-webkit-media-controls { display: none !important; }
 }
 
 /* Pill active */
-.pill-active { box-shadow: 0 0 0 1px rgba(91, 33, 182, 0.5); }
+.pill-active { box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.5); }
 
 /* Glass */
 .glass {
@@ -169,9 +170,9 @@ video::-webkit-media-controls { display: none !important; }
   background: linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.6) 50%, transparent 100%);
 }
 
-/* Genre gradient for VOD detail — the logo's violet → cyan wash. */
+/* Genre gradient for VOD detail — a blue → cyan wash (no purple). */
 .genre-gradient {
-  background: linear-gradient(135deg, rgba(91,33,182,0.18) 0%, rgba(34,211,238,0.12) 55%, transparent 100%);
+  background: linear-gradient(135deg, rgba(37,99,235,0.18) 0%, rgba(34,211,238,0.12) 55%, transparent 100%);
 }
 
 /* Smooth in-page scrolling (rail arrows, anchor jumps) */
@@ -226,9 +227,8 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
   100% { background-position: 200% 50%; }
 }
 .brand-sheen {
-  /* THE logo gradient, animated: violet → cyan. This is the site's signature
-     accent — violet and cyan share the spotlight (not purple-dominant). */
-  background: linear-gradient(110deg, #5B21B6, #4338ca, #22d3ee, #4338ca, #5B21B6);
+  /* Animated blue → cyan sheen — the site's signature accent, zero purple. */
+  background: linear-gradient(110deg, #2563eb, #3b82f6, #22d3ee, #3b82f6, #2563eb);
   background-size: 200% 100%;
   animation: brandSheen 3s linear infinite;
 }
@@ -256,14 +256,13 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 .animate-page-rise { animation: pageRise 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
 
 /* ════════════════════════════════════════════════════════════════════════
-   HUD / "JARVIS"-style futuristic system — adapted to brand VIOLET (#5B21B6),
+   HUD / "JARVIS"-style futuristic system — adapted to brand BLUE (#2563eb),
    keeping the existing dark palette + layout.
-   Brand RGB for tinting: 91, 33, 182.
+   Brand RGB for tinting: 37, 99, 235.
    ════════════════════════════════════════════════════════════════════════ */
 :root {
-  --br: 91; --bg: 33; --bb: 182;            /* brand violet rgb (violet-800) */
-  /* Glows lean BLUE/cyan (logo's second color) so the UI reads violet+cyan, not
-     purple-dominant. Sky-400 (56,189,248) sits between the logo's violet & cyan. */
+  --br: 37; --bg: 99; --bb: 235;            /* brand blue rgb (blue-600) */
+  /* Glows lean sky-blue/cyan so the whole UI reads blue→cyan with zero purple. */
   --hud-corner: rgba(56,189,248,0.55);
   --hud-glow-sm: 0 0 8px rgba(56,189,248,0.40);
   --hud-glow-md: 0 0 18px rgba(56,189,248,0.35);
@@ -302,7 +301,7 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 .hud-scan { position: relative; overflow: hidden; }
 .hud-scan::after {
   content: ""; position: absolute; left: 0; right: 0; height: 40%; z-index: 2; pointer-events: none;
-  background: linear-gradient(180deg, transparent, rgba(91,33,182,0.10), transparent);
+  background: linear-gradient(180deg, transparent, rgba(37,99,235,0.12), transparent);
   animation: hudScan 6s ease-in-out infinite;
 }
 
@@ -330,7 +329,7 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 /* Shimmer skeleton in brand tint (loading states feel intentional). */
 @keyframes hudShimmer { 0% { background-position: -150% 0; } 100% { background-position: 150% 0; } }
 .hud-skeleton {
-  background: linear-gradient(100deg, rgba(255,255,255,0.04) 30%, rgba(91,33,182,0.10) 50%, rgba(255,255,255,0.04) 70%);
+  background: linear-gradient(100deg, rgba(255,255,255,0.04) 30%, rgba(37,99,235,0.12) 50%, rgba(255,255,255,0.04) 70%);
   background-size: 200% 100%;
   animation: hudShimmer 1.4s linear infinite;
 }
