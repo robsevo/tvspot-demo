@@ -104,16 +104,21 @@ export default function VideoPlayer({
         // No low-latency: build a real ~45s forward buffer to ride out upstream
         // hiccups instead of pinning to the live edge with no cushion.
         lowLatencyMode: false,
-        maxBufferLength: 45,
-        maxMaxBufferLength: 90, // bound growth for mobile memory
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120, // bound growth for mobile memory
         backBufferLength: 30,
-        // Sit ~4 segments behind the live edge so there's a deep forward buffer.
-        // The relay has sustained ~30-40s outage windows where every (shared)
-        // source 403s at once — failover is futile, so the buffer is what keeps
-        // playback alive until the relay recovers. Stay within a typical 60s
-        // live window; if the playlist falls too far behind, resync forward.
-        liveSyncDurationCount: 4,
-        liveMaxLatencyDurationCount: 10,
+        // Sit a fixed 36 SECONDS behind the live edge (not a segment COUNT). The
+        // relay's transmux window is 36×3s = 108s, designed for exactly this — but
+        // a count of 4 only bought ~12s on those 3s segments, leaving almost no
+        // cushion. 36s behind in a 108s window = a deep forward buffer + ~72s of
+        // look-back, so the relay's sustained ~30-40s outage windows (every shared
+        // source 403s at once — failover is futile) are ridden out by the buffer
+        // instead of catching the live edge and stalling. Seconds-based so it's
+        // consistent across 3s-segment (transmux) and 10s-segment (passthrough)
+        // sources. Resync forward only if >50s behind (stay off the 60s-window back
+        // edge of passthrough sources).
+        liveSyncDuration: 36,
+        liveMaxLatencyDuration: 50,
         fragLoadPolicy: resilient(dc.fragLoadPolicy),
         playlistLoadPolicy: resilient(dc.playlistLoadPolicy),
         manifestLoadPolicy: resilient(dc.manifestLoadPolicy),
