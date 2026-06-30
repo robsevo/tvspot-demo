@@ -214,8 +214,8 @@ export default function LivePage() {
             <CalendarDays className="w-4 h-4" />
             Events
           </Link>
-          <div className="flex items-center gap-1.5 text-sky-400 text-xs font-medium bg-sky-400/10 px-2.5 py-1 rounded-xl">
-            <span className="w-1.5 h-1.5 rounded-xl bg-sky-400 live-dot" />
+          <div className="flex items-center gap-1.5 text-cyan-400 text-xs font-medium bg-cyan-400/10 px-2.5 py-1 rounded-xl">
+            <span className="w-1.5 h-1.5 rounded-xl bg-cyan-400 live-dot" />
             <span>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
           </div>
         </div>
@@ -321,7 +321,7 @@ export default function LivePage() {
                       fallbackClassName="text-gray-800"
                     />
                     {/* Smoked-glass casing — frosted gradient + violet underglow */}
-                    <div className="absolute inset-0 rounded-lg pointer-events-none bg-gradient-to-br from-white/15 via-transparent to-sky-500/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_-2px_3px_rgba(56,189,248,0.22)] ring-1 ring-white/10" />
+                    <div className="absolute inset-0 rounded-lg pointer-events-none bg-gradient-to-br from-white/15 via-transparent to-cyan-500/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.25),inset_0_-2px_3px_rgba(56,189,248,0.22)] ring-1 ring-white/10" />
                     {ch.online && (
                       <div className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-500 ring-1 ring-white" />
                     )}
@@ -364,7 +364,7 @@ export default function LivePage() {
                 className="absolute top-0 bottom-0 w-0.5 z-20"
                 style={{ left: nowOffset, backgroundColor: NOW_COLOR, boxShadow: "0 0 8px rgba(56,189,248,0.6)" }}
               >
-                <div className="absolute -top-0 left-1/2 -translate-x-1/2 bg-white/[0.07] text-sky-300 text-[8px] px-1.5 py-0.5 rounded-b font-bold ring-1 ring-sky-400/30">
+                <div className="absolute -top-0 left-1/2 -translate-x-1/2 bg-white/[0.07] text-cyan-300 text-[8px] px-1.5 py-0.5 rounded-b font-bold ring-1 ring-cyan-400/30">
                   NOW
                 </div>
               </div>

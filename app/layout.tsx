@@ -13,7 +13,7 @@ export default function RootLayout({
     <html lang="en">
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        <meta name="theme-color" content="#080d1a" />
+        <meta name="theme-color" content="#0a0a0a" />
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
         <link rel="shortcut icon" href="/favicon-48.png" type="image/png" />

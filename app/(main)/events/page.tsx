@@ -133,7 +133,7 @@ export default function EventsPage() {
       {/* Header — mirrors the Live page header, with a toggle back to Live TV */}
       <div className="px-4 mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="w-9 h-9 rounded-3xl bg-gradient-to-br from-brand to-sky-400 flex items-center justify-center hud-glow flex-shrink-0">
+          <div className="w-9 h-9 rounded-3xl bg-gradient-to-br from-brand to-cyan-400 flex items-center justify-center hud-glow flex-shrink-0">
             <CalendarDays className="w-4 h-4 text-white" />
           </div>
           <div className="min-w-0">

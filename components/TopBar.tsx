@@ -32,7 +32,7 @@ export default function TopBar() {
     <header
       className={`fixed top-0 left-0 right-0 z-40 h-12 safe-area-top transition-all duration-300 ${
         showBg
-          ? "bg-gradient-to-b from-[#0c1426] via-[#080a16] to-[#04050a] shadow-lg shadow-blue-500/10 backdrop-blur-sm"
+          ? "bg-gradient-to-b from-[#0c1426] via-[#080a16] to-[#04050a] shadow-lg shadow-cyan-500/10 backdrop-blur-sm"
           : "bg-transparent"
       }`}
     >
