@@ -110,7 +110,7 @@ export default function HeroBanner({ items, events = [] }: Props) {
             // Generic league "poster": branded gradient + large faint league logo.
             <div
               key={`e-${s.ev.id}`}
-              className={`absolute inset-0 transition-opacity duration-[1200ms] ease-out bg-gradient-to-br from-brand/40 via-cyan-900/25 to-black ${
+              className={`absolute inset-0 transition-opacity duration-[1200ms] ease-out bg-gradient-to-br from-brand/40 via-blue-950/40 to-black ${
                 i === current ? "opacity-100" : "opacity-0"
               }`}
             >
@@ -125,7 +125,7 @@ export default function HeroBanner({ items, events = [] }: Props) {
           ),
         )}
         <div
-          className={`absolute inset-0 bg-gradient-to-br from-brand/30 via-cyan-900/15 to-surface transition-opacity duration-700 ${
+          className={`absolute inset-0 bg-gradient-to-br from-brand/30 via-blue-950/30 to-surface transition-opacity duration-700 ${
             slide.type === "catalog" && imgErrors[current] ? "opacity-100" : "opacity-0"
           }`}
         />

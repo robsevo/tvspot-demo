@@ -12,7 +12,7 @@ export default function MyListPage() {
   return (
     <div className="pt-14 min-h-screen pb-20 animate-fade-in">
       <div className="px-4 mb-3 flex items-center gap-2">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-cyan-400 flex items-center justify-center">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-sky-400 flex items-center justify-center">
           <Library className="w-4 h-4 text-white" />
         </div>
         <div>

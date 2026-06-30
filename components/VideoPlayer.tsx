@@ -458,14 +458,14 @@ export default function VideoPlayer({
       {/* Buffering ring — shown whenever the stream is rebuffering */}
       {buffering && playing && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-          <div className="w-14 h-14 rounded-full border-[3px] border-white/15 border-t-cyan-400 border-r-brand animate-spin" />
+          <div className="w-14 h-14 rounded-full border-[3px] border-white/15 border-t-sky-400 border-r-brand animate-spin" />
         </div>
       )}
 
       {/* Sustained-rebuffer notice */}
       {bufferNotice && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-black/75 backdrop-blur-sm text-white text-xs font-medium px-3 py-1.5 rounded-full animate-fade-in">
-          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 live-dot" />
+          <span className="w-1.5 h-1.5 rounded-full bg-sky-400 live-dot" />
           Buffering — rebuilding the stream…
         </div>
       )}

@@ -82,7 +82,7 @@ export default function CatalogBrowser({ items, kind, serviceLabel, onBack }: Pr
             onChange={(e) => setQuery(e.target.value)}
             placeholder={`Search ${serviceLabel} ${kindLabel.toLowerCase()}...`}
             autoComplete="off"
-            className="w-full glass-card rounded-xl pl-10 pr-10 py-2.5 text-white text-sm placeholder-text-muted outline-none focus:ring-1 focus:ring-brand focus:shadow-[0_0_18px_rgba(91,33,182,0.3)] transition-all"
+            className="w-full glass-card rounded-xl pl-10 pr-10 py-2.5 text-white text-sm placeholder-text-muted outline-none focus:ring-1 focus:ring-brand focus:shadow-[0_0_18px_rgba(37,99,235,0.35)] transition-all"
           />
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
           {query && (

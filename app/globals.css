@@ -1,13 +1,16 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-brand: #5B21B6;
-  /* Logo's second color — cyan. The brand IS the violet→cyan logo gradient, so
-     accents pair violet with this cyan instead of being purple-dominant. */
-  --color-accent: #22d3ee;
-  --color-surface: #0a0a0a;
-  --color-card: #181818;
-  --color-header: #080a16;
+  /* Deep-navy theme (rebuilt 2026-06-29). The whole app reads as the dark-navy
+     World Cup hero — solid navy surfaces, a single restrained blue accent, no
+     violet→cyan "popsicle" gradients. Brand is a clean royal blue. */
+  --color-brand: #2563eb;
+  /* Secondary accent — a calm sky blue (not neon cyan) for glows, the now-line
+     and "live" emphasis. Pairs with the brand blue instead of competing with it. */
+  --color-accent: #38bdf8;
+  --color-surface: #070b16;
+  --color-card: #101a2e;
+  --color-header: #080d1a;
   --color-text-primary: #ffffff;
   --color-text-secondary: #b3b3b3;
   --color-text-muted: #808080;
@@ -16,7 +19,7 @@
 }
 
 :root {
-  --background: #0a0a0a;
+  --background: #070b16;
   --foreground: #ffffff;
 }
 
@@ -148,11 +151,11 @@ video::-webkit-media-controls { display: none !important; }
 }
 
 /* Pill active */
-.pill-active { box-shadow: 0 0 0 1px rgba(91, 33, 182, 0.5); }
+.pill-active { box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.5); }
 
 /* Glass */
 .glass {
-  background: rgba(15, 15, 15, 0.8);
+  background: rgba(12, 18, 38, 0.8);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
@@ -166,12 +169,12 @@ video::-webkit-media-controls { display: none !important; }
 
 /* Hero fade overlay for transitions */
 .hero-overlay {
-  background: linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.6) 50%, transparent 100%);
+  background: linear-gradient(to top, #070b16 0%, rgba(7,11,22,0.6) 50%, transparent 100%);
 }
 
-/* Genre gradient for VOD detail — the logo's violet → cyan wash. */
+/* Genre gradient for VOD detail — a deep-navy → soft-blue wash (no violet/cyan). */
 .genre-gradient {
-  background: linear-gradient(135deg, rgba(91,33,182,0.18) 0%, rgba(34,211,238,0.12) 55%, transparent 100%);
+  background: linear-gradient(135deg, rgba(30,58,138,0.28) 0%, rgba(56,189,248,0.10) 55%, transparent 100%);
 }
 
 /* Smooth in-page scrolling (rail arrows, anchor jumps) */
@@ -205,7 +208,7 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 }
 /* Glass 3D card — frosted with depth */
 .glass-card-depth {
-  background: rgba(24, 24, 24, 0.7);
+  background: rgba(16, 26, 46, 0.7);
   backdrop-filter: blur(12px) saturate(1.2);
   -webkit-backdrop-filter: blur(12px) saturate(1.2);
   border: 1px solid rgba(255, 255, 255, 0.07);
@@ -226,23 +229,23 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
   100% { background-position: 200% 50%; }
 }
 .brand-sheen {
-  /* THE logo gradient, animated: violet → cyan. This is the site's signature
-     accent — violet and cyan share the spotlight (not purple-dominant). */
-  background: linear-gradient(110deg, #5B21B6, #4338ca, #22d3ee, #4338ca, #5B21B6);
+  /* Navy → blue → navy sheen. A single-hue highlight sweeping across the dark
+     navy edge, matching the nav background — tasteful, not a rainbow popsicle. */
+  background: linear-gradient(110deg, #0c1426, #1e3a8a, #2563eb, #1e3a8a, #0c1426);
   background-size: 200% 100%;
   animation: brandSheen 3s linear infinite;
 }
 
 /* Soft neon ring for "now/live" emphasis — uses brand color, opt-in. */
 @keyframes neonPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(34,211,238,0.45); }
-  50% { box-shadow: 0 0 0 4px rgba(34,211,238,0.0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(56,189,248,0.45); }
+  50% { box-shadow: 0 0 0 4px rgba(56,189,248,0.0); }
 }
 .neon-pulse { animation: neonPulse 2s ease-in-out infinite; }
 
 /* Glassy elevated surface for a futuristic depth cue (opt-in). */
 .glass-card {
-  background: rgba(31, 31, 31, 0.6);
+  background: rgba(16, 26, 46, 0.6);
   backdrop-filter: blur(10px) saturate(1.2);
   -webkit-backdrop-filter: blur(10px) saturate(1.2);
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -256,14 +259,14 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 .animate-page-rise { animation: pageRise 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
 
 /* ════════════════════════════════════════════════════════════════════════
-   HUD / "JARVIS"-style futuristic system — adapted to brand VIOLET (#5B21B6),
-   keeping the existing dark palette + layout.
-   Brand RGB for tinting: 91, 33, 182.
+   HUD / "JARVIS"-style futuristic system — adapted to brand BLUE (#2563eb),
+   keeping the deep-navy palette + layout.
+   Brand RGB for tinting: 37, 99, 235.
    ════════════════════════════════════════════════════════════════════════ */
 :root {
-  --br: 91; --bg: 33; --bb: 182;            /* brand violet rgb (violet-800) */
-  /* Glows lean BLUE/cyan (logo's second color) so the UI reads violet+cyan, not
-     purple-dominant. Sky-400 (56,189,248) sits between the logo's violet & cyan. */
+  --br: 37; --bg: 99; --bb: 235;            /* brand blue rgb (blue-600) */
+  /* Glows lean sky-blue (56,189,248) so the HUD reads as a single cool blue on
+     navy, not a violet+cyan candy mix. */
   --hud-corner: rgba(56,189,248,0.55);
   --hud-glow-sm: 0 0 8px rgba(56,189,248,0.40);
   --hud-glow-md: 0 0 18px rgba(56,189,248,0.35);
@@ -302,14 +305,14 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 .hud-scan { position: relative; overflow: hidden; }
 .hud-scan::after {
   content: ""; position: absolute; left: 0; right: 0; height: 40%; z-index: 2; pointer-events: none;
-  background: linear-gradient(180deg, transparent, rgba(91,33,182,0.10), transparent);
+  background: linear-gradient(180deg, transparent, rgba(37,99,235,0.12), transparent);
   animation: hudScan 6s ease-in-out infinite;
 }
 
 /* Live pulse — red glowing dot/border for "LIVE"/now. */
 @keyframes livePulseRed {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(34,211,238,0.55); }
-  50%      { box-shadow: 0 0 0 5px rgba(34,211,238,0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(56,189,248,0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(56,189,248,0); }
 }
 .live-dot { animation: livePulseRed 1.8s ease-in-out infinite; }
 
@@ -330,7 +333,7 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 /* Shimmer skeleton in brand tint (loading states feel intentional). */
 @keyframes hudShimmer { 0% { background-position: -150% 0; } 100% { background-position: 150% 0; } }
 .hud-skeleton {
-  background: linear-gradient(100deg, rgba(255,255,255,0.04) 30%, rgba(91,33,182,0.10) 50%, rgba(255,255,255,0.04) 70%);
+  background: linear-gradient(100deg, rgba(255,255,255,0.04) 30%, rgba(37,99,235,0.12) 50%, rgba(255,255,255,0.04) 70%);
   background-size: 200% 100%;
   animation: hudShimmer 1.4s linear infinite;
 }
