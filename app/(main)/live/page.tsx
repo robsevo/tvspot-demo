@@ -60,6 +60,28 @@ export default function LivePage() {
   const timeRulerRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(new Date());
 
+  // Desktop drag-to-scroll for the EPG timeline: the horizontal scrollbar sits
+  // below the fold on a tall grid, so a mouse user couldn't pan to see later
+  // programmes. Click-drag pans; a >6px drag suppresses the program-cell click so
+  // dragging never accidentally opens a channel. (Touch/trackpad still scroll natively.)
+  const drag = useRef({ down: false, startX: 0, startScroll: 0, moved: false });
+  const onDragDown = (e: React.MouseEvent) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    drag.current = { down: true, startX: e.pageX, startScroll: el.scrollLeft, moved: false };
+  };
+  const onDragMove = (e: React.MouseEvent) => {
+    const el = scrollRef.current;
+    if (!el || !drag.current.down) return;
+    const dx = e.pageX - drag.current.startX;
+    if (Math.abs(dx) > 6) drag.current.moved = true;
+    el.scrollLeft = drag.current.startScroll - dx;
+  };
+  const endDrag = () => { drag.current.down = false; };
+  const onDragClickCapture = (e: React.MouseEvent) => {
+    if (drag.current.moved) { e.preventDefault(); e.stopPropagation(); drag.current.moved = false; }
+  };
+
   // Update "now" every 30 seconds
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
@@ -354,7 +376,12 @@ export default function LivePage() {
           {/* Scrollable program grid */}
           <div
             ref={scrollRef}
-            className="flex-1 overflow-x-auto relative"
+            className="flex-1 overflow-x-auto relative cursor-grab active:cursor-grabbing select-none"
+            onMouseDown={onDragDown}
+            onMouseMove={onDragMove}
+            onMouseUp={endDrag}
+            onMouseLeave={endDrag}
+            onClickCapture={onDragClickCapture}
             onScroll={(e) => {
               if (timeRulerRef.current) {
                 timeRulerRef.current.scrollLeft = (e.target as HTMLElement).scrollLeft;

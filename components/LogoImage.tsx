@@ -50,7 +50,9 @@ export function LogoImage({ name, logoUrl, className = "", fallbackClassName = "
           alt={name}
           loading="lazy"
           referrerPolicy="no-referrer"
-          className={`w-full h-full object-contain ${imgClassName}`}
+          // rounded-md so square logo tiles (e.g. TSN) match the rounded container
+          // instead of showing hard square corners inside it.
+          className={`w-full h-full object-contain rounded-md ${imgClassName}`}
           onError={() => setIdx((i) => i + 1)}
         />
       </div>

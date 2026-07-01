@@ -210,18 +210,46 @@ function getShowLogoUrl(name: string): string | null {
 }
 /** Resolve a logo domain for a channel name, tolerating numbers/regions/prefixes
  *  ("TSN1", "Sportsnet East", "24/7 Family Guy") via normalized brand matching. */
-function domainFor(name: string): string | undefined {
-  const exact = SERVICE_DOMAINS[name] || CHANNEL_DOMAINS[name];
-  if (exact) return exact;
-  // Normalize: drop "24/7 " prefix, lowercase, strip trailing digits + region
-  // words, collapse spaces — then match the longest brand key it starts with.
-  const n = name
+/** Normalize a channel name to a brand key: drop "24/7 " prefix, lowercase, strip
+ *  trailing digits + region/qualifier words, collapse spaces. "TSN1" → "tsn",
+ *  "CTV 2" → "ctv", "Sportsnet 360" → "sportsnet". Shared by domain + logo lookup. */
+function normalizeBrand(name: string): string {
+  return name
     .toLowerCase()
     .replace(/^24\/7\s+/, "")
     .replace(/\b(hd|fhd|sd|4k|uhd|east|west|ontario|pacific|network|channel|info|one|tv)\b/g, "")
     .replace(/\s*\d+\s*$/, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Curated, verified logo URLs for channels whose favicon is wrong/low-quality
+ *  (e.g. CTV rendered a generic blue "C"). Keyed by normalized brand so it covers
+ *  numbered variants (TSN1-5, CTV 2, …). Wikimedia-hosted; tried BEFORE the favicon. */
+const CHANNEL_LOGO_OVERRIDES: Record<string, string> = {
+  "ctv": "https://commons.wikimedia.org/wiki/Special:FilePath/CTV%20logo%202018.svg?width=320",
+  "tsn": "https://commons.wikimedia.org/wiki/Special:FilePath/TSN%20Logo.svg?width=320",
+  "cbc": "https://commons.wikimedia.org/wiki/Special:FilePath/CBC%20Logo%201992-Present.svg?width=320",
+  "sportsnet": "https://commons.wikimedia.org/wiki/Special:FilePath/Logo%20Sportsnet%202011.svg?width=320",
+  "global": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/20/Global_Television_Network_2019_logo.svg/330px-Global_Television_Network_2019_logo.svg.png",
+  "tva sports": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/57/TVA_Sports_Logo.svg/330px-TVA_Sports_Logo.svg.png",
+};
+
+function channelLogoOverride(name: string): string | undefined {
+  const n = normalizeBrand(name);
+  if (CHANNEL_LOGO_OVERRIDES[n]) return CHANNEL_LOGO_OVERRIDES[n];
+  const keys = Object.keys(CHANNEL_LOGO_OVERRIDES).sort((a, b) => b.length - a.length);
+  for (const k of keys) {
+    if (n === k || n.startsWith(k + " ") || name.toLowerCase().startsWith(k)) return CHANNEL_LOGO_OVERRIDES[k];
+  }
+  return undefined;
+}
+
+function domainFor(name: string): string | undefined {
+  const exact = SERVICE_DOMAINS[name] || CHANNEL_DOMAINS[name];
+  if (exact) return exact;
+  // Normalize, then match the longest brand key it starts with.
+  const n = normalizeBrand(name);
   if (BRAND_DOMAINS[n]) return BRAND_DOMAINS[n];
   // Prefix match against brand keys (so "sportsnet 360" → "sportsnet").
   const keys = Object.keys(BRAND_DOMAINS).sort((a, b) => b.length - a.length);
@@ -239,6 +267,10 @@ function domainFor(name: string): string | undefined {
  */
 export function getLogoCandidates(name: string): string[] {
   const out: string[] = [];
+  // Curated correct logo first (fixes wrong favicons, e.g. CTV); a broken URL
+  // safely falls through to the next candidate via the <img> onError chain.
+  const override = channelLogoOverride(name);
+  if (override) out.push(override);
   const showUrl = getShowLogoUrl(name);
   if (showUrl) out.push(showUrl);
   const slug = SIMPLEICONS_SLUGS[name];
