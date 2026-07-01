@@ -1,15 +1,21 @@
-"use client";
-
-import { AuthProvider } from "@/hooks/useAuth";
-import { PlayerProvider } from "@/hooks/usePlayer";
+import { cookies } from "next/headers";
+import { verifyToken } from "@/lib/auth";
+import Providers from "@/components/Providers";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import "./globals.css";
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Resolve the user on the SERVER from the already-verified auth cookie, so the
+  // HTML ships with the app chrome + username instead of a blank shell that waits
+  // on a client /api/auth/me round-trip. Middleware has already redirected
+  // invalid/absent tokens on protected routes; here it just seeds the client.
+  const token = (await cookies()).get("tvspot_session")?.value;
+  const initialUsername = token ? (await verifyToken(token))?.username ?? null : null;
+
   return (
     <html lang="en">
       <head>
@@ -27,11 +33,9 @@ export default function RootLayout({
       </head>
       <body className="bg-surface text-white antialiased">
         <ServiceWorkerRegister />
-        <AuthProvider>
-          <PlayerProvider>
-            {children}
-          </PlayerProvider>
-        </AuthProvider>
+        <Providers initialUsername={initialUsername}>
+          {children}
+        </Providers>
       </body>
     </html>
   );

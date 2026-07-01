@@ -29,9 +29,17 @@ const cacheUser = (u: string | null) => {
   } catch {}
 };
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [username, setUsername] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+export function AuthProvider({
+  children,
+  initialUsername = null,
+}: {
+  children: ReactNode;
+  /** Username resolved on the server from the auth cookie (see app/layout.tsx). */
+  initialUsername?: string | null;
+}) {
+  const [username, setUsername] = useState<string | null>(initialUsername);
+  // If the server already resolved a user, we start ready — no blocking fetch.
+  const [loading, setLoading] = useState(initialUsername === null);
 
   const checkAuth = useCallback(async () => {
     try {
@@ -49,7 +57,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // Paint immediately from the cached user, then revalidate in the background.
+    // Server already told us who we are (middleware verified the cookie) → trust
+    // it, keep the localStorage cache warm, and skip the /api/auth/me round-trip.
+    if (initialUsername !== null) {
+      cacheUser(initialUsername);
+      return;
+    }
+    // No server user (e.g. /login, or SSR without a cookie): fall back to the
+    // cached optimistic render + background revalidation.
     let cached: string | null = null;
     try {
       cached = localStorage.getItem(USER_KEY);
@@ -59,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
     checkAuth();
-  }, [checkAuth]);
+  }, [checkAuth, initialUsername]);
 
   const login = async (username: string, password: string, secret_word: string): Promise<boolean> => {
     try {
