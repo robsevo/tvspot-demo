@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 
 const BACKEND = process.env.BACKEND_API_URL || "https://api.example.com";
 
@@ -292,85 +292,121 @@ async function filterUsCaEn(items: any[], kind: "movie" | "tv", allow: Set<numbe
   return out;
 }
 
+/** The heavy trending build: 9 backend service catalogs + TMDB discover/enrich/
+ *  rank + US/CA gate. Result is user-independent, so it's cached below. */
+async function computeTrending(cookie: string): Promise<{ movies: any[]; series: any[] }> {
+  const services = ["Netflix", "Disney+", "HBO Max", "Prime Video", "Paramount+", "Apple TV+", "Hulu", "Crave", "Peacock"];
+  const allMovies: any[] = [];
+  const allSeries: any[] = [];
+  const seenIds = new Set<number>();
+
+  await Promise.all(
+    services.map(async (svc) => {
+      try {
+        const res = await fetch(
+          `${BACKEND}/lounge/vod/catalog?service=${encodeURIComponent(svc)}`,
+          { headers: { Cookie: cookie } }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        for (const m of normalizeItems(data.movies || [])) {
+          if (!seenIds.has(m.tmdb_id)) { seenIds.add(m.tmdb_id); allMovies.push(m); }
+        }
+        for (const s of normalizeItems(data.series || [])) {
+          if (!seenIds.has(s.tmdb_id)) { seenIds.add(s.tmdb_id); allSeries.push(s); }
+        }
+      } catch {}
+    })
+  );
+
+  // Supplement with broader US/CA TMDB content the backend catalog lacks:
+  // more popular movies + series, plus a dedicated animation pass (genre 16)
+  // so adult-animation shows appear. Dedupe against what the backend returned.
+  const [supMovies, supSeries, supAnimation] = await Promise.all([
+    fetchDiscover("movie", "", 5),
+    fetchDiscover("tv", "", 5),
+    fetchDiscover("tv", "&with_genres=16", 3), // animation (Family Guy, Rick & Morty, …)
+  ]);
+  for (const m of supMovies) {
+    if (!seenIds.has(m.tmdb_id)) { seenIds.add(m.tmdb_id); allMovies.push(m); }
+  }
+  for (const s of [...supSeries, ...supAnimation]) {
+    if (!seenIds.has(s.tmdb_id)) { seenIds.add(s.tmdb_id); allSeries.push(s); }
+  }
+
+  // Inject the global-megahit bypass titles (Squid Game, …) so they appear even
+  // if no backend service catalog carries them. Deduped against the above.
+  const [bypassMovies, bypassSeries] = await Promise.all([
+    fetchTmdbByIds("movie", BYPASS_MOVIE_IDS),
+    fetchTmdbByIds("tv", BYPASS_TV_IDS),
+  ]);
+  for (const m of bypassMovies) {
+    if (!seenIds.has(m.tmdb_id)) { seenIds.add(m.tmdb_id); allMovies.push(m); }
+  }
+  for (const s of bypassSeries) {
+    if (!seenIds.has(s.tmdb_id)) { seenIds.add(s.tmdb_id); allSeries.push(s); }
+  }
+
+  // Enrich + rank by US/CA popularity (writes score onto item.popularity).
+  const [movieRegion, seriesRegion] = await Promise.all([
+    fetchRegionData("movie"),
+    fetchRegionData("tv"),
+  ]);
+  applyRegionScores(allMovies, movieRegion.scores);
+  applyRegionScores(allSeries, seriesRegion.scores);
+
+  // USA/CANADA ONLY: the backend service catalogs mix in foreign dramas (K/J/
+  // Thai/Indian) whose romanized titles pass a script check; drop anything TMDB
+  // doesn't confirm as US/CA-origin English. Our own discover supplements are
+  // US/CA-en by construction and always kept (see isUsCa).
+  const usCaMovies = allMovies.filter((m) => isUsCa(m, movieRegion.allow));
+  const usCaSeries = allSeries.filter((s) => isUsCa(s, seriesRegion.allow));
+  return { movies: usCaMovies, series: usCaSeries };
+}
+
+// The trending catalog is identical for every user, so cache the built result
+// process-wide and serve it stale-while-revalidating: a stale hit returns
+// instantly and refreshes in the background (after()), so the ~20s+ cold rebuild
+// (dozens of TMDB calls) never stalls a request after the first.
+type Trending = { movies: any[]; series: any[] };
+const TRENDING_FRESH_MS = 15 * 60 * 1000;
+let trendingCache: { data: Trending; ts: number } | null = null;
+let trendingInFlight: Promise<Trending> | null = null;
+
+function refreshTrending(cookie: string): Promise<Trending> {
+  if (trendingInFlight) return trendingInFlight; // coalesce concurrent rebuilds
+  trendingInFlight = (async () => {
+    try {
+      const data = await computeTrending(cookie);
+      if (data.movies.length + data.series.length > 0) {
+        trendingCache = { data, ts: Date.now() };
+      }
+      return data;
+    } finally {
+      trendingInFlight = null;
+    }
+  })();
+  return trendingInFlight;
+}
+
+async function getTrending(cookie: string): Promise<Trending> {
+  if (trendingCache && Date.now() - trendingCache.ts < TRENDING_FRESH_MS) {
+    return trendingCache.data; // fresh
+  }
+  if (trendingCache) {
+    after(() => refreshTrending(cookie).catch(() => {})); // stale → SWR in background
+    return trendingCache.data;
+  }
+  return refreshTrending(cookie); // cold — compute once for this process
+}
+
 export async function GET(request: NextRequest) {
   const service = request.nextUrl.searchParams.get("service");
   const trending = request.nextUrl.searchParams.get("trending");
 
   if (trending === "true") {
-    const services = ["Netflix", "Disney+", "HBO Max", "Prime Video", "Paramount+", "Apple TV+", "Hulu", "Crave", "Peacock"];
-    const allMovies: any[] = [];
-    const allSeries: any[] = [];
-    const seenIds = new Set<number>();
-
-    await Promise.all(
-      services.map(async (svc) => {
-        try {
-          const res = await fetch(
-            `${BACKEND}/lounge/vod/catalog?service=${encodeURIComponent(svc)}`,
-            { headers: { Cookie: request.headers.get("cookie") || "" } }
-          );
-          if (!res.ok) return;
-          const data = await res.json();
-          for (const m of normalizeItems(data.movies || [])) {
-            if (!seenIds.has(m.tmdb_id)) {
-              seenIds.add(m.tmdb_id);
-              allMovies.push(m);
-            }
-          }
-          for (const s of normalizeItems(data.series || [])) {
-            if (!seenIds.has(s.tmdb_id)) {
-              seenIds.add(s.tmdb_id);
-              allSeries.push(s);
-            }
-          }
-        } catch {}
-      })
-    );
-
-    // Supplement with broader US/CA TMDB content the backend catalog lacks:
-    // more popular movies + series, plus a dedicated animation pass (genre 16)
-    // so adult-animation shows appear. Dedupe against what the backend returned.
-    const [supMovies, supSeries, supAnimation] = await Promise.all([
-      fetchDiscover("movie", "", 5),
-      fetchDiscover("tv", "", 5),
-      fetchDiscover("tv", "&with_genres=16", 3), // animation (Family Guy, Rick & Morty, …)
-    ]);
-    for (const m of supMovies) {
-      if (!seenIds.has(m.tmdb_id)) { seenIds.add(m.tmdb_id); allMovies.push(m); }
-    }
-    for (const s of [...supSeries, ...supAnimation]) {
-      if (!seenIds.has(s.tmdb_id)) { seenIds.add(s.tmdb_id); allSeries.push(s); }
-    }
-
-    // Inject the global-megahit bypass titles (Squid Game, …) so they appear even
-    // if no backend service catalog carries them. Deduped against the above.
-    const [bypassMovies, bypassSeries] = await Promise.all([
-      fetchTmdbByIds("movie", BYPASS_MOVIE_IDS),
-      fetchTmdbByIds("tv", BYPASS_TV_IDS),
-    ]);
-    for (const m of bypassMovies) {
-      if (!seenIds.has(m.tmdb_id)) { seenIds.add(m.tmdb_id); allMovies.push(m); }
-    }
-    for (const s of bypassSeries) {
-      if (!seenIds.has(s.tmdb_id)) { seenIds.add(s.tmdb_id); allSeries.push(s); }
-    }
-
-    // Enrich + rank by US/CA popularity (writes score onto item.popularity).
-    const [movieRegion, seriesRegion] = await Promise.all([
-      fetchRegionData("movie"),
-      fetchRegionData("tv"),
-    ]);
-    applyRegionScores(allMovies, movieRegion.scores);
-    applyRegionScores(allSeries, seriesRegion.scores);
-
-    // USA/CANADA ONLY: the backend service catalogs mix in foreign dramas (K/J/
-    // Thai/Indian) whose romanized titles pass a script check; drop anything TMDB
-    // doesn't confirm as US/CA-origin English. Our own discover supplements are
-    // US/CA-en by construction and always kept (see isUsCa).
-    const usCaMovies = allMovies.filter((m) => isUsCa(m, movieRegion.allow));
-    const usCaSeries = allSeries.filter((s) => isUsCa(s, seriesRegion.allow));
-
-    return NextResponse.json({ movies: usCaMovies, series: usCaSeries, sorted_by: "tmdb_popularity_us_ca" });
+    const data = await getTrending(request.headers.get("cookie") || "");
+    return NextResponse.json({ ...data, sorted_by: "tmdb_popularity_us_ca" });
   }
 
   if (service) {
