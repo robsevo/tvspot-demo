@@ -13,6 +13,9 @@ interface Props {
   fallbackClassName?: string;
   /** Class applied directly to the <img> element (for CSS filters etc.). */
   imgClassName?: string;
+  /** VOD service card: skip the curated live-channel logo override (which is
+   *  colored) so the clean white brand mark is used. */
+  serviceLogo?: boolean;
 }
 
 /**
@@ -22,14 +25,14 @@ interface Props {
  *   3. text initials
  * Each failed source advances to the next via the <img> onError handler.
  */
-export function LogoImage({ name, logoUrl, className = "", fallbackClassName = "text-white/80", imgClassName = "" }: Props) {
+export function LogoImage({ name, logoUrl, className = "", fallbackClassName = "text-white/80", imgClassName = "", serviceLogo = false }: Props) {
   // Try reliable brand-favicon sources FIRST (Simple Icons / Google favicon by
   // domain), then the backend logo-proxy as a last resort. The backend's
   // /static/channel-logos path currently returns an HTML login page for many
   // channels — an <img> "succeeds" on that (broken image) and never errors, so
   // putting it first left logos blank. Domain favicons resolve far more channels.
   const candidates = [
-    ...getLogoCandidates(name),
+    ...getLogoCandidates(name, { skipChannelOverride: serviceLogo }),
     logoUrl ? `/api/lounge/logo-proxy?url=${encodeURIComponent(logoUrl)}` : null,
   ].filter((u): u is string => Boolean(u));
 

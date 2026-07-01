@@ -34,7 +34,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="min-h-screen bg-surface text-white">
       {showNav && <TopBar />}
-      <main>
+      {/* Match the TopBar's safe-area inset so page content clears the notch too
+          (pages already pad for the 48px bar; this adds the inset on top). */}
+      <main className="safe-area-top">
         {children}
       </main>
       {showNav && <BottomNav />}

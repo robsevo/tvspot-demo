@@ -30,7 +30,7 @@ export default function TopBar() {
 
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-40 h-12 safe-area-top transition-all duration-300 ${
+      className={`fixed top-0 left-0 right-0 z-40 safe-area-top transition-all duration-300 ${
         showBg
           ? "bg-[#0c1426]/85 backdrop-blur-xl border-b border-white/10 shadow-lg shadow-black/60"
           : "bg-transparent"
@@ -42,7 +42,7 @@ export default function TopBar() {
       }`}>
         <div className="h-full brand-sheen" />
       </div>
-      <div className="flex items-center justify-between h-full w-full max-w-screen-2xl mx-auto px-4">
+      <div className="flex items-center justify-between h-12 w-full max-w-screen-2xl mx-auto px-4">
         <Link
           href="/search"
           className="w-9 h-9 rounded-lg flex items-center justify-center text-white/70 hover:text-white hover:bg-white/5 transition-all hover:scale-110 active:scale-90"

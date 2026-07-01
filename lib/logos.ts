@@ -303,11 +303,13 @@ function domainFor(name: string): string | undefined {
  * back to text initials. A backend-provided logo_url, when present, should be
  * tried before these.
  */
-export function getLogoCandidates(name: string): string[] {
+export function getLogoCandidates(name: string, opts?: { skipChannelOverride?: boolean }): string[] {
   const out: string[] = [];
   // Curated correct logo first (fixes wrong favicons, e.g. CTV); a broken URL
   // safely falls through to the next candidate via the <img> onError chain.
-  const override = channelLogoOverride(name);
+  // Skipped for VOD SERVICE cards — those want the clean white brand marks
+  // (SimpleIcons/wordmarks), not a colored live-channel logo (e.g. Paramount+).
+  const override = opts?.skipChannelOverride ? undefined : channelLogoOverride(name);
   if (override) out.push(override);
   const showUrl = getShowLogoUrl(name);
   if (showUrl) out.push(showUrl);

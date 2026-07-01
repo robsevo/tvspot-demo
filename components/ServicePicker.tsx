@@ -84,8 +84,12 @@ export default function ServicePicker({ onSelectAction }: { onSelectAction: (ser
                 ) : (
                   <LogoImage
                     name={service}
+                    serviceLogo
                     className="w-full h-full object-contain"
-                    imgClassName={`rounded-md ${WHITEN_LOGOS.has(service) ? "brightness-0 invert" : ""}`}
+                    // Force EVERY provider mark white: brightness-0 flattens to a
+                    // black silhouette, invert → white (idempotent for already-white
+                    // marks). Keeps the provider grid visually consistent.
+                    imgClassName="brightness-0 invert"
                   />
                 )}
               </div>

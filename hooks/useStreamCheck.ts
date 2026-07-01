@@ -1,7 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { StreamCheck } from "@/lib/stream-verify";
+
+/** Keep probing until at least this many sources verify working + non-busy. */
+const TARGET_WORKING = 3;
+const WATCH_POLL_MS = 20000;
+const WATCH_MAX_ROUNDS = 15; // ~5 min, then stop to bound background load
 
 export type SourceStatus = "checking" | "working" | "dead" | "busy" | "unknown";
 
@@ -71,6 +76,47 @@ export function useStreamCheck(urls: string[]): UseStreamCheck {
 
   const current = checkedKey === key;
 
+  const workingNow = current ? urls.reduce((n, u) => (results[u]?.ok ? n + 1 : n), 0) : 0;
+
+  // Layer 2 watcher: soft-reprobe (merge results, NO loading flash) so a busy
+  // source that frees up — or a dead one that recovers — is detected and the
+  // player's auto-pick promotes it. Runs only while we're short of TARGET_WORKING
+  // and there are non-working candidates worth re-checking; bounded to avoid
+  // indefinite background load.
+  const urlsRef = useRef(urls);
+  useEffect(() => { urlsRef.current = urls; }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const softReprobe = useCallback(async () => {
+    const us = urlsRef.current;
+    if (us.length === 0) return;
+    try {
+      const res = await fetch("/api/stream-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls: us }),
+      });
+      const data: { results?: StreamCheck[] } = await res.json();
+      const map: Record<string, StreamCheck> = {};
+      for (const r of data.results || []) map[r.url] = r;
+      setResults((prev) => ({ ...prev, ...map }));
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!current || workingNow >= TARGET_WORKING) return;
+    const hasRetryable = urls.some((u) => results[u] && !results[u].ok);
+    if (!hasRetryable) return;
+    let rounds = 0;
+    const id = setInterval(() => {
+      rounds += 1;
+      softReprobe();
+      if (rounds >= WATCH_MAX_ROUNDS) clearInterval(id);
+    }, WATCH_POLL_MS);
+    return () => clearInterval(id);
+    // Re-arm when the working count changes (progress toward target) or the set changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, key, workingNow, softReprobe]);
+
   const statusOf = useCallback(
     (url: string): SourceStatus => {
       if (!current) return "checking";
@@ -83,9 +129,7 @@ export function useStreamCheck(urls: string[]): UseStreamCheck {
     [results, current]
   );
 
-  const workingCount = current
-    ? urls.reduce((n, u) => (results[u]?.ok ? n + 1 : n), 0)
-    : 0;
+  const workingCount = workingNow;
 
   const busyCount = current
     ? urls.reduce((n, u) => (results[u]?.busy ? n + 1 : n), 0)
