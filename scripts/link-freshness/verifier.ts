@@ -400,7 +400,10 @@ async function segmentLoads(playlistUrl: string): Promise<boolean> {
   }
 }
 
-const MAX_CANDIDATES_PER_CHANNEL = 10; // bound work + heap per channel
+// Raised from 10 → 16 so the deeper backend candidate pool (now 1 primary + up to
+// 9 backups per channel) actually gets verified, letting the active 5 fill with more
+// live-verified links. Still bounded so a channel's verify work + heap stays sane.
+const MAX_CANDIDATES_PER_CHANNEL = 16; // bound work + heap per channel
 const LIVENESS_PROBE_CAP = 3;          // max liveness probes per channel
 // No keep-cap here: return ALL loadable links so index.ts can build the sticky
 // active set (≤5) + the unbounded waiting bench. The active/waiting split is the
