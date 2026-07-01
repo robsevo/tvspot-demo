@@ -22,6 +22,12 @@ export interface StreamCheck {
   latencyMs: number;
   /** Short human-readable outcome, e.g. "ok", "timeout", "401 unauthorized". */
   reason: string;
+  /**
+   * The source isn't dead — it's temporarily BUSY (shared IPTV account at its
+   * connection limit: HTTP 456/429). Distinct from `ok:false` "dead" so the UI
+   * doesn't hide it: it plays fine once the shared slot frees up.
+   */
+  busy?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 6000;
@@ -71,7 +77,18 @@ export async function checkStream(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): 
     const latencyMs = Date.now() - start;
 
     if (!res.ok) {
-      return { url, ok: false, status: res.status, latencyMs, reason: httpReason(res.status) };
+      // 456 (upstream "connection limit reached") / 429 (rate limit) mean the source
+      // is BUSY, not dead — a shared IPTV account whose one slot is momentarily in
+      // use. Flag it so the UI keeps it as a candidate instead of badging it dead.
+      const busy = res.status === 456 || res.status === 429;
+      return {
+        url,
+        ok: false,
+        busy,
+        status: res.status,
+        latencyMs,
+        reason: busy ? "busy (connection limit)" : httpReason(res.status),
+      };
     }
 
     const ct = res.headers.get("content-type") || "";

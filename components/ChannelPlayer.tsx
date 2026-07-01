@@ -39,7 +39,10 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     return Array.from(new Set(merged)).slice(0, 10);
   }, [channel]);
 
-  const { statusOf, workingCount, loading, recheck } = useStreamCheck(probedUrls);
+  const { statusOf, workingCount, busyCount, loading, recheck } = useStreamCheck(probedUrls);
+  // The source ACTUALLY playing — playback is ground truth, so the verifier can
+  // never mark it dead or claim "no sources online" while it's on screen.
+  const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
 
   // A user-chosen source pins playback. Tracked by URL (not index) so reordering
   // the list as verdicts arrive never changes what the user selected.
@@ -67,13 +70,23 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     setPrevName(channel?.name);
     setPickedUrl(null);
     setFailedAt({});
+    setConfirmedUrl(null);
   }
 
   // A source is unusable if verification marked it dead OR it dropped within the
   // cooldown window (after which the relay has likely recovered).
-  const isDead = (u: string) =>
-    statusOf(u) === "dead" ||
-    (failedAt[u] !== undefined && Date.now() - failedAt[u] < FAIL_COOLDOWN_MS);
+  const isDead = (u: string) => {
+    // An actual mid-watch drop (cooldown) wins even over a confirmed source.
+    if (failedAt[u] !== undefined && Date.now() - failedAt[u] < FAIL_COOLDOWN_MS) return true;
+    // The source on screen is playing — a verify probe (which may hit a transient
+    // 456/timeout) can't override reality. Busy sources are "unknown", not dead.
+    if (u === confirmedUrl) return false;
+    return statusOf(u) === "dead";
+  };
+
+  // Working count that trusts playback: if the on-screen source plays but the probe
+  // didn't verify it, still count it — so we never say "0 online" while it's playing.
+  const shownWorking = workingCount + (confirmedUrl && statusOf(confirmedUrl) !== "working" ? 1 : 0);
 
   // Buttons: keep usable + still-checking sources (order preserved), hide dead/
   // failed ones, cap the list. If everything is gone, show them anyway so the user
@@ -158,6 +171,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
         isLive
         channelUp={channelUp}
         channelDown={channelDown}
+        onPlay={() => setConfirmedUrl(src)}
         onStall={handleSourceFailure}
         onError={handleSourceFailure}
       />
@@ -172,7 +186,11 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
             <span>
               {loading
                 ? "Checking sources…"
-                : `${workingCount} of ${probedUrls.length} sources online`}
+                : shownWorking > 0
+                  ? `${shownWorking} of ${probedUrls.length} sources online`
+                  : busyCount > 0
+                    ? `${busyCount} source${busyCount > 1 ? "s" : ""} busy — will connect when free`
+                    : `0 of ${probedUrls.length} sources online`}
             </span>
             <button
               onClick={recheckAll}

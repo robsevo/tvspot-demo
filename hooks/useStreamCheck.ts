@@ -14,6 +14,8 @@ interface UseStreamCheck {
   statusOf: (url: string) => SourceStatus;
   /** How many of `urls` have verified as working. */
   workingCount: number;
+  /** How many are BUSY (connection-limited) — not dead, just momentarily in use. */
+  busyCount: number;
   /** Re-run the probe (e.g. a manual "recheck" button). */
   recheck: () => void;
 }
@@ -73,7 +75,8 @@ export function useStreamCheck(urls: string[]): UseStreamCheck {
     (url: string): SourceStatus => {
       if (!current) return "checking";
       const r = results[url];
-      if (r) return r.ok ? "working" : "dead";
+      // A busy (connection-limited) source is NOT dead — keep it as a candidate.
+      if (r) return r.ok ? "working" : r.busy ? "unknown" : "dead";
       return "unknown";
     },
     [results, current]
@@ -83,11 +86,15 @@ export function useStreamCheck(urls: string[]): UseStreamCheck {
     ? urls.reduce((n, u) => (results[u]?.ok ? n + 1 : n), 0)
     : 0;
 
+  const busyCount = current
+    ? urls.reduce((n, u) => (results[u]?.busy ? n + 1 : n), 0)
+    : 0;
+
   const recheck = useCallback(() => {
     setResults({});
     setCheckedKey(""); // force the loading state until the new probe resolves
     setNonce((n) => n + 1);
   }, []);
 
-  return { results, loading, statusOf, workingCount, recheck };
+  return { results, loading, statusOf, workingCount, busyCount, recheck };
 }
