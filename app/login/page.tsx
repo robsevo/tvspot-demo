@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Smartphone, ChevronDown, Share, MoreVertical } from "lucide-react";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [showSecret, setShowSecret] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showInstall, setShowInstall] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
 
@@ -47,7 +48,7 @@ export default function LoginPage() {
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="w-full bg-card border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder:text-text-muted focus:outline-none focus:border-brand/50 transition-colors"
+            className="w-full bg-card border border-white/10 rounded-xl px-4 py-3 text-white text-base placeholder:text-text-muted focus:outline-none focus:border-brand/50 transition-colors"
             placeholder="Enter username"
             autoComplete="username"
             required
@@ -61,7 +62,7 @@ export default function LoginPage() {
               type={showPassword ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-card border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder:text-text-muted focus:outline-none focus:border-brand/50 transition-colors pr-10"
+              className="w-full bg-card border border-white/10 rounded-xl px-4 py-3 text-white text-base placeholder:text-text-muted focus:outline-none focus:border-brand/50 transition-colors pr-10"
               placeholder="Enter password"
               autoComplete="current-password"
               required
@@ -84,7 +85,7 @@ export default function LoginPage() {
               type={showSecret ? "text" : "password"}
               value={secretWord}
               onChange={(e) => setSecretWord(e.target.value)}
-              className="w-full bg-card border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder:text-text-muted focus:outline-none focus:border-brand/50 transition-colors pr-10"
+              className="w-full bg-card border border-white/10 rounded-xl px-4 py-3 text-white text-base placeholder:text-text-muted focus:outline-none focus:border-brand/50 transition-colors pr-10"
               placeholder="Enter secret word"
               required
             />
@@ -111,6 +112,51 @@ export default function LoginPage() {
           {loading ? "Signing in..." : "Sign In"}
         </button>
       </form>
+
+      {/* How to install to home screen — collapsed by default */}
+      <div className="w-full max-w-sm mt-6">
+        <button
+          type="button"
+          onClick={() => setShowInstall((v) => !v)}
+          className="w-full flex items-center justify-between text-text-muted text-xs font-medium px-1 py-2 hover:text-text-secondary transition-colors"
+          aria-expanded={showInstall}
+        >
+          <span className="flex items-center gap-1.5">
+            <Smartphone className="w-3.5 h-3.5" /> How to get the app
+          </span>
+          <ChevronDown className={`w-4 h-4 transition-transform ${showInstall ? "rotate-180" : ""}`} />
+        </button>
+
+        {showInstall && (
+          <div className="mt-1 rounded-xl bg-card border border-white/10 p-4 space-y-3 text-xs animate-fade-in">
+            <p className="text-text-secondary">
+              Install TVSpot to your home screen for a full-screen, app-like experience.
+            </p>
+
+            <div>
+              <p className="text-white font-semibold mb-1 flex items-center gap-1.5">
+                <Share className="w-3.5 h-3.5" /> iPhone / iPad (Safari)
+              </p>
+              <ol className="text-text-muted space-y-0.5 list-decimal list-inside">
+                <li>Tap the <span className="text-text-secondary">Share</span> button in the toolbar.</li>
+                <li>Scroll down and tap <span className="text-text-secondary">Add to Home Screen</span>.</li>
+                <li>Tap <span className="text-text-secondary">Add</span> in the top-right.</li>
+              </ol>
+            </div>
+
+            <div>
+              <p className="text-white font-semibold mb-1 flex items-center gap-1.5">
+                <MoreVertical className="w-3.5 h-3.5" /> Android (Chrome)
+              </p>
+              <ol className="text-text-muted space-y-0.5 list-decimal list-inside">
+                <li>Tap the <span className="text-text-secondary">⋮</span> menu in the top-right.</li>
+                <li>Tap <span className="text-text-secondary">Add to Home screen</span> or <span className="text-text-secondary">Install app</span>.</li>
+                <li>Tap <span className="text-text-secondary">Add</span> / <span className="text-text-secondary">Install</span> to confirm.</li>
+              </ol>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

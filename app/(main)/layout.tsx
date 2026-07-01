@@ -3,20 +3,20 @@
 import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import { useLastRoute } from "@/hooks/useLastRoute";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import TopBar from "@/components/TopBar";
 import BottomNav from "@/components/BottomNav";
 import FloatingPlayer from "@/components/FloatingPlayer";
+import ScrollToTop from "@/components/ScrollToTop";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { username, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
-  // Make a full reload (mobile tab eviction) feel seamless: come back to the same
-  // route, and the same scroll position, instead of a cold start on Home.
-  useLastRoute();
+  // Restore scroll position on a reload. Note: we deliberately do NOT restore the
+  // last route on cold launch — reopening the app should land on Home (the PWA
+  // start_url), not wherever you were.
   useScrollRestoration();
 
   useEffect(() => {
@@ -38,6 +38,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         {children}
       </main>
       {showNav && <BottomNav />}
+      {showNav && <ScrollToTop />}
       <FloatingPlayer />
     </div>
   );
