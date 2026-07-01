@@ -1,9 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import Link from "next/link";
 import PosterRail from "@/components/PosterRail";
-import { Search, X, Clock, TrendingUp, Loader2 } from "lucide-react";
+import { LogoImage } from "@/components/LogoImage";
+import { Search, X, Clock, TrendingUp, Loader2, Tv } from "lucide-react";
 import { proxyFetch } from "@/lib/api";
+import { useChannels } from "@/hooks/useChannels";
+import { channelSlug } from "@/lib/sources";
 import type { CatalogItem } from "@/lib/types";
 
 const CORPUS_CACHE_KEY = "tvspot_search_corpus_v1";
@@ -36,6 +40,7 @@ export default function SearchPage() {
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { channels } = useChannels();
 
   // Load recent searches
   useEffect(() => {
@@ -79,12 +84,23 @@ export default function SearchPage() {
     return { movies: rank(corpus.movies), series: rank(corpus.series) };
   }, [query, corpus]);
 
+  // Live-TV channels matching the query (name-based), best match first.
+  const channelResults = useMemo(() => {
+    const q = query.trim();
+    if (q.length < 1) return [];
+    return channels
+      .map((ch) => ({ ch, s: scoreMatch(ch.name, q) }))
+      .filter((x) => x.s >= 0)
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.ch);
+  }, [query, channels]);
+
   // Title suggestions derived from real matches (top of both lists).
   const suggestions = useMemo(() => {
     if (query.trim().length < 2) return [];
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const it of [...results.movies, ...results.series]) {
+    for (const it of [...channelResults.map((c) => ({ title: c.name })), ...results.movies, ...results.series]) {
       const t = it.title?.trim();
       if (t && !seen.has(norm(t))) {
         seen.add(norm(t));
@@ -93,7 +109,7 @@ export default function SearchPage() {
       if (out.length >= 6) break;
     }
     return out;
-  }, [results, query]);
+  }, [results, channelResults, query]);
 
   const commitRecent = useCallback((term: string) => {
     const t = term.trim();
@@ -112,7 +128,9 @@ export default function SearchPage() {
   };
 
   const hasQuery = query.trim().length >= 1;
-  const noResults = hasQuery && !corpusLoading && results.movies.length === 0 && results.series.length === 0;
+  const noResults =
+    hasQuery && !corpusLoading &&
+    results.movies.length === 0 && results.series.length === 0 && channelResults.length === 0;
 
   return (
     <div className="hud-grid-bg pt-14 min-h-screen pb-20 animate-page-rise">
@@ -124,7 +142,9 @@ export default function SearchPage() {
           <div>
             <h1 className="text-white text-lg font-bold">Search</h1>
             <p className="text-text-muted text-[11px]">
-              {corpusLoading ? "Loading library…" : `${corpus.movies.length + corpus.series.length} titles · all providers`}
+              {corpusLoading
+                ? "Loading library…"
+                : `${corpus.movies.length + corpus.series.length} titles · ${channels.length} channels`}
             </p>
           </div>
         </div>
@@ -154,9 +174,11 @@ export default function SearchPage() {
             )}
           </div>
 
-          {/* Live suggestions dropdown (real matching titles) */}
+          {/* Live suggestions dropdown (real matching titles). OPAQUE background —
+              glass-card is translucent, so the results rail behind it bled through
+              and the text "fused". Solid surface + border keeps it readable. */}
           {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 glass-card rounded-xl overflow-hidden shadow-xl z-30 animate-fade-in">
+            <div className="absolute top-full left-0 right-0 mt-1 bg-[#0c1426] ring-1 ring-white/10 rounded-xl overflow-hidden shadow-2xl shadow-black/60 z-30 animate-fade-in">
               {suggestions.map((s) => (
                 <button
                   key={s}
@@ -206,6 +228,35 @@ export default function SearchPage() {
             </div>
           ) : (
             <>
+              {channelResults.length > 0 && (
+                <div className="mb-5">
+                  <h2 className="text-white text-sm font-semibold px-4 mb-2">
+                    Channels ({channelResults.length})
+                  </h2>
+                  <div className="flex gap-2 overflow-x-auto px-4 poster-rail">
+                    {channelResults.slice(0, 20).map((ch) => (
+                      <Link
+                        key={ch.name}
+                        href={`/live/${channelSlug(ch.name)}`}
+                        className="flex-shrink-0 w-[104px] flex flex-col items-center gap-1.5 glass-card rounded-xl p-2.5 hover:bg-card/60 transition-colors"
+                      >
+                        <div className="w-14 h-11 rounded-lg bg-gradient-to-br from-zinc-200/90 via-zinc-400/75 to-zinc-600/70 flex items-center justify-center overflow-hidden p-1 ring-1 ring-white/15 relative">
+                          <LogoImage
+                            name={ch.name}
+                            logoUrl={ch.logo_url || ch.logo}
+                            className="w-full h-full object-contain"
+                            fallbackClassName="text-gray-800"
+                          />
+                          {ch.online && (
+                            <div className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-500 ring-1 ring-white" />
+                          )}
+                        </div>
+                        <span className="text-text-secondary text-[10px] leading-tight text-center truncate w-full">{ch.name}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
               {results.movies.length > 0 && (
                 <PosterRail title={`Movies (${results.movies.length})`} items={results.movies.slice(0, 30)} kind="movie" />
               )}
