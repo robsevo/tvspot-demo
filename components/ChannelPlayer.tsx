@@ -6,7 +6,7 @@ import VideoPlayer from "./VideoPlayer";
 import { channelSlug } from "@/lib/sources";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, X, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, Check, X, Loader2, RefreshCw, Info } from "lucide-react";
 
 /** How many sources to probe / show at most. */
 const MAX_SOURCES = 6;
@@ -242,6 +242,17 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
           </div>
         </div>
       )}
+
+      {/* Disclaimer — live sources cycle as providers come and go, so a periodic
+          Recheck is the fastest fix for stalls / a source that won't load. */}
+      <p className="flex items-start gap-1.5 px-1 text-[11px] text-text-muted">
+        <Info className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
+        <span>
+          Live streams cycle as providers come and go. If a channel stalls, buffers, or
+          won&apos;t load, tap <span className="text-text-secondary font-medium">Recheck</span> every
+          now and then to refresh the source list, or pick another source above.
+        </span>
+      </p>
     </div>
   );
 }

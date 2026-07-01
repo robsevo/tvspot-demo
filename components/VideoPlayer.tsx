@@ -555,8 +555,20 @@ export default function VideoPlayer({
   const showControls = useCallback(() => {
     setControlsVisible(true);
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
-    controlsTimer.current = setTimeout(() => setControlsVisible(false), 3000);
+    controlsTimer.current = setTimeout(() => setControlsVisible(false), 4000);
   }, []);
+
+  // Auto-hide the controls a few seconds after playback starts/resumes (they used
+  // to stay up forever until the first tap). While paused, keep them visible.
+  useEffect(() => {
+    if (controlsTimer.current) clearTimeout(controlsTimer.current);
+    if (playing) {
+      controlsTimer.current = setTimeout(() => setControlsVisible(false), 4000);
+    } else {
+      setControlsVisible(true);
+    }
+    return () => { if (controlsTimer.current) clearTimeout(controlsTimer.current); };
+  }, [playing]);
 
   const seek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const video = videoRef.current;
