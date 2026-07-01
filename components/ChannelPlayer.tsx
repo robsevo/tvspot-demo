@@ -16,6 +16,8 @@ function StatusDot({ status }: { status: SourceStatus }) {
   if (status === "checking") return <Loader2 className="w-3 h-3 animate-spin text-text-muted" />;
   if (status === "working") return <Check className="w-3 h-3 text-green-400" />;
   if (status === "dead") return <X className="w-3 h-3 text-red-400" />;
+  // Busy = connection-limited (shared account full right now), not dead — amber.
+  if (status === "busy") return <span className="w-2 h-2 rounded-full bg-amber-400" title="Busy — connection limit" />;
   return null;
 }
 
@@ -102,10 +104,22 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   }, [probedUrls, statusOf, pickedUrl, failedAt]);
 
   // Playback: honor a manual pick (unless it has since dropped); otherwise the
-  // first source that isn't dead/cooling. During probing nothing is dead yet, so
-  // source 1 plays instantly; a dead verdict or a mid-watch drop auto-advances.
+  // BEST auto source. Preference cycles past busy (connection-limited) accounts to
+  // a free one: confirmed-working non-busy first, then still-checking/unknown, then
+  // busy last (only if nothing better). During probing nothing is verified yet, so
+  // source 1 plays instantly; verdicts then promote a non-busy working source.
   const pickValid = pickedUrl != null && probedUrls.includes(pickedUrl) && !isDead(pickedUrl);
-  const firstAlive = probedUrls.find((u) => !isDead(u));
+  const pickRank = (u: string): number => {
+    if (u === confirmedUrl) return -1;         // already playing → never displace it
+    const s = statusOf(u);
+    if (s === "working") return 0;             // verified free + playable
+    if (s === "checking" || s === "unknown") return 1; // not yet judged — worth trying
+    if (s === "busy") return 2;                // connection-limited → last resort
+    return 3;                                   // dead
+  };
+  const firstAlive = probedUrls
+    .filter((u) => !isDead(u))
+    .sort((a, b) => pickRank(a) - pickRank(b))[0];
   // If every source is cooling down (a global relay outage), keep trying the
   // least-recently-failed one instead of blanking to "no stream" — it's the most
   // likely to have recovered, and the player's own recovery reconnects in place.
@@ -187,7 +201,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
               {loading
                 ? "Checking sources…"
                 : shownWorking > 0
-                  ? `${shownWorking} of ${probedUrls.length} sources online`
+                  ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${probedUrls.length}`
                   : busyCount > 0
                     ? `${busyCount} source${busyCount > 1 ? "s" : ""} busy — will connect when free`
                     : `0 of ${probedUrls.length} sources online`}

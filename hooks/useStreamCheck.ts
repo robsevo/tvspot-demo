@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { StreamCheck } from "@/lib/stream-verify";
 
-export type SourceStatus = "checking" | "working" | "dead" | "unknown";
+export type SourceStatus = "checking" | "working" | "dead" | "busy" | "unknown";
 
 interface UseStreamCheck {
   /** Verdict per source URL, for the currently-probed set. */
@@ -75,8 +75,9 @@ export function useStreamCheck(urls: string[]): UseStreamCheck {
     (url: string): SourceStatus => {
       if (!current) return "checking";
       const r = results[url];
-      // A busy (connection-limited) source is NOT dead — keep it as a candidate.
-      if (r) return r.ok ? "working" : r.busy ? "unknown" : "dead";
+      // "busy" (connection-limited) is distinct from dead — kept as a candidate,
+      // but de-prioritized vs a working non-busy source when auto-picking.
+      if (r) return r.ok ? "working" : r.busy ? "busy" : "dead";
       return "unknown";
     },
     [results, current]
