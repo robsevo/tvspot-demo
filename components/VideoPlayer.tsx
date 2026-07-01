@@ -277,47 +277,58 @@ export default function VideoPlayer({
     };
   }, [onPlay, onPause, onTimeUpdate, onEnded, onError]);
 
-  // Rebuffer feedback + recovery. Some sources play, then freeze ~30s while the
-  // edge restocks, then resume. We (1) show a ring immediately, (2) surface an
-  // on-page notice if it's sustained, and (3) nudge hls to pull segments forward
-  // so it rebuilds the buffer (maxBufferLength=45 → grabs well past 15s ahead)
-  // instead of idling. With no hls (native/MP4) there's nothing to nudge — the
-  // ring just shows while it waits it out.
+  // Rebuffer feedback + recovery. Some sources play, then freeze while the edge
+  // restocks, then resume. Drive the ring/notice off ACTUAL playback progress
+  // (does currentTime advance?), NOT the media `waiting`/`stalled`/`playing`
+  // events: on mobile — especially live — those fire constantly during perfectly
+  // smooth playback, and `playing` doesn't reliably fire to clear the ring, so the
+  // event-driven version showed "buffering" while the video was fine. We still use
+  // `waiting` for the silent hls.startLoad() nudge (pull segments forward), but it
+  // never touches the UI.
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
-    let noticeTimer: ReturnType<typeof setTimeout> | null = null;
-    let ringTimer: ReturnType<typeof setTimeout> | null = null;
-    const clearTimers = () => {
-      if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
-      if (ringTimer) { clearTimeout(ringTimer); ringTimer = null; }
-    };
 
-    const onWaiting = () => {
-      try { hlsRef.current?.startLoad(); } catch {} // silent recovery nudge — no UI yet
-      clearTimers();
-      // Only surface the ring/notice when the stream has actually STOPPED (sustained
-      // no-resume) — not for the brief buffering that happens during normal playback,
-      // which was just noise. If playback resumes first, `playing` clears these.
-      ringTimer = setTimeout(() => setBuffering(true), 5000);
-      noticeTimer = setTimeout(() => setBufferNotice(true), 8000);
-    };
-    const onResume = () => {
-      setBuffering(false);
-      setBufferNotice(false);
-      clearTimers();
-    };
-
+    const onWaiting = () => { try { hlsRef.current?.startLoad(); } catch {} };
     video.addEventListener("waiting", onWaiting);
     video.addEventListener("stalled", onWaiting);
-    video.addEventListener("playing", onResume);
-    video.addEventListener("canplaythrough", onResume);
+
+    // Only surface UI when currentTime genuinely stops advancing — and hide it the
+    // instant it moves again. Thresholds are real wall-clock stalls, so no false
+    // positives from segment-boundary `waiting` blips.
+    const RING_MS = 4000;    // no progress this long → spinner
+    const NOTICE_MS = 9000;  // still stuck → "rebuilding the stream" banner
+    let lastTime = video.currentTime;
+    let stalledSince = 0; // 0 = progressing
+    const id = setInterval(() => {
+      const v = videoRef.current;
+      if (!v) return;
+      // Not expected to be advancing → not "buffering".
+      if (v.paused || v.seeking || v.ended) {
+        lastTime = v.currentTime;
+        stalledSince = 0;
+        setBuffering(false);
+        setBufferNotice(false);
+        return;
+      }
+      if (v.currentTime > lastTime + 0.05) {
+        lastTime = v.currentTime;
+        stalledSince = 0;
+        setBuffering(false);
+        setBufferNotice(false);
+        return;
+      }
+      // Frozen: measure how long.
+      if (stalledSince === 0) stalledSince = Date.now();
+      const stuck = Date.now() - stalledSince;
+      if (stuck >= RING_MS) setBuffering(true);
+      if (stuck >= NOTICE_MS) setBufferNotice(true);
+    }, 500);
+
     return () => {
+      clearInterval(id);
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("stalled", onWaiting);
-      video.removeEventListener("playing", onResume);
-      video.removeEventListener("canplaythrough", onResume);
-      clearTimers();
     };
   }, [src]);
 
