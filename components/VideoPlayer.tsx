@@ -287,18 +287,25 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (!video || !src) return;
     let noticeTimer: ReturnType<typeof setTimeout> | null = null;
-    const clearNotice = () => { if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; } };
+    let ringTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearTimers = () => {
+      if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
+      if (ringTimer) { clearTimeout(ringTimer); ringTimer = null; }
+    };
 
     const onWaiting = () => {
-      setBuffering(true);
-      try { hlsRef.current?.startLoad(); } catch {} // pull segments forward, don't idle
-      clearNotice();
-      noticeTimer = setTimeout(() => setBufferNotice(true), 2500); // only if sustained
+      try { hlsRef.current?.startLoad(); } catch {} // silent recovery nudge — no UI yet
+      clearTimers();
+      // Only surface the ring/notice when the stream has actually STOPPED (sustained
+      // no-resume) — not for the brief buffering that happens during normal playback,
+      // which was just noise. If playback resumes first, `playing` clears these.
+      ringTimer = setTimeout(() => setBuffering(true), 5000);
+      noticeTimer = setTimeout(() => setBufferNotice(true), 8000);
     };
     const onResume = () => {
       setBuffering(false);
       setBufferNotice(false);
-      clearNotice();
+      clearTimers();
     };
 
     video.addEventListener("waiting", onWaiting);
@@ -310,7 +317,7 @@ export default function VideoPlayer({
       video.removeEventListener("stalled", onWaiting);
       video.removeEventListener("playing", onResume);
       video.removeEventListener("canplaythrough", onResume);
-      clearNotice();
+      clearTimers();
     };
   }, [src]);
 
@@ -604,12 +611,15 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Center play button when paused */}
+      {/* Center play button when paused. z-30 + pointer-events so it sits ABOVE the
+          bottom controls overlay — on the short VOD/series player that overlay
+          otherwise reached the center and swallowed the tap. */}
       {!playing && (
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
           <button
             onClick={togglePlay}
-            className="w-16 h-16 rounded-full bg-brand/90 flex items-center justify-center backdrop-blur-sm"
+            className="w-16 h-16 rounded-full bg-brand/90 flex items-center justify-center backdrop-blur-sm pointer-events-auto"
+            aria-label="Play"
           >
             <Play className="w-8 h-8 text-white fill-white" />
           </button>

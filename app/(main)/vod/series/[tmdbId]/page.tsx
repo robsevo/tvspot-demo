@@ -148,7 +148,11 @@ export default function VodSeriesPage() {
                       // One labeled source list: resolved CLEAN streams FIRST
                       // (default), then any backend direct streams, then the
                       // vidlink embed LAST (safety-net fallback). Capped at 5.
-                      const clean = (resolvedByEp[epKey] ?? []).map((url, n) => ({
+                      // HD1 (the first resolved source) has been unreliable —
+                      // prefer HD2+ when there's more than one; keep the sole one.
+                      const epResolved = resolvedByEp[epKey] ?? [];
+                      const cleanUrls = epResolved.length >= 2 ? epResolved.slice(1) : epResolved;
+                      const clean = cleanUrls.map((url, n) => ({
                         url,
                         kind: "stream" as const,
                         label: `HD ${n + 1}`,

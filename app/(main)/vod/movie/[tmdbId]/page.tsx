@@ -67,7 +67,10 @@ export default function VodMoviePage() {
   // backend direct streams, then the vidlink embed LAST as fallback.
   // Capped at 5 per product requirement.
   const sources = useMemo(() => {
-    const clean = resolved.map((url, i) => ({
+    // HD1 (the first resolved source) has been unreliable — prefer HD2+ when we
+    // have more than one clean source; keep the sole source when there's only one.
+    const cleanUrls = resolved.length >= 2 ? resolved.slice(1) : resolved;
+    const clean = cleanUrls.map((url, i) => ({
       url, kind: "stream" as const, label: `HD ${i + 1}`,
     }));
     const streams = (detail?.stream_urls ?? []).map((url, i) => ({
