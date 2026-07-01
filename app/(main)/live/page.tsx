@@ -33,6 +33,23 @@ const STATUS_STYLE: Record<GameStatus, { dot: string; ring: string; text: string
 };
 const teamAbbr = (t: GameEvent["home"]): string => t.abbrev || t.name.slice(0, 3).toUpperCase();
 
+/** Team logo (ESPN) with an abbreviation fallback when there's no logo or it 404s. */
+function TeamMark({ team, active }: { team: GameEvent["home"]; active: boolean }) {
+  const [err, setErr] = useState(false);
+  if (team.logo && !err) {
+    return (
+      <img
+        src={team.logo}
+        alt={team.name}
+        referrerPolicy="no-referrer"
+        onError={() => setErr(true)}
+        className="w-5 h-5 object-contain"
+      />
+    );
+  }
+  return <span className={active ? "text-white" : "text-text-secondary"}>{teamAbbr(team)}</span>;
+}
+
 export default function LivePage() {
   const { channels, loading } = useChannels();
   const { data: eventsData } = useEvents();
@@ -209,7 +226,7 @@ export default function LivePage() {
         <div className="flex items-center gap-2">
           <Link
             href="/events"
-            className="flex items-center gap-1.5 glass-card text-text-secondary hover:text-white text-xs font-medium px-3 py-2 rounded-xl transition-colors"
+            className="flex items-center gap-1.5 bg-brand text-white hover:bg-blue-700 text-xs font-semibold px-3.5 py-2 rounded-xl transition-colors shadow-md shadow-brand/30 hud-glow"
           >
             <CalendarDays className="w-4 h-4" />
             Events
@@ -232,7 +249,7 @@ export default function LivePage() {
               onClick={() => setActiveCat(cat)}
               className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all ${
                 activeCat === cat
-                  ? "bg-white/[0.07] text-white ring-1 ring-white/10"
+                  ? "bg-brand text-white ring-1 ring-brand/50 shadow-md shadow-brand/30"
                   : "glass-card text-text-secondary hover:text-white"
               }`}
             >
@@ -249,7 +266,7 @@ export default function LivePage() {
           onClick={() => setSelectedGameId(null)}
           className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all ${
             !selectedEntry
-              ? "bg-white/[0.07] text-white ring-1 ring-white/10"
+              ? "bg-brand text-white ring-1 ring-brand/50 shadow-md shadow-brand/30"
               : "glass-card text-text-secondary hover:text-white"
           }`}
         >
@@ -275,13 +292,15 @@ export default function LivePage() {
                 title={`${game.away.name} vs ${game.home.name}`}
                 className={`flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ring-1 ${
                   active
-                    ? `bg-white/[0.07] text-white ring-1 ring-white/10 ${s.ring}`
+                    ? "bg-brand text-white ring-1 ring-brand/50 shadow-md shadow-brand/30"
                     : `glass-card ${s.ring} text-text-secondary hover:text-white`
                 }`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${status === "live" ? "live-dot" : ""}`} />
-                <span className="whitespace-nowrap">
-                  {teamAbbr(game.away)} <span className="text-text-muted">v</span> {teamAbbr(game.home)}
+                <span className="flex items-center gap-1 whitespace-nowrap">
+                  <TeamMark team={game.away} active={active} />
+                  <span className={active ? "text-white/70" : "text-text-muted"}>v</span>
+                  <TeamMark team={game.home} active={active} />
                 </span>
                 <span className={`text-[10px] whitespace-nowrap ${active ? "text-white/80" : s.text}`}>
                   {suffix}
