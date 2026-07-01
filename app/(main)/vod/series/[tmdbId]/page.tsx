@@ -273,6 +273,7 @@ export default function VodSeriesPage() {
                               <VideoPlayer
                                 src={currentSource.url}
                                 autoPlay={false}
+                                title={detail?.title}
                                 key={currentSource.url}
                               />
                             )}

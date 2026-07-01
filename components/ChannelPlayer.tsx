@@ -154,6 +154,8 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
       <VideoPlayer
         src={src}
         channelName={channel.name}
+        title={channel.name}
+        isLive
         channelUp={channelUp}
         channelDown={channelDown}
         onStall={handleSourceFailure}

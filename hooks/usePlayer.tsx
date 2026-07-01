@@ -40,10 +40,37 @@ const PlayerContext = createContext<PlayerContextType>({
   setPlaying: () => {},
 });
 
+const STORAGE_KEY = "tvspot_player";
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const [currentItem, setCurrentItem] = useState<PlayerItem | null>(null);
   const [playing, setPlaying] = useState(false);
   const [minimized, setMinimized] = useState(false);
+
+  // Rehydrate the floating/mini player after a reload so a backgrounded-then-
+  // evicted tab comes back to what was playing instead of an empty player.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { currentItem: PlayerItem | null; minimized: boolean };
+      if (saved.currentItem) {
+        setCurrentItem(saved.currentItem);
+        setMinimized(saved.minimized ?? true);
+      }
+    } catch {}
+  }, []);
+
+  // Persist what's playing (not the volatile `playing` flag — resume paused).
+  useEffect(() => {
+    try {
+      if (currentItem) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ currentItem, minimized }));
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch {}
+  }, [currentItem, minimized]);
 
   const play = useCallback((item: PlayerItem) => {
     setCurrentItem(item);

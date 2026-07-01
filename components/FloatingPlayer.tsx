@@ -22,6 +22,8 @@ export default function FloatingPlayer() {
           autoPlay={playing}
           poster={currentItem.poster}
           channelName={currentItem.channelName}
+          title={currentItem.title}
+          isLive={currentItem.type === "live"}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
         />

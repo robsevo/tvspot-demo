@@ -18,6 +18,17 @@ const AuthContext = createContext<AuthContextType>({
   checkAuth: async () => {},
 });
 
+// Last-known username, cached so a reload can render the UI optimistically instead
+// of blanking to `null` for a full /api/auth/me round-trip (the white "restart"
+// flash). The cookie is still the source of truth — we always revalidate.
+const USER_KEY = "tvspot_user";
+const cacheUser = (u: string | null) => {
+  try {
+    if (u) localStorage.setItem(USER_KEY, u);
+    else localStorage.removeItem(USER_KEY);
+  } catch {}
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -26,15 +37,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await fetch("/api/auth/me");
       const data = await res.json();
-      setUsername(data.username ?? null);
+      const u = data.username ?? null;
+      setUsername(u);
+      cacheUser(u);
     } catch {
-      setUsername(null);
+      // Network blip (e.g. offline after eviction): keep the optimistic cached
+      // user rather than logging them out. Only an explicit no-user response clears it.
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    // Paint immediately from the cached user, then revalidate in the background.
+    let cached: string | null = null;
+    try {
+      cached = localStorage.getItem(USER_KEY);
+    } catch {}
+    if (cached) {
+      setUsername(cached);
+      setLoading(false);
+    }
     checkAuth();
   }, [checkAuth]);
 
@@ -48,11 +71,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       if (res.ok) {
         setUsername(username);
+        cacheUser(username);
         return true;
       }
       throw new Error(data.error || "Login failed");
     } catch (e) {
       setUsername(null);
+      cacheUser(null);
       throw e;
     }
   };
@@ -60,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     setUsername(null);
+    cacheUser(null);
   };
 
   return (

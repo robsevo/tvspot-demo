@@ -2,6 +2,7 @@
 
 import { AuthProvider } from "@/hooks/useAuth";
 import { PlayerProvider } from "@/hooks/usePlayer";
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import "./globals.css";
 
 export default function RootLayout({
@@ -25,6 +26,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
       <body className="bg-surface text-white antialiased">
+        <ServiceWorkerRegister />
         <AuthProvider>
           <PlayerProvider>
             {children}

@@ -1,8 +1,9 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { proxyFetch } from "@/lib/api";
+import { useContinueWatching } from "@/hooks/useContinueWatching";
 import Link from "next/link";
 import { ChevronLeft, Play } from "lucide-react";
 import VideoPlayer from "@/components/VideoPlayer";
@@ -79,6 +80,36 @@ export default function VodMoviePage() {
   }, [detail, resolved]);
   const idx = Math.min(sourceIndex, Math.max(0, sources.length - 1));
   const current = sources[idx];
+
+  // Continue Watching: resume position captured ONCE (so ongoing progress writes
+  // don't keep re-seeking the player), plus a throttled save back to the store.
+  const { items: cwItems, updateProgress } = useContinueWatching();
+  const [resumeTime, setResumeTime] = useState<number | undefined>(undefined);
+  const resumeCaptured = useRef(false);
+  useEffect(() => {
+    if (resumeCaptured.current) return;
+    const it = cwItems.find((i) => i.tmdbId === Number(tmdbId) && i.kind === "movie");
+    if (it && it.duration) {
+      resumeCaptured.current = true;
+      setResumeTime((it.progress / 100) * it.duration);
+    }
+  }, [cwItems, tmdbId]);
+
+  const handleProgress = useCallback(
+    (t: number, d: number) => {
+      if (!detail || !d) return;
+      updateProgress({
+        tmdbId: Number(tmdbId),
+        title: detail.title,
+        poster: detail.backdrop,
+        kind: "movie",
+        progress: (t / d) * 100,
+        duration: d,
+        updatedAt: Date.now(), // overwritten by the hook; required by the type
+      });
+    },
+    [detail, tmdbId, updateProgress],
+  );
 
   if (loading) {
     return (
@@ -210,6 +241,10 @@ export default function VodMoviePage() {
                 <VideoPlayer
                   src={current.url}
                   autoPlay={false}
+                  title={detail.title}
+                  poster={detail.backdrop}
+                  initialTime={resumeTime}
+                  onProgress={handleProgress}
                   key={current.url}
                 />
               )}

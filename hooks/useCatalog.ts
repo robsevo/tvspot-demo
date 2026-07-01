@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { proxyFetch } from "@/lib/api";
+import { readCache, writeCache } from "@/lib/localCache";
 import type { CatalogResponse, ServiceCatalogResponse, CatalogItem, CatalogSummaryEntry } from "@/lib/types";
 import { curate } from "@/lib/discovery";
 
@@ -20,19 +21,10 @@ export function useCatalog() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchCatalog = useCallback(async () => {
+  const fetchCatalog = useCallback(async (background = false) => {
     try {
-      setLoading(true);
+      if (!background) setLoading(true);
       setError(null);
-
-      const cached = sessionStorage.getItem(CATALOG_CACHE_KEY);
-      if (cached) {
-        const { services, summary } = JSON.parse(cached);
-        setServices(services);
-        setSummary(summary);
-        setLoading(false);
-        return;
-      }
 
       const data = await proxyFetch<CatalogResponse>("/api/lounge/vod/catalog");
       // Inject virtual services (guard against a malformed/empty backend response
@@ -51,12 +43,9 @@ export function useCatalog() {
       setServices(allServices);
       setSummary(allSummary);
       // Only cache a genuinely-populated catalog — caching an empty/failed
-      // response would pin VOD to "no titles" for the rest of the session.
+      // response would pin VOD to "no titles".
       if (realServices.length > 0) {
-        sessionStorage.setItem(
-          CATALOG_CACHE_KEY,
-          JSON.stringify({ services: allServices, summary: allSummary })
-        );
+        writeCache(CATALOG_CACHE_KEY, { services: allServices, summary: allSummary });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load catalog");
@@ -66,10 +55,19 @@ export function useCatalog() {
   }, []);
 
   useEffect(() => {
-    fetchCatalog();
+    // Paint instantly from the last catalog (survives eviction), revalidate behind it.
+    const cached = readCache<{ services: string[]; summary: Record<string, CatalogSummaryEntry> }>(CATALOG_CACHE_KEY);
+    if (cached && cached.data.services?.length) {
+      setServices(cached.data.services);
+      setSummary(cached.data.summary);
+      setLoading(false);
+      fetchCatalog(true);
+    } else {
+      fetchCatalog(false);
+    }
   }, [fetchCatalog]);
 
-  return { services, summary, loading, error, refetch: fetchCatalog };
+  return { services, summary, loading, error, refetch: () => fetchCatalog(false) };
 }
 
 export function useServiceCatalog(service: string | null) {
@@ -79,23 +77,16 @@ export function useServiceCatalog(service: string | null) {
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState<string>("");
 
-  const fetchService = useCallback(async () => {
+  const fetchService = useCallback(async (background = false) => {
     if (!service) return;
     try {
-      setLoading(true);
+      if (!background) {
+        setLoading(true);
+        setLabel("");
+      }
       setError(null);
-      setLabel("");
 
       const cacheKey = SERVICE_CACHE_PREFIX + service;
-      const cached = sessionStorage.getItem(cacheKey);
-      if (cached) {
-        const { movies, series, label } = JSON.parse(cached);
-        setMovies(movies);
-        setSeries(series);
-        setLabel(label || "");
-        setLoading(false);
-        return;
-      }
 
       if (service === "Classics") {
         const data = await proxyFetch<{ movies: any[]; series: any[] }>("/api/lounge/classics");
@@ -105,7 +96,7 @@ export function useServiceCatalog(service: string | null) {
         setSeries(series);
         setLabel("Classic Movies & Series");
         if (movies.length + series.length > 0) {
-          sessionStorage.setItem(cacheKey, JSON.stringify({ movies, series, label: "Classic Movies & Series" }));
+          writeCache(cacheKey, { movies, series, label: "Classic Movies & Series" });
         }
         return;
       }
@@ -117,7 +108,7 @@ export function useServiceCatalog(service: string | null) {
         setSeries([]);
         setLabel("New & In Theaters");
         if (all.length > 0) {
-          sessionStorage.setItem(cacheKey, JSON.stringify({ movies: all, series: [], label: "New & In Theaters" }));
+          writeCache(cacheKey, { movies: all, series: [], label: "New & In Theaters" });
         }
         return;
       }
@@ -134,7 +125,7 @@ export function useServiceCatalog(service: string | null) {
         setSeries(series);
         setLabel("Popular Right Now");
         if (movies.length + series.length > 0) {
-          sessionStorage.setItem(cacheKey, JSON.stringify({ movies, series, label: "Popular Right Now" }));
+          writeCache(cacheKey, { movies, series, label: "Popular Right Now" });
         }
         return;
       }
@@ -149,9 +140,9 @@ export function useServiceCatalog(service: string | null) {
       setSeries(svcSeries);
       setLabel(service);
       // Don't cache an empty result (a transient backend/auth hiccup) — it would
-      // otherwise stick as "no titles" until the tab is closed.
+      // otherwise stick as "no titles".
       if (svcMovies.length + svcSeries.length > 0) {
-        sessionStorage.setItem(cacheKey, JSON.stringify({ movies: svcMovies, series: svcSeries, label: service }));
+        writeCache(cacheKey, { movies: svcMovies, series: svcSeries, label: service });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load service catalog");
@@ -161,10 +152,23 @@ export function useServiceCatalog(service: string | null) {
   }, [service]);
 
   useEffect(() => {
-    fetchService();
-  }, [fetchService]);
+    if (!service) return;
+    // Paint instantly from the cached service catalog, then revalidate behind it.
+    const cached = readCache<{ movies: CatalogItem[]; series: CatalogItem[]; label: string }>(
+      SERVICE_CACHE_PREFIX + service,
+    );
+    if (cached && (cached.data.movies?.length || cached.data.series?.length)) {
+      setMovies(cached.data.movies);
+      setSeries(cached.data.series);
+      setLabel(cached.data.label || "");
+      setLoading(false);
+      fetchService(true);
+    } else {
+      fetchService(false);
+    }
+  }, [service, fetchService]);
 
-  return { movies, series, loading, error, label, refetch: fetchService };
+  return { movies, series, loading, error, label, refetch: () => fetchService(false) };
 }
 
 function normalizeItem(item: any): CatalogItem {

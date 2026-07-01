@@ -16,10 +16,18 @@ interface Props {
    *  case) so the parent can fail over to another source. */
   onStall?: () => void;
   onTimeUpdate?: (time: number) => void;
+  /** Throttled (~8s) progress callback for continue-watching persistence. */
+  onProgress?: (currentTime: number, duration: number) => void;
   onEnded?: () => void;
   channelUp?: () => void;
   channelDown?: () => void;
   channelName?: string;
+  /** Display title for MediaSession (lock-screen) metadata. */
+  title?: string;
+  /** True for live channels — changes background/foreground resync behavior. */
+  isLive?: boolean;
+  /** Seek here once metadata loads (resume-where-you-left-off for VOD). */
+  initialTime?: number;
 }
 
 export default function VideoPlayer({
@@ -31,13 +39,25 @@ export default function VideoPlayer({
   onError,
   onStall,
   onTimeUpdate,
+  onProgress,
   onEnded,
   channelUp,
   channelDown,
   channelName,
+  title,
+  isLive = false,
+  initialTime,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Was the video playing when the tab was backgrounded? (drives auto-resume).
+  const wasPlayingRef = useRef(false);
+  // Throttle continue-watching writes so timeupdate (~4Hz) doesn't spam storage.
+  const lastProgressSaveRef = useRef(0);
+  // Latest onProgress in a ref so the timeupdate effect doesn't re-subscribe when
+  // the callback identity changes each render.
+  const onProgressRef = useRef(onProgress);
+  useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
   const [playing, setPlaying] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -101,12 +121,17 @@ export default function VideoPlayer({
       });
       const hls = new Hls({
         enableWorker: true,
-        // No low-latency: build a real ~45s forward buffer to ride out upstream
+        // No low-latency: build a real ~60s forward buffer to ride out upstream
         // hiccups instead of pinning to the live edge with no cushion.
         lowLatencyMode: false,
         maxBufferLength: 60,
-        maxMaxBufferLength: 120, // bound growth for mobile memory
-        backBufferLength: 30,
+        // Cap forward growth for mobile memory. The forward buffer is what rides
+        // out relay outages, so keep it generous; it's the BACK buffer that was
+        // pure waste — 30s of already-watched media held in memory, making the
+        // tab a fat eviction target. Trim the back buffer hard (mobile browsers
+        // discard big-memory tabs, which is what made the app "restart").
+        maxMaxBufferLength: 90,
+        backBufferLength: 6,
         // Sit a fixed 36 SECONDS behind the live edge (not a segment COUNT). The
         // relay's transmux window is 36×3s = 108s, designed for exactly this — but
         // a count of 4 only bought ~12s on those 3s segments, leaving almost no
@@ -210,6 +235,11 @@ export default function VideoPlayer({
       if (video.duration) {
         setProgress(video.currentTime / video.duration);
         onTimeUpdate?.(video.currentTime);
+        const now = Date.now();
+        if (onProgressRef.current && now - lastProgressSaveRef.current > 8000) {
+          lastProgressSaveRef.current = now;
+          onProgressRef.current(video.currentTime, video.duration);
+        }
       }
     };
     const onEndedHandler = () => onEnded?.();
@@ -317,6 +347,81 @@ export default function VideoPlayer({
 
     return () => clearInterval(id);
   }, [src, onStall]);
+
+  // Background/foreground lifecycle — the core anti-eviction fix. When the tab is
+  // backgrounded, a playing video keeps a decoder + big buffer alive, making the
+  // OS far more likely to discard the tab (the "restart"). So on hide we pause and
+  // stop pulling segments (frees memory/CPU); on show we resume — and for LIVE we
+  // jump back to the edge rather than resuming stale.
+  useEffect(() => {
+    const onVisibility = () => {
+      const video = videoRef.current;
+      if (!video) return;
+      if (document.hidden) {
+        wasPlayingRef.current = !video.paused;
+        if (!video.paused) video.pause();
+        try { hlsRef.current?.stopLoad(); } catch {}
+      } else {
+        try { hlsRef.current?.startLoad(); } catch {}
+        if (isLive && hlsRef.current) {
+          const pos = hlsRef.current.liveSyncPosition;
+          if (typeof pos === "number" && isFinite(pos)) {
+            try { video.currentTime = pos; } catch {}
+          }
+        }
+        if (wasPlayingRef.current) video.play().catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [isLive]);
+
+  // MediaSession — lock-screen / notification controls, and a signal to the OS
+  // that this is active media (reduces background kills).
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+    const label = title || channelName;
+    if (label) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: label,
+          artist: isLive ? "Live" : "TVSPOT",
+          artwork: poster ? [{ src: poster, sizes: "512x512" }] : undefined,
+        });
+      } catch {}
+    }
+    const actions: [MediaSessionAction, () => void][] = [
+      ["play", () => { videoRef.current?.play().catch(() => {}); }],
+      ["pause", () => { videoRef.current?.pause(); }],
+      ["stop", () => { videoRef.current?.pause(); }],
+    ];
+    for (const [action, handler] of actions) {
+      try { navigator.mediaSession.setActionHandler(action, handler); } catch {}
+    }
+    return () => {
+      for (const [action] of actions) {
+        try { navigator.mediaSession.setActionHandler(action, null); } catch {}
+      }
+    };
+  }, [title, channelName, poster, isLive, src]);
+
+  // Resume-where-you-left-off: seek to initialTime once metadata is available.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !initialTime || initialTime < 1) return;
+    let done = false;
+    const seek = () => {
+      if (done) return;
+      done = true;
+      // Don't resume within the last 5s (basically the end) — start fresh instead.
+      if (!video.duration || initialTime < video.duration - 5) {
+        try { video.currentTime = initialTime; } catch {}
+      }
+    };
+    if (video.readyState >= 1) seek();
+    else video.addEventListener("loadedmetadata", seek, { once: true });
+    return () => video.removeEventListener("loadedmetadata", seek);
+  }, [initialTime, src]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;

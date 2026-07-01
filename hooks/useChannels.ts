@@ -2,38 +2,24 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { proxyFetch } from "@/lib/api";
+import { readCache, writeCache } from "@/lib/localCache";
 import type { ChannelsResponse, Channel } from "@/lib/types";
 
 const CACHE_KEY = "tvspot_channels";
-const CACHE_TTL = 60000; // 60 seconds
+const CACHE_TTL = 60000; // 60 seconds — after this we revalidate in the background
 
 export function useChannels() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchChannels = useCallback(async () => {
+  const fetchChannels = useCallback(async (background = false) => {
     try {
-      setLoading(true);
+      if (!background) setLoading(true);
       setError(null);
-
-      // Check session cache
-      const cached = sessionStorage.getItem(CACHE_KEY);
-      if (cached) {
-        const { data, timestamp } = JSON.parse(cached);
-        if (Date.now() - timestamp < CACHE_TTL) {
-          setChannels(data);
-          setLoading(false);
-          return;
-        }
-      }
-
       const data = await proxyFetch<ChannelsResponse>("/api/lounge/live-channels");
       setChannels(data.channels);
-      sessionStorage.setItem(
-        CACHE_KEY,
-        JSON.stringify({ data: data.channels, timestamp: Date.now() })
-      );
+      writeCache(CACHE_KEY, data.channels);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load channels");
     } finally {
@@ -42,8 +28,17 @@ export function useChannels() {
   }, []);
 
   useEffect(() => {
-    fetchChannels();
+    // Paint instantly from the last-known list (survives tab eviction), then only
+    // hit the network if it's stale.
+    const cached = readCache<Channel[]>(CACHE_KEY);
+    if (cached && cached.data.length > 0) {
+      setChannels(cached.data);
+      setLoading(false);
+      if (cached.ageMs > CACHE_TTL) fetchChannels(true);
+    } else {
+      fetchChannels(false);
+    }
   }, [fetchChannels]);
 
-  return { channels, loading, error, refetch: fetchChannels };
+  return { channels, loading, error, refetch: () => fetchChannels(false) };
 }

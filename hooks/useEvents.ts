@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { readCache, writeCache } from "@/lib/localCache";
 import type { EventsResponse } from "@/lib/leagues";
 
 /** Local YYYYMMDD (user's timezone), so "today's games" matches the user's day. */
@@ -22,29 +23,29 @@ export function useEvents(date?: string) {
   useEffect(() => {
     let cancelled = false;
     const cacheKey = `tvspot_events_${day}`;
-    try {
-      const cached = sessionStorage.getItem(cacheKey);
-      if (cached) {
-        const { payload, ts } = JSON.parse(cached);
-        if (Date.now() - ts < CACHE_TTL) {
-          setData(payload);
-          setLoading(false);
-          return;
-        }
-      }
-    } catch {}
 
-    setLoading(true);
+    // Paint instantly from cache (survives eviction); revalidate only when stale.
+    const cached = readCache<EventsResponse>(cacheKey);
+    if (cached && cached.data) {
+      setData(cached.data);
+      setLoading(false);
+      if (cached.ageMs <= CACHE_TTL) return () => { cancelled = true; };
+    } else {
+      setLoading(true);
+    }
+
     fetch(`/api/events?date=${day}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((payload: EventsResponse | null) => {
         if (cancelled) return;
-        setData(payload);
         if (payload) {
-          try { sessionStorage.setItem(cacheKey, JSON.stringify({ payload, ts: Date.now() })); } catch {}
+          setData(payload);
+          writeCache(cacheKey, payload);
+        } else if (!cached) {
+          setData(null);
         }
       })
-      .catch(() => { if (!cancelled) setData(null); })
+      .catch(() => { if (!cancelled && !cached) setData(null); })
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
