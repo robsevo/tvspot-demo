@@ -7,8 +7,17 @@ const BACKEND = process.env.BACKEND_API_URL || "https://api.example.com";
 const SCAN_SERVICES = ["Netflix", "HBO Max", "Prime Video", "Disney+", "Paramount+"];
 
 /** Era-defining titles to GUARANTEE in Classics — the named requests plus reality
- *  staples that discover misses on low vote counts. TMDB ids, verified. */
-const CLASSIC_MOVIE_PICKS = [816, 817, 818, 2105, 2770]; // Austin Powers x3, American Pie 1 & 2
+ *  staples that discover misses on low vote counts. TMDB ids, verified. Picks are
+ *  fetched by id and force-kept past the slice, so they always appear regardless of
+ *  the discover vote-count floor. */
+const CLASSIC_MOVIE_PICKS = [
+  816, 817, 818,            // Austin Powers 1-3
+  2105, 2770, 8273,         // American Pie, American Pie 2, American Wedding
+  11397,                    // Not Another Teen Movie
+  2109, 5175, 5174,         // Rush Hour 1-3
+  9737, 8961,               // Bad Boys, Bad Boys II (classic-era; the 2020/2024 films
+                            // are recent → already in the trending catalog + search)
+];
 const CLASSIC_TV_PICKS = [31343]; // Jersey Shore
 
 function fixImageUrl(url: string | undefined | null, size = "w500"): string {
