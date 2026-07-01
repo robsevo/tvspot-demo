@@ -1,9 +1,14 @@
 "use client";
 
 import { useRef } from "react";
+import dynamic from "next/dynamic";
 import { usePlayer } from "@/hooks/usePlayer";
-import VideoPlayer from "./VideoPlayer";
 import { X } from "lucide-react";
+
+// FloatingPlayer is mounted on every page but renders null unless something is
+// actually minimized. Loading VideoPlayer lazily keeps it (and its deps) out of
+// every route's initial bundle — it's fetched only when a mini-player appears.
+const VideoPlayer = dynamic(() => import("./VideoPlayer"), { ssr: false });
 
 export default function FloatingPlayer() {
   const { currentItem, playing, minimized, stop, togglePlay, setPlaying } = usePlayer();

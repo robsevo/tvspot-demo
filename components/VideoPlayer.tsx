@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
-import Hls from "hls.js";
+import type Hls from "hls.js"; // type only — the library is imported lazily below
 import { Play, Pause, Maximize, Minimize, SkipBack, SkipForward, Monitor, Cast, Volume2, VolumeX, Volume1 } from "lucide-react";
 import { castMedia, loadCastSDK } from "@/lib/cast";
 
@@ -105,7 +105,23 @@ export default function VideoPlayer({
     // Check if it's an HLS URL
     const isHlsUrl = typeof src === 'string' && src.includes(".m3u8");
 
-    if (isHlsUrl && Hls.isSupported()) {
+    // hls.js is ~150KB gzip: load it LAZILY, only when actually attaching an HLS
+    // stream on an MSE browser — never on Home/search/etc, and never on iOS (which
+    // plays .m3u8 natively). This keeps the library off every route's first-load JS.
+    const supportsMSE =
+      typeof window !== "undefined" &&
+      ("MediaSource" in window || "ManagedMediaSource" in window);
+
+    if (isHlsUrl && supportsMSE) {
+      void (async () => {
+      const Hls = (await import("hls.js")).default;
+      if (cancelled) return;
+      if (!Hls.isSupported()) {
+        // MSE present but hls.js unusable — let the element try natively.
+        video.src = src;
+        if (autoPlay) safePlay();
+        return;
+      }
       // The relay upstream (relay.example.com, used by TSN1 etc.) transiently 403s
       // and times out even on a healthy stream. Bump load retries so those blips
       // are absorbed by the loader instead of bubbling up as a fatal error that
@@ -206,12 +222,13 @@ export default function VideoPlayer({
         // Unrecoverable, or recovery budget exhausted → let the parent fail over.
         onError?.("HLS playback error");
       });
+      })();
     } else if (isHlsUrl && video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Native HLS (Safari)
+      // Native HLS (Safari / iOS) — plays .m3u8 without hls.js.
       video.src = src;
       if (autoPlay) safePlay();
     } else {
-      // Progressive MP4
+      // Progressive MP4 (or an HLS url on a browser with neither MSE nor native).
       video.src = src;
       if (autoPlay) safePlay();
     }
