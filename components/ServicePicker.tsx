@@ -91,9 +91,17 @@ export default function ServicePicker({ onSelectAction }: { onSelectAction: (ser
               </div>
               <div>
                 <span className="text-white text-sm font-bold block leading-tight drop-shadow">{service}</span>
-                <span className="text-white/75 text-[11px]">
-                  {s?.movies_count || 0} movies · {s?.series_count || 0} series
-                </span>
+                {/* The backend summary counts are sometimes empty (0/0) even though
+                    the provider has titles — show a neutral hint rather than a
+                    misleading "0 movies · 0 series". Real counts return automatically
+                    when the backend provides them. */}
+                {(s?.movies_count || 0) + (s?.series_count || 0) > 0 ? (
+                  <span className="text-white/75 text-[11px]">
+                    {s?.movies_count || 0} movies · {s?.series_count || 0} series
+                  </span>
+                ) : (
+                  <span className="text-white/60 text-[11px]">Tap to browse</span>
+                )}
               </div>
             </div>
           </button>
