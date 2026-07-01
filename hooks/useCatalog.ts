@@ -40,8 +40,12 @@ export function useCatalog() {
         // the summary so the card's count matches what actually opens.
         ...(realServices.includes("Other") ? { "Other": { movies_count: 40, series_count: 40, preview: "Popular right now" } } : {}),
       };
-      setServices(allServices);
-      setSummary(allSummary);
+      // A transient empty backend response must not blank the provider list the
+      // user is looking at during a background revalidation.
+      if (!background || realServices.length > 0) {
+        setServices(allServices);
+        setSummary(allSummary);
+      }
       // Only cache a genuinely-populated catalog — caching an empty/failed
       // response would pin VOD to "no titles".
       if (realServices.length > 0) {
@@ -92,9 +96,11 @@ export function useServiceCatalog(service: string | null) {
         const data = await proxyFetch<{ movies: any[]; series: any[] }>("/api/lounge/classics");
         const movies = curate((data.movies || []).map(normalizeItem));
         const series = curate((data.series || []).map(normalizeItem));
-        setMovies(movies);
-        setSeries(series);
-        setLabel("Classic Movies & Series");
+        if (!background || movies.length + series.length > 0) {
+          setMovies(movies);
+          setSeries(series);
+          setLabel("Classic Movies & Series");
+        }
         if (movies.length + series.length > 0) {
           writeCache(cacheKey, { movies, series, label: "Classic Movies & Series" });
         }
@@ -104,9 +110,11 @@ export function useServiceCatalog(service: string | null) {
       if (service === "Theater") {
         const data = await proxyFetch<{ now_playing: any[]; upcoming: any[] }>("/api/lounge/theater");
         const all = curate([...(data.now_playing || []), ...(data.upcoming || [])].map(normalizeItem));
-        setMovies(all);
-        setSeries([]);
-        setLabel("New & In Theaters");
+        if (!background || all.length > 0) {
+          setMovies(all);
+          setSeries([]);
+          setLabel("New & In Theaters");
+        }
         if (all.length > 0) {
           writeCache(cacheKey, { movies: all, series: [], label: "New & In Theaters" });
         }
@@ -121,9 +129,11 @@ export function useServiceCatalog(service: string | null) {
         );
         const movies = curate(data.movies || []).slice(0, 40);
         const series = curate(data.series || []).slice(0, 40);
-        setMovies(movies);
-        setSeries(series);
-        setLabel("Popular Right Now");
+        if (!background || movies.length + series.length > 0) {
+          setMovies(movies);
+          setSeries(series);
+          setLabel("Popular Right Now");
+        }
         if (movies.length + series.length > 0) {
           writeCache(cacheKey, { movies, series, label: "Popular Right Now" });
         }
@@ -136,9 +146,13 @@ export function useServiceCatalog(service: string | null) {
       );
       const svcMovies = curate(data.movies || []);
       const svcSeries = curate(data.series || []);
-      setMovies(svcMovies);
-      setSeries(svcSeries);
-      setLabel(service);
+      // A transient EMPTY revalidation must NOT blank the catalog the user is
+      // already viewing — only overwrite on a foreground load or a non-empty result.
+      if (!background || svcMovies.length + svcSeries.length > 0) {
+        setMovies(svcMovies);
+        setSeries(svcSeries);
+        setLabel(service);
+      }
       // Don't cache an empty result (a transient backend/auth hiccup) — it would
       // otherwise stick as "no titles".
       if (svcMovies.length + svcSeries.length > 0) {

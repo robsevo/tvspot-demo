@@ -18,8 +18,11 @@ export function useChannels() {
       if (!background) setLoading(true);
       setError(null);
       const data = await proxyFetch<ChannelsResponse>("/api/lounge/live-channels");
-      setChannels(data.channels);
-      writeCache(CACHE_KEY, data.channels);
+      // Don't let a transient empty revalidation blank the channel grid.
+      if (!background || (data.channels?.length ?? 0) > 0) {
+        setChannels(data.channels);
+      }
+      if ((data.channels?.length ?? 0) > 0) writeCache(CACHE_KEY, data.channels);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load channels");
     } finally {
