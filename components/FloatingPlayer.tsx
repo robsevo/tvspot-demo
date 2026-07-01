@@ -19,7 +19,8 @@ export default function FloatingPlayer() {
   return (
     <div
       ref={containerRef}
-      className="fixed bottom-16 right-3 z-50 w-[160px] rounded-lg overflow-hidden shadow-2xl shadow-black/50 bg-black border border-white/10"
+      style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 84px)" }}
+      className="fixed right-3 z-50 w-[160px] rounded-lg overflow-hidden shadow-2xl shadow-black/50 bg-black border border-white/10"
     >
       <div className="relative">
         <VideoPlayer
