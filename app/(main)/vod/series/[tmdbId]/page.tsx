@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { proxyFetch } from "@/lib/api";
+import { useContinueWatching } from "@/hooks/useContinueWatching";
 import Link from "next/link";
 import { ChevronLeft, ChevronDown, Play } from "lucide-react";
 import VideoPlayer from "@/components/VideoPlayer";
@@ -51,6 +52,14 @@ export default function VodSeriesPage() {
     },
     [tmdbId, resolvedByEp],
   );
+
+  // Continue Watching, keyed per episode (tmdbId + season + episode). Resume
+  // position is captured ONCE per episode-open (into episodeResume) so the ongoing
+  // progress writes below don't keep re-seeking the player mid-playback.
+  const { items: cwItems, updateProgress } = useContinueWatching();
+  const cwRef = useRef(cwItems);
+  useEffect(() => { cwRef.current = cwItems; }, [cwItems]);
+  const [episodeResume, setEpisodeResume] = useState<Record<string, number | undefined>>({});
 
   useEffect(() => {
     if (!tmdbId) return;
@@ -168,7 +177,18 @@ export default function VodSeriesPage() {
                         onClick={() => {
                           const opening = !isPlaying;
                           setPlayingEpisode(isPlaying ? null : epKey);
-                          if (opening) resolveEpisode(epKey, season.season_number, ep.episode_number);
+                          if (opening) {
+                            resolveEpisode(epKey, season.season_number, ep.episode_number);
+                            // Snapshot this episode's resume point at open time.
+                            const it = cwRef.current.find(
+                              (i) => i.tmdbId === Number(tmdbId) && i.kind === "series"
+                                && i.season === season.season_number && i.episode === ep.episode_number,
+                            );
+                            setEpisodeResume((prev) => ({
+                              ...prev,
+                              [epKey]: it && it.duration ? (it.progress / 100) * it.duration : undefined,
+                            }));
+                          }
                         }}
                         className="w-full flex items-center gap-3 glass-card rounded-xl px-3 py-2.5 text-left hover:bg-card/60 transition-colors"
                       >
@@ -274,6 +294,21 @@ export default function VodSeriesPage() {
                                 src={currentSource.url}
                                 autoPlay={false}
                                 title={detail?.title}
+                                initialTime={episodeResume[epKey]}
+                                onProgress={(t, d) => {
+                                  if (!detail || !d) return;
+                                  updateProgress({
+                                    tmdbId: Number(tmdbId),
+                                    title: detail.title,
+                                    poster: detail.poster,
+                                    kind: "series",
+                                    season: season.season_number,
+                                    episode: ep.episode_number,
+                                    progress: (t / d) * 100,
+                                    duration: d,
+                                    updatedAt: Date.now(), // overwritten by the hook; required by the type
+                                  });
+                                }}
                                 key={currentSource.url}
                               />
                             )}
