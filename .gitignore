@@ -13,8 +13,8 @@
 # testing
 /coverage
 
-# next.js
-/.next/
+# next.js (any stray .next/, e.g. from running next inside public/)
+.next/
 /out/
 
 # production
