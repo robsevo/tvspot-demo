@@ -28,13 +28,18 @@ export default function MyListPage() {
           <h2 className="text-white text-base font-semibold px-4 mb-2">Continue Watching</h2>
           <div className="flex gap-2 overflow-x-auto px-4 poster-rail">
             {continueWatching.map((item) => (
-              <div key={item.tmdbId} className="flex-shrink-0 w-[40vw] sm:w-[180px] md:w-[200px] lg:w-[220px]">
+              <div
+                key={`${item.tmdbId}-${item.season ?? ""}-${item.episode ?? ""}`}
+                className="flex-shrink-0 w-[40vw] sm:w-[180px] md:w-[200px] lg:w-[220px]"
+              >
                 <PosterCard
                   tmdbId={item.tmdbId}
                   title={item.title}
                   poster={item.poster}
                   kind={item.kind}
                   service=""
+                  season={item.season}
+                  episode={item.episode}
                 />
               </div>
             ))}

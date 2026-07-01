@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { proxyFetch } from "@/lib/api";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
@@ -60,6 +60,35 @@ export default function VodSeriesPage() {
   const cwRef = useRef(cwItems);
   useEffect(() => { cwRef.current = cwItems; }, [cwItems]);
   const [episodeResume, setEpisodeResume] = useState<Record<string, number | undefined>>({});
+
+  // Continue Watching deep-link: /vod/series/[id]?s=&e= auto-opens that episode,
+  // resumes it, and scrolls to it — so tapping a Continue Watching card picks up
+  // exactly where you left off instead of dumping you on the season list.
+  const searchParams = useSearchParams();
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (autoOpened.current || !detail) return;
+    const s = searchParams.get("s");
+    const e = searchParams.get("e");
+    if (!s || !e) return;
+    autoOpened.current = true;
+    const season = Number(s), episode = Number(e);
+    const epKey = `${season}-${episode}`;
+    setExpandedSeasons((prev) => ({ ...prev, [season]: true }));
+    setPlayingEpisode(epKey);
+    resolveEpisode(epKey, season, episode);
+    const it = cwRef.current.find(
+      (i) => i.tmdbId === Number(tmdbId) && i.kind === "series"
+        && i.season === season && i.episode === episode,
+    );
+    setEpisodeResume((prev) => ({
+      ...prev,
+      [epKey]: it && it.duration ? (it.progress / 100) * it.duration : undefined,
+    }));
+    setTimeout(() => {
+      document.getElementById(`ep-${epKey}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 300);
+  }, [detail, searchParams, resolveEpisode, tmdbId]);
 
   useEffect(() => {
     if (!tmdbId) return;
@@ -176,7 +205,7 @@ export default function VodSeriesPage() {
                       // WHOLE row is always tappable — no source needs to pre-exist
                       // (vidlink, the old always-present fallback, is gone).
                       return (
-                      <div key={i}>
+                      <div key={i} id={`ep-${epKey}`}>
                       <button
                         onClick={() => {
                           const opening = !isPlaying;

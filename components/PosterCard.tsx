@@ -13,9 +13,12 @@ interface Props {
   service?: string;
   rating?: number | string;
   year?: string;
+  /** For a series, deep-link straight to a specific episode (Continue Watching). */
+  season?: number;
+  episode?: number;
 }
 
-export default function PosterCard({ tmdbId, title, poster, kind }: Props) {
+export default function PosterCard({ tmdbId, title, poster, kind, season, episode }: Props) {
   const [imgError, setImgError] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -29,7 +32,7 @@ export default function PosterCard({ tmdbId, title, poster, kind }: Props) {
   }, []);
 
   const href = kind === "series"
-    ? `/vod/series/${tmdbId}`
+    ? `/vod/series/${tmdbId}${episode ? `?s=${season ?? 1}&e=${episode}` : ""}`
     : `/vod/movie/${tmdbId}`;
 
   // Prewarm the clean-stream resolve the moment the user shows intent (press on
