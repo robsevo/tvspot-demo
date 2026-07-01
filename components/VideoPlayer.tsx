@@ -573,9 +573,14 @@ export default function VideoPlayer({
   const seek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const video = videoRef.current;
     if (!video) return;
+    // Live streams report a non-finite duration (Infinity/NaN) — seeking by ratio
+    // would set currentTime to a non-finite value and throw. Only seek on a real
+    // (finite, seekable) duration; clamp the ratio to [0,1].
+    const d = video.duration;
+    if (!Number.isFinite(d) || d <= 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const pos = (e.clientX - rect.left) / rect.width;
-    video.currentTime = pos * video.duration;
+    const pos = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    video.currentTime = pos * d;
   }, []);
 
   // AirPlay support (Safari/iOS) — detect via video element
