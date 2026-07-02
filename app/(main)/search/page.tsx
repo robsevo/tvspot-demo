@@ -137,7 +137,10 @@ export default function SearchPage() {
 
   return (
     <div className="hud-grid-bg pt-14 min-h-screen pb-20 animate-page-rise">
-      <div className="px-4 mb-3">
+      {/* z-20 (vs the hud-grid-bg > * default of z-1): the results container is a
+          LATER SIBLING stacking context, so without this it paints over the
+          suggestions dropdown regardless of the dropdown's own z-index. */}
+      <div className="px-4 mb-3 relative z-20">
         <div className="flex items-center gap-2 mb-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-cyan-400 flex items-center justify-center hud-glow">
             <Search className="w-4 h-4 text-white" />
@@ -177,11 +180,11 @@ export default function SearchPage() {
             )}
           </div>
 
-          {/* Live suggestions dropdown (real matching titles). OPAQUE background —
-              glass-card is translucent, so the results rail behind it bled through
-              and the text "fused". Solid surface + border keeps it readable. */}
+          {/* Live suggestions dropdown (real matching titles). OPAQUE background,
+              no fade-in: a translucent frame (glass-card or mid-animation opacity)
+              lets the results rail behind bleed through and the text "fuses". */}
           {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-[#0c1426] ring-1 ring-white/10 rounded-xl overflow-hidden shadow-2xl shadow-black/60 z-30 animate-fade-in">
+            <div className="absolute top-full left-0 right-0 mt-1 bg-[#0c1426] ring-1 ring-white/10 rounded-xl overflow-hidden shadow-2xl shadow-black/60 z-30">
               {suggestions.map((s) => (
                 <button
                   key={s}
