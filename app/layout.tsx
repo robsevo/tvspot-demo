@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { verifyToken } from "@/lib/auth";
 import Providers from "@/components/Providers";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import DeployRefresh from "@/components/DeployRefresh";
 import "./globals.css";
 
 export default async function RootLayout({
@@ -33,6 +34,7 @@ export default async function RootLayout({
       </head>
       <body className="bg-surface text-white antialiased">
         <ServiceWorkerRegister />
+        <DeployRefresh />
         <Providers initialUsername={initialUsername}>
           {children}
         </Providers>
