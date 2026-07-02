@@ -19,10 +19,10 @@ import { useEffect } from "react";
  *    always tell it's stale — however it got loaded.
  *  - before reloading, DELETE the SW shell caches so the reload fetches the
  *    new build from the network instead of the stale cache.
- *  - reload at a benign moment: backgrounded → now (invisible); re-opened →
- *    at re-entry, before navigating into a broken route; foreground with
- *    nothing playing → now (SW-less repaint is still fast; state restores);
- *    video playing → defer to the next background.
+ *  - reload ONLY at invisible/boundary moments: backgrounded → now; re-opened
+ *    → at re-entry, before the user starts doing anything. NEVER mid-use —
+ *    a foreground reload, however "idle" the app looks, reads as the app
+ *    hard-resetting itself; mid-use mismatches wait for the next background.
  *  - 60s sessionStorage guard so no failure mode can reload-cycle the app.
  */
 const MY_BUILD = process.env.NEXT_PUBLIC_BUILD_ID || "dev";
@@ -50,14 +50,7 @@ export default function DeployRefresh() {
       window.location.reload();
     };
 
-    const videoPlaying = (): boolean => {
-      for (const v of document.querySelectorAll("video")) {
-        if (!v.paused && !v.ended && v.readyState > 2) return true;
-      }
-      return false;
-    };
-
-    const check = async () => {
+    const check = async (atReentry = false) => {
       if (disposed) return;
       let id: string | null = null;
       try {
@@ -68,8 +61,11 @@ export default function DeployRefresh() {
         return; // offline / transient — never reload on a failed check
       }
       if (!id || id === "dev" || id === MY_BUILD) return;
-      // A different build is live and this page is stale.
-      if (document.visibilityState === "hidden" || !videoPlaying()) void reload();
+      // A different build is live and this page is stale. NEVER reload while
+      // the user is actively in the app ("the app hard reset on me") — only
+      // when it's invisible (hidden) or at the natural re-entry boundary,
+      // before they've started doing anything.
+      if (document.visibilityState === "hidden" || atReentry) void reload();
       else pendingReload = true;
     };
 
@@ -77,7 +73,7 @@ export default function DeployRefresh() {
       if (document.visibilityState === "hidden") {
         if (pendingReload) void reload();
       } else {
-        void check(); // re-entry: catch deploys that shipped while backgrounded
+        void check(true); // re-entry: catch deploys that shipped while backgrounded
       }
     };
     const onPageHide = () => {
