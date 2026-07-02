@@ -349,7 +349,12 @@ export default function VodSeriesPage() {
                                     updatedAt: Date.now(), // overwritten by the hook; required by the type
                                   });
                                 }}
-                                onSourceFail={() => {
+                                onSourceFail={(lastTime) => {
+                                  // Carry the position so the next source resumes
+                                  // where the dead one stopped, not from 0:00.
+                                  if (lastTime > 30) {
+                                    setEpisodeResume((prev) => ({ ...prev, [epKey]: lastTime }));
+                                  }
                                   setEpisodeSourceIdx((prev) => {
                                     const cur = Math.min(prev[epKey] ?? 0, Math.max(0, sources.length - 1));
                                     if (cur + 1 >= sources.length) {

@@ -24,8 +24,9 @@ interface Props {
   initialTime?: number;
   autoPlay?: boolean;
   onProgress?: (currentTime: number, duration: number) => void;
-  /** This source is dead — advance. Fired at most once per src. */
-  onSourceFail?: () => void;
+  /** This source is dead — advance. Receives the last playback position so
+   *  the parent can resume the NEXT source there instead of restarting. */
+  onSourceFail?: (lastTime: number) => void;
 }
 
 const NEVER_STARTED_MS = 15_000;
@@ -41,6 +42,7 @@ export default function VodPlayer({
 }: Props) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const failed = useRef(false);
+  const lastTime = useRef(0);
   const [started, setStarted] = useState(false);
 
   const clear = () => {
@@ -52,7 +54,7 @@ export default function VodPlayer({
     if (failed.current) return; // one verdict per source
     failed.current = true;
     clear();
-    onSourceFail?.();
+    onSourceFail?.(lastTime.current);
   }, [onSourceFail]);
 
   const arm = useCallback(() => {
@@ -75,14 +77,27 @@ export default function VodPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
+  // Remux sources (relay live-style HLS) can't seek — resume is baked into the
+  // URL instead: the relay's ffmpeg starts reading the file at &start=<sec>.
+  const isRemux = src.includes("/remux.m3u8");
+  const effectiveSrc =
+    isRemux && initialTime && initialTime > 30
+      ? `${src}&start=${Math.max(0, Math.floor(initialTime) - 5)}`
+      : src;
+
   return (
     <VideoPlayer
-      src={src}
+      src={effectiveSrc}
       poster={poster}
       title={title}
-      initialTime={initialTime}
+      initialTime={isRemux ? undefined : initialTime}
       autoPlay={autoPlay}
       onProgress={onProgress}
+      onTimeUpdate={(t) => {
+        // Remux playback clocks from 0 at the baked offset — track absolute
+        // position so a further failover resumes at the right spot.
+        lastTime.current = isRemux && initialTime ? initialTime + t : t;
+      }}
       onPlayIntent={arm}
       onPlay={() => {
         setStarted(true);

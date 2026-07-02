@@ -89,7 +89,10 @@ export default function VodMoviePage() {
   // re-tap. Wraps nothing — past the last source we show an honest failure.
   const [autoResume, setAutoResume] = useState(false);
   const [allFailed, setAllFailed] = useState(false);
-  const advanceSource = useCallback(() => {
+  const advanceSource = useCallback((lastTime: number) => {
+    // Carry the position into the next source so failover resumes where the
+    // dead source stopped, instead of restarting the movie.
+    if (lastTime > 30) setResumeTime(lastTime);
     setSourceIndex((i) => {
       if (i + 1 >= sources.length) {
         setAllFailed(true);
