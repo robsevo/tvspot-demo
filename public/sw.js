@@ -11,7 +11,7 @@
  *
  * Bump VERSION to force-evict all caches on the next deploy.
  */
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL_CACHE = `tvspot-shell-${VERSION}`;
 const ASSET_CACHE = `tvspot-assets-${VERSION}`;
 

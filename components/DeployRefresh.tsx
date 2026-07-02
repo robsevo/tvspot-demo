@@ -3,36 +3,49 @@
 import { useEffect } from "react";
 
 /**
- * Reload gracefully when a NEW deployment ships while the app is open.
+ * Reload gracefully when THIS page's build no longer matches the deployment
+ * that's live.
  *
- * Without this, the open client keeps its old build until a navigation trips
+ * Without this, an open client keeps its old build until a navigation trips
  * Next's version-skew fallback: chunk/RSC fetches hit the new deployment,
- * mismatch, and Next hard-reloads mid-use — "the site broke and rebuilt".
+ * mismatch, hard reload mid-use ("the site broke and rebuilt"). Worse, the
+ * service worker's shell cache can RESURRECT the old build's HTML on that
+ * reload — old page → skew → reload → cached old page → … a reload death
+ * loop until the SW happens to update.
  *
- * Instead: poll /api/version at benign moments and, when the deployment id
- * changes, reload while it's invisible or near-invisible (the SW app shell
- * repaints in a frame; auth/player/route/scroll all restore):
- *   - app backgrounded → reload immediately (fully invisible)
- *   - app re-opened (visibilitychange → visible) → reload at re-entry, before
- *     the user navigates into a broken route (covers the overnight 4 AM deploy)
- *   - foreground + nothing playing → reload now (state restore makes it a blink)
- *   - foreground + video playing → don't interrupt; reload on next background
+ * Fix shape:
+ *  - compare the page's OWN build id (baked at build time) against
+ *    /api/version (served by whatever deployment is live). A stale page can
+ *    always tell it's stale — however it got loaded.
+ *  - before reloading, DELETE the SW shell caches so the reload fetches the
+ *    new build from the network instead of the stale cache.
+ *  - reload at a benign moment: backgrounded → now (invisible); re-opened →
+ *    at re-entry, before navigating into a broken route; foreground with
+ *    nothing playing → now (SW-less repaint is still fast; state restores);
+ *    video playing → defer to the next background.
+ *  - 60s sessionStorage guard so no failure mode can reload-cycle the app.
  */
+const MY_BUILD = process.env.NEXT_PUBLIC_BUILD_ID || "dev";
+
 export default function DeployRefresh() {
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") return;
+    // Local/hand builds aren't stamped — skew detection needs a real id.
+    if (MY_BUILD === "dev") return;
 
-    let baseline: string | null = null;
     let pendingReload = false;
     let disposed = false;
 
-    const reload = () => {
-      // Loop guard: if a reload just happened, don't chain another (e.g. a
-      // misbehaving /api/version must never make the app reload-cycle).
+    const reload = async () => {
       try {
         const last = Number(sessionStorage.getItem("tvspot_deploy_reload_ts") || 0);
         if (Date.now() - last < 60_000) return;
         sessionStorage.setItem("tvspot_deploy_reload_ts", String(Date.now()));
+      } catch {}
+      // Drop the stale app-shell so the reload lands on the NEW build.
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((k) => k.startsWith("tvspot-shell")).map((k) => caches.delete(k)));
       } catch {}
       window.location.reload();
     };
@@ -54,36 +67,33 @@ export default function DeployRefresh() {
       } catch {
         return; // offline / transient — never reload on a failed check
       }
-      if (!id) return;
-      if (baseline === null) {
-        baseline = id;
-        return;
-      }
-      if (id === baseline) return;
-      // New deployment is live. Reload invisibly if we can, defer if not.
-      if (document.visibilityState === "hidden" || !videoPlaying()) reload();
+      if (!id || id === "dev" || id === MY_BUILD) return;
+      // A different build is live and this page is stale.
+      if (document.visibilityState === "hidden" || !videoPlaying()) void reload();
       else pendingReload = true;
     };
 
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
-        if (pendingReload) reload();
+        if (pendingReload) void reload();
       } else {
         void check(); // re-entry: catch deploys that shipped while backgrounded
       }
     };
+    const onPageHide = () => {
+      if (pendingReload) void reload();
+    };
 
-    void check(); // establish baseline for this page load
+    void check();
     const interval = setInterval(() => void check(), 10 * 60_000);
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("pagehide", () => {
-      if (pendingReload) reload();
-    });
+    window.addEventListener("pagehide", onPageHide);
 
     return () => {
       disposed = true;
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
     };
   }, []);
 

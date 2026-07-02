@@ -15,7 +15,13 @@ export default function ServiceWorkerRegister() {
     if (process.env.NODE_ENV !== "production") return;
 
     const register = () => {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+      navigator.serviceWorker
+        .register("/sw.js")
+        // Check for a new sw.js immediately (not just the browser's own cadence)
+        // so a post-deploy VERSION bump rotates stale caches on the FIRST page
+        // load after a deploy instead of a navigation later.
+        .then((reg) => reg.update().catch(() => {}))
+        .catch(() => {});
     };
     if (document.readyState === "complete") register();
     else window.addEventListener("load", register, { once: true });
