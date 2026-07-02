@@ -6,7 +6,7 @@ import { proxyFetch } from "@/lib/api";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
 import Link from "next/link";
 import { ChevronLeft, Play } from "lucide-react";
-import VideoPlayer from "@/components/VideoPlayer";
+import VodPlayer from "@/components/VodPlayer";
 import { providerName, filterEmbeds } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
@@ -67,10 +67,10 @@ export default function VodMoviePage() {
   // backend direct streams, then the vidlink embed LAST as fallback.
   // Capped at 5 per product requirement.
   const sources = useMemo(() => {
-    // HD1 (the first resolved source) has been unreliable — prefer HD2+ when we
-    // have more than one clean source; keep the sole source when there's only one.
-    const cleanUrls = resolved.length >= 2 ? resolved.slice(1) : resolved;
-    const clean = cleanUrls.map((url, i) => ({
+    // Resolved order is already best-first (direct panel mp4 → Origin HD → provider-a
+    // → remux last). The old "drop HD1" hack predates that ordering and was
+    // throwing away the single most reliable source on every multi-source title.
+    const clean = resolved.map((url, i) => ({
       url, kind: "stream" as const, label: `HD ${i + 1}`,
     }));
     const streams = (detail?.stream_urls ?? []).map((url, i) => ({
@@ -83,6 +83,27 @@ export default function VodMoviePage() {
   }, [detail, resolved]);
   const idx = Math.min(sourceIndex, Math.max(0, sources.length - 1));
   const current = sources[idx];
+
+  // Auto-failover: when the playing source is pronounced dead (error / stall /
+  // never-started timeout), advance to the next and keep playing without a
+  // re-tap. Wraps nothing — past the last source we show an honest failure.
+  const [autoResume, setAutoResume] = useState(false);
+  const [allFailed, setAllFailed] = useState(false);
+  const advanceSource = useCallback(() => {
+    setSourceIndex((i) => {
+      if (i + 1 >= sources.length) {
+        setAllFailed(true);
+        return i;
+      }
+      setAutoResume(true);
+      return i + 1;
+    });
+  }, [sources.length]);
+  const pickSource = useCallback((i: number) => {
+    setAllFailed(false);
+    setAutoResume(false);
+    setSourceIndex(i);
+  }, []);
 
   // Continue Watching: resume position captured ONCE (so ongoing progress writes
   // don't keep re-seeking the player), plus a throttled save back to the store.
@@ -194,7 +215,7 @@ export default function VodMoviePage() {
                 sources.map((s, i) => (
                   <button
                     key={i}
-                    onClick={() => setSourceIndex(i)}
+                    onClick={() => pickSource(i)}
                     className={`text-[10px] px-2.5 py-1 rounded-full transition-colors ${
                       idx === i ? "bg-brand text-white hud-glow" : "glass-card text-text-muted hover:text-white"
                     }`}
@@ -241,18 +262,28 @@ export default function VodMoviePage() {
                   </button>
                 )
               ) : (
-                <VideoPlayer
+                <VodPlayer
                   src={current.url}
-                  autoPlay={false}
+                  autoPlay={autoResume}
                   title={detail.title}
                   poster={detail.backdrop}
                   initialTime={resumeTime}
                   onProgress={handleProgress}
+                  onSourceFail={advanceSource}
                   key={current.url}
                 />
               )}
             </div>
-            {/* No auto-switch — the user picks. Nudge after 30s on this source. */}
+            {autoResume && !allFailed && (
+              <p className="text-text-muted text-[10px] mt-1.5">
+                Previous source failed — switched to {current.label}.
+              </p>
+            )}
+            {allFailed && (
+              <p className="text-red-400/90 text-xs mt-1.5">
+                None of the sources are playing right now. Try again in a minute, or pick a source above to retry.
+              </p>
+            )}
             <SourceTroubleHint resetKey={idx} />
           </div>
         )}

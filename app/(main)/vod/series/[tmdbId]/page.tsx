@@ -6,7 +6,7 @@ import { proxyFetch } from "@/lib/api";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
 import Link from "next/link";
 import { ChevronLeft, ChevronDown, Play } from "lucide-react";
-import VideoPlayer from "@/components/VideoPlayer";
+import VodPlayer from "@/components/VodPlayer";
 import { providerName, filterEmbeds } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
@@ -26,6 +26,10 @@ export default function VodSeriesPage() {
   // Click-to-play gate for embeds (they autoplay on mount otherwise). Tracks the
   // started embed URL; switching source/episode re-gates. Render-time derive.
   const [startedUrl, setStartedUrl] = useState<string | null>(null);
+  // Auto-failover state for the episode currently playing: advance past a dead
+  // source without a re-tap; past the last source, show an honest failure.
+  const [autoResume, setAutoResume] = useState(false);
+  const [allFailed, setAllFailed] = useState(false);
   // Seasons start COLLAPSED — tap a season header to expand its episodes.
   const [expandedSeasons, setExpandedSeasons] = useState<Record<number, boolean>>({});
   const toggleSeason = (n: number) =>
@@ -175,13 +179,10 @@ export default function VodSeriesPage() {
                       const epKey = `${season.season_number}-${ep.episode_number}`;
                       const isPlaying = playingEpisode === epKey;
                       // One labeled source list: resolved CLEAN streams FIRST
-                      // (default), then any backend direct streams, then the
-                      // vidlink embed LAST (safety-net fallback). Capped at 5.
-                      // HD1 (the first resolved source) has been unreliable —
-                      // prefer HD2+ when there's more than one; keep the sole one.
+                      // (default, already best-first: direct mp4 → Origin HD →
+                      // provider-a → remux last), then backend streams, embeds last.
                       const epResolved = resolvedByEp[epKey] ?? [];
-                      const cleanUrls = epResolved.length >= 2 ? epResolved.slice(1) : epResolved;
-                      const clean = cleanUrls.map((url, n) => ({
+                      const clean = epResolved.map((url, n) => ({
                         url,
                         kind: "stream" as const,
                         label: `HD ${n + 1}`,
@@ -210,6 +211,8 @@ export default function VodSeriesPage() {
                         onClick={() => {
                           const opening = !isPlaying;
                           setPlayingEpisode(isPlaying ? null : epKey);
+                          setAutoResume(false);
+                          setAllFailed(false);
                           if (opening) {
                             resolveEpisode(epKey, season.season_number, ep.episode_number);
                             // Snapshot this episode's resume point at open time.
@@ -274,7 +277,11 @@ export default function VodSeriesPage() {
                               sources.map((src, n) => (
                                 <button
                                   key={n}
-                                  onClick={() => setEpisodeSourceIdx((prev) => ({ ...prev, [epKey]: n }))}
+                                  onClick={() => {
+                                    setAutoResume(false);
+                                    setAllFailed(false);
+                                    setEpisodeSourceIdx((prev) => ({ ...prev, [epKey]: n }));
+                                  }}
                                   className={`text-[10px] px-2.5 py-1 rounded-full transition-colors ${
                                     epSrcIdx === n
                                       ? "bg-brand text-white hud-glow"
@@ -323,9 +330,9 @@ export default function VodSeriesPage() {
                                 </button>
                               )
                             ) : (
-                              <VideoPlayer
+                              <VodPlayer
                                 src={currentSource.url}
-                                autoPlay={false}
+                                autoPlay={autoResume}
                                 title={detail?.title}
                                 initialTime={episodeResume[epKey]}
                                 onProgress={(t, d) => {
@@ -342,11 +349,31 @@ export default function VodSeriesPage() {
                                     updatedAt: Date.now(), // overwritten by the hook; required by the type
                                   });
                                 }}
+                                onSourceFail={() => {
+                                  setEpisodeSourceIdx((prev) => {
+                                    const cur = Math.min(prev[epKey] ?? 0, Math.max(0, sources.length - 1));
+                                    if (cur + 1 >= sources.length) {
+                                      setAllFailed(true);
+                                      return prev;
+                                    }
+                                    setAutoResume(true);
+                                    return { ...prev, [epKey]: cur + 1 };
+                                  });
+                                }}
                                 key={currentSource.url}
                               />
                             )}
                           </div>
-                          {/* No auto-switch — user picks. Nudge after 30s. */}
+                          {autoResume && !allFailed && (
+                            <p className="text-text-muted text-[10px]">
+                              Previous source failed — switched to {currentSource.label}.
+                            </p>
+                          )}
+                          {allFailed && (
+                            <p className="text-red-400/90 text-xs">
+                              None of the sources are playing right now. Try again in a minute, or pick a source above to retry.
+                            </p>
+                          )}
                           <SourceTroubleHint resetKey={`${epKey}-${epSrcIdx}`} />
                         </div>
                       )}

@@ -15,6 +15,11 @@ interface Props {
   /** Fired when playback makes no progress for too long (the "plays then drops"
    *  case) so the parent can fail over to another source. */
   onStall?: () => void;
+  /** Fired the moment the user asks for playback (tap on the play button /
+   *  overlay). Lets a VOD parent arm a "nothing ever played" timeout — the
+   *  stall watchdog can't cover that case because a source that never starts
+   *  stays paused. */
+  onPlayIntent?: () => void;
   onTimeUpdate?: (time: number) => void;
   /** Throttled (~8s) progress callback for continue-watching persistence. */
   onProgress?: (currentTime: number, duration: number) => void;
@@ -38,6 +43,7 @@ export default function VideoPlayer({
   onPause,
   onError,
   onStall,
+  onPlayIntent,
   onTimeUpdate,
   onProgress,
   onEnded,
@@ -68,6 +74,9 @@ export default function VideoPlayer({
   // sustained-rebuffer banner (the "freezes ~30s then resumes" case).
   const [buffering, setBuffering] = useState(false);
   const [bufferNotice, setBufferNotice] = useState(false);
+  // User tapped play but nothing has started yet — drives the spinner on the
+  // center button so a slow/dead source doesn't look like a dead button.
+  const [awaitingPlay, setAwaitingPlay] = useState(false);
   const [castAvailable, setCastAvailable] = useState(false);
   const [airPlaySupported, setAirPlaySupported] = useState(false);
   const controlsTimer = useRef<NodeJS.Timeout | null>(null);
@@ -95,6 +104,10 @@ export default function VideoPlayer({
 
     // Cancel any pending play() from previous src to avoid race
     video.pause();
+    // Fresh source: clear a stale spinner; VOD auto-advance (autoPlay after a
+    // failover) starts in the "waiting for playback" state so the user sees
+    // progress, not a dead frame. Live keeps its existing overlay behavior.
+    setAwaitingPlay(autoPlay && !isLive);
 
     // Clean up previous HLS instance
     if (hlsRef.current) {
@@ -240,13 +253,13 @@ export default function VideoPlayer({
         hlsRef.current = null;
       }
     };
-  }, [src, autoPlay, onError]);
+  }, [src, autoPlay, onError, isLive]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const onPlayHandler = () => { setPlaying(true); onPlay?.(); };
+    const onPlayHandler = () => { setPlaying(true); setAwaitingPlay(false); onPlay?.(); };
     const onPauseHandler = () => { setPlaying(false); onPause?.(); };
     const onTimeHandler = () => {
       if (video.duration) {
@@ -260,7 +273,7 @@ export default function VideoPlayer({
       }
     };
     const onEndedHandler = () => onEnded?.();
-    const onErrorHandler = () => onError?.("Video playback error");
+    const onErrorHandler = () => { setAwaitingPlay(false); onError?.("Video playback error"); };
 
     video.addEventListener("play", onPlayHandler);
     video.addEventListener("pause", onPauseHandler);
@@ -464,9 +477,13 @@ export default function VideoPlayer({
     // play() returns a promise that REJECTS (AbortError) if a load/pause
     // interrupts it before it resolves — e.g. a source swap mid-tap. Always
     // swallow it so it never surfaces as an unhandled rejection in the console.
-    if (video.paused) { const p = video.play(); if (p) p.catch(() => {}); }
-    else video.pause();
-  }, []);
+    if (video.paused) {
+      setAwaitingPlay(true);
+      onPlayIntent?.();
+      const p = video.play();
+      if (p) p.catch(() => {});
+    } else video.pause();
+  }, [onPlayIntent]);
 
   const toggleMute = useCallback(() => {
     const video = videoRef.current;
@@ -641,7 +658,9 @@ export default function VideoPlayer({
 
       {/* Center play button when paused. z-30 + pointer-events so it sits ABOVE the
           bottom controls overlay — on the short VOD/series player that overlay
-          otherwise reached the center and swallowed the tap. */}
+          otherwise reached the center and swallowed the tap. After a tap, the
+          icon becomes a spinner until playback actually starts (or errors) —
+          a slow source must never look like a dead button. */}
       {!playing && (
         <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
           <button
@@ -649,7 +668,11 @@ export default function VideoPlayer({
             className="w-16 h-16 rounded-full bg-brand/90 flex items-center justify-center backdrop-blur-sm pointer-events-auto"
             aria-label="Play"
           >
-            <Play className="w-8 h-8 text-white fill-white" />
+            {awaitingPlay ? (
+              <span className="w-8 h-8 rounded-full border-[3px] border-white/30 border-t-white animate-spin" />
+            ) : (
+              <Play className="w-8 h-8 text-white fill-white" />
+            )}
           </button>
         </div>
       )}
