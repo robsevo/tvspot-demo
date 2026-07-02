@@ -19,4 +19,7 @@ export const CLASSIC_MOVIE_PICKS = [
   10050,                    // Get Over It (2001, Kirsten Dunst)
 ];
 
-export const CLASSIC_TV_PICKS = [31343]; // Jersey Shore
+export const CLASSIC_TV_PICKS = [
+  31343,                    // Jersey Shore
+  607,                      // The Powerpuff Girls (1998)
+];

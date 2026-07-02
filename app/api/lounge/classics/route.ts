@@ -123,6 +123,7 @@ export async function GET(request: NextRequest) {
       ...[1, 2].map((p) => get(`${TV}&sort_by=popularity.desc&vote_count.gte=200&page=${p}`)),
       get(`${TV}&sort_by=vote_count.desc&vote_count.gte=400&page=1`),
       ...[1, 2].map((p) => get(`${TV}&with_genres=10764&sort_by=popularity.desc&vote_count.gte=20&page=${p}`)), // reality (Jersey Shore, The Hills, …)
+      ...[1, 2].map((p) => get(`${TV}&with_genres=16&sort_by=popularity.desc&vote_count.gte=60&page=${p}`)), // classic animation (Powerpuff Girls, Dexter's Lab, …)
     ];
 
     // picks (fetched by id) lead the pool so they sort naturally, and are force-kept
