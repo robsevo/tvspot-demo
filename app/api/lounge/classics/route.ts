@@ -1,25 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+// Guaranteed picks — fetched by id and force-kept past the slice, so they always
+// appear regardless of the discover vote-count floor. Shared with the nightly
+// vod-index build so they also get IPTV sources (lib/classic-picks.ts).
+import { CLASSIC_MOVIE_PICKS, CLASSIC_TV_PICKS } from "@/lib/classic-picks";
 
 const TMDB_TOKEN = process.env.TMDB_ACCESS_TOKEN;
 const BACKEND = process.env.BACKEND_API_URL || "https://api.example.com";
 
 // Services to scan when deriving classics from the backend catalog (no token).
 const SCAN_SERVICES = ["Netflix", "HBO Max", "Prime Video", "Disney+", "Paramount+"];
-
-/** Era-defining titles to GUARANTEE in Classics — the named requests plus reality
- *  staples that discover misses on low vote counts. TMDB ids, verified. Picks are
- *  fetched by id and force-kept past the slice, so they always appear regardless of
- *  the discover vote-count floor. */
-const CLASSIC_MOVIE_PICKS = [
-  816, 817, 818,            // Austin Powers 1-3
-  2105, 2770, 8273,         // American Pie, American Pie 2, American Wedding
-  11397,                    // Not Another Teen Movie
-  2109, 5175, 5174,         // Rush Hour 1-3
-  9737, 8961,               // Bad Boys, Bad Boys II (classic-era; the 2020/2024 films
-                            // are recent → already in the trending catalog + search)
-  10050,                    // Get Over It (2001, Kirsten Dunst)
-];
-const CLASSIC_TV_PICKS = [31343]; // Jersey Shore
 
 function fixImageUrl(url: string | undefined | null, size = "w500"): string {
   if (!url) return "";
