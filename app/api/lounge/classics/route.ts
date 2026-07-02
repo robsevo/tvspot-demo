@@ -17,6 +17,7 @@ const CLASSIC_MOVIE_PICKS = [
   2109, 5175, 5174,         // Rush Hour 1-3
   9737, 8961,               // Bad Boys, Bad Boys II (classic-era; the 2020/2024 films
                             // are recent → already in the trending catalog + search)
+  10050,                    // Get Over It (2001, Kirsten Dunst)
 ];
 const CLASSIC_TV_PICKS = [31343]; // Jersey Shore
 

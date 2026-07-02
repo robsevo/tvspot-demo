@@ -10,7 +10,7 @@ import { useChannels } from "@/hooks/useChannels";
 import { channelSlug } from "@/lib/sources";
 import type { CatalogItem } from "@/lib/types";
 
-const CORPUS_CACHE_KEY = "tvspot_search_corpus_v1";
+const CORPUS_CACHE_KEY = "tvspot_search_corpus_v2";
 
 /** Case/diacritic-insensitive normalize for matching. */
 function norm(s: string): string {
@@ -49,7 +49,9 @@ export default function SearchPage() {
     } catch {}
   }, []);
 
-  // Load the searchable corpus once (merged movies + series across providers).
+  // Load the searchable corpus once — the FULL universe (all service catalogs +
+  // classics + trending), not just the trending slice, so anything browsable is
+  // findable. Falls back to trending if the corpus route fails.
   useEffect(() => {
     const cached = sessionStorage.getItem(CORPUS_CACHE_KEY);
     if (cached) {
@@ -59,7 +61,8 @@ export default function SearchPage() {
         return;
       } catch {}
     }
-    proxyFetch<{ movies: CatalogItem[]; series: CatalogItem[] }>("/api/lounge/catalog?trending=true")
+    proxyFetch<{ movies: CatalogItem[]; series: CatalogItem[] }>("/api/lounge/search-corpus")
+      .catch(() => proxyFetch<{ movies: CatalogItem[]; series: CatalogItem[] }>("/api/lounge/catalog?trending=true"))
       .then((data) => {
         const c = { movies: data.movies || [], series: data.series || [] };
         setCorpus(c);
