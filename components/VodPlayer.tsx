@@ -29,7 +29,12 @@ interface Props {
   onSourceFail?: (lastTime: number) => void;
 }
 
+// Remux sources get a longer runway: a cold relay ffmpeg spawn takes ~20-24s
+// to produce the first manifest (the relay holds the request meanwhile), and
+// failing over AWAY from the last-resort source because it was still warming
+// up defeats its purpose.
 const NEVER_STARTED_MS = 15_000;
+const NEVER_STARTED_REMUX_MS = 35_000;
 
 export default function VodPlayer({
   src,
@@ -59,13 +64,14 @@ export default function VodPlayer({
 
   const arm = useCallback(() => {
     clear();
+    const ms = src.includes("/remux.m3u8") ? NEVER_STARTED_REMUX_MS : NEVER_STARTED_MS;
     timer.current = setTimeout(() => {
       if (!failed.current && !started) fail();
-    }, NEVER_STARTED_MS);
+    }, ms);
     // `started` is intentionally read via state at fire time through the
     // closure guard below in onPlay (which clears the timer) — an armed timer
     // that outlives a successful start is always cleared before firing.
-  }, [fail, started]);
+  }, [fail, started, src]);
 
   // New source: reset the verdict; if it auto-plays (failover advance), the
   // play attempt starts immediately — arm the never-started timeout now.
