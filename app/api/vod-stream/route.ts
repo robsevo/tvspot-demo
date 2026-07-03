@@ -32,28 +32,31 @@ function isBlockedHost(host: string): boolean {
   );
 }
 
-function rewriteUri(uri: string, base: string): string {
+function rewriteUri(uri: string, base: string, ref?: string): string {
   let abs: string;
   try {
     abs = new URL(uri, base).href;
   } catch {
     return uri;
   }
-  return SELF + encodeURIComponent(abs);
+  const wrapped = SELF + encodeURIComponent(abs);
+  // Propagate the Referer to every child (variant playlists, segments, keys) —
+  // the referer-gated CDN 403s each hop without it.
+  return ref ? `${wrapped}&ref=${encodeURIComponent(ref)}` : wrapped;
 }
 
 /** Rewrite every URI in an HLS playlist to route back through this proxy. */
-function rewritePlaylist(text: string, base: string): string {
+function rewritePlaylist(text: string, base: string, ref?: string): string {
   const out: string[] = [];
   for (const line of text.split(/\r?\n/)) {
     const t = line.trim();
     if (!t) { out.push(line); continue; }
     if (t.startsWith("#")) {
       // Rewrite URIs embedded in tags (EXT-X-KEY, EXT-X-MEDIA, EXT-X-MAP, …).
-      out.push(line.replace(/URI="([^"]+)"/g, (_m, u) => `URI="${rewriteUri(u, base)}"`));
+      out.push(line.replace(/URI="([^"]+)"/g, (_m, u) => `URI="${rewriteUri(u, base, ref)}"`));
     } else {
       // A bare line = a segment or sub-playlist URI.
-      out.push(rewriteUri(t, base));
+      out.push(rewriteUri(t, base, ref));
     }
   }
   return out.join("\n");
@@ -102,6 +105,87 @@ export async function GET(request: NextRequest) {
   let host: string;
   try { host = new URL(target).host; } catch { return new NextResponse("bad url", { status: 400 }); }
   if (isBlockedHost(host)) return new NextResponse("blocked host", { status: 403 });
+
+  // Referer-gated CDN family (Provider B): the origin 403s every hop without a
+  // Referer, and the whole playlist tree is extension-obfuscated (.txt master +
+  // variants, .woff/.woff2 fMP4 segments) so the URL tells us nothing. Inject the
+  // Referer, content-sniff playlist vs media, and propagate `ref` to child URIs.
+  const ref = request.nextUrl.searchParams.get("ref") || undefined;
+  if (ref) {
+    const range = request.headers.get("range");
+    const base: Record<string, string> = { "User-Agent": UA, Referer: ref };
+
+    // No client Range → a playlist OR a full segment. Fetch whole, sniff #EXTM3U.
+    if (!range) {
+      let res: Response;
+      try {
+        res = await fetch(target, { headers: base, redirect: "follow", signal: AbortSignal.timeout(15000) });
+      } catch {
+        return new NextResponse("upstream fetch failed", { status: 502 });
+      }
+      if (!res.ok) return new NextResponse("upstream error", { status: 502 });
+      const buf = Buffer.from(await res.arrayBuffer());
+      const isHls =
+        looksLikeHls(target, res.headers.get("content-type")) ||
+        buf.subarray(0, 16).toString("latin1").trimStart().startsWith("#EXTM3U");
+      if (isHls) {
+        const rewritten = rewritePlaylist(buf.toString("utf8"), res.url || target, ref);
+        return new NextResponse(rewritten, {
+          status: 200,
+          headers: {
+            "content-type": "application/vnd.apple.mpegurl",
+            "access-control-allow-origin": "*",
+            "cache-control": "no-store",
+          },
+        });
+      }
+      const clean = stripObfuscation(buf);
+      return new NextResponse(new Uint8Array(clean), {
+        status: 200,
+        headers: {
+          "content-type": res.headers.get("content-type") || "video/mp4",
+          "accept-ranges": "bytes",
+          "access-control-allow-origin": "*",
+          "cache-control": "no-store",
+          "content-length": String(clean.length),
+        },
+      });
+    }
+
+    // Client Range (seek) → byte passthrough with the Referer, capped per response.
+    let start = 0;
+    let reqEnd: number | undefined;
+    const m = /bytes=(\d+)-(\d*)/.exec(range);
+    if (m) {
+      start = parseInt(m[1], 10) || 0;
+      if (m[2]) reqEnd = parseInt(m[2], 10);
+    }
+    const end = Math.min(reqEnd ?? start + CHUNK - 1, start + CHUNK - 1);
+    let upstream: Response;
+    try {
+      upstream = await fetch(target, {
+        headers: { ...base, Range: `bytes=${start}-${end}` },
+        redirect: "follow",
+        signal: AbortSignal.timeout(20000),
+      });
+    } catch {
+      return new NextResponse("upstream fetch failed", { status: 502 });
+    }
+    if (upstream.status >= 400 || !upstream.body) {
+      return new NextResponse("upstream error", { status: 502 });
+    }
+    const headers = new Headers();
+    headers.set("content-type", upstream.headers.get("content-type") || "video/mp4");
+    headers.set("accept-ranges", "bytes");
+    headers.set("access-control-allow-origin", "*");
+    headers.set("cache-control", "no-store");
+    const cr = upstream.headers.get("content-range");
+    if (cr) headers.set("content-range", cr);
+    const cl = upstream.headers.get("content-length");
+    if (cl) headers.set("content-length", cl);
+    const status = upstream.status === 206 || cr ? 206 : upstream.status;
+    return new NextResponse(upstream.body, { status, headers });
+  }
 
   // Decide playlist vs byte stream. Playlists are small — fetch whole, no Range.
   if (M3U8_RE.test(target)) {
