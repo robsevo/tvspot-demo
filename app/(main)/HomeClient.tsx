@@ -11,7 +11,24 @@ import { channelSlug } from "@/lib/sources";
 import { carrierForLeague } from "@/lib/leagues";
 import { curate, trendingScore, trendingNow, topRated, adultAnimation } from "@/lib/discovery";
 import { prewarmVod } from "@/lib/vodPrewarm";
+import { readCache, writeCache } from "@/lib/localCache";
 import type { CatalogItem } from "@/lib/types";
+
+// Last-known trending rails. The home page was the ONE screen without a
+// localStorage fallback: when the SSR catalog fetch bails (cold lambda /
+// slow backend — ~20s+ rebuild vs its 5s abort) the client refetch used to
+// leave the whole page on <PageSkeleton /> until that slow call returned.
+// On mobile every eviction/deploy re-entry reloads the app, so users saw
+// "nothing but a skeleton" for the whole refetch. Cap what we store so the
+// write stays well inside mobile localStorage quota (rails only show ~20
+// items each; 300 keeps every derived row populated).
+const TRENDING_CACHE_KEY = "tvspot_trending_v1";
+const TRENDING_CACHE_MAX = 300;
+const cacheTrending = (movies: CatalogItem[], series: CatalogItem[]) =>
+  writeCache(TRENDING_CACHE_KEY, {
+    movies: movies.slice(0, TRENDING_CACHE_MAX),
+    series: series.slice(0, TRENDING_CACHE_MAX),
+  });
 
 /** Check whether a catalog item belongs to a genre by name or TMDB genre_id. */
 function hasGenre(item: CatalogItem, name: string, id: number): boolean {
@@ -39,18 +56,34 @@ export default function HomeClient({
   const [loading, setLoading] = useState(initialMovies.length === 0);
 
   // Cold-cache fallback: if the server's short-timeout catalog fetch bailed (the
-  // endpoint is ~20s+ cold), fetch it client-side — exactly the pre-RSC behavior.
-  // On the warm path the server already provided the rails, so this never runs.
+  // endpoint is ~20s+ cold), paint instantly from the last-known rails (survives
+  // eviction) and refetch client-side behind them. On the warm path the server
+  // already provided the rails — just keep the reload cache fresh.
   useEffect(() => {
-    if (initialMovies.length > 0) return;
+    if (initialMovies.length > 0) {
+      cacheTrending(initialMovies, initialSeries);
+      return;
+    }
+    const cached = readCache<{ movies: CatalogItem[]; series: CatalogItem[] }>(TRENDING_CACHE_KEY);
+    if (cached && (cached.data.movies?.length ?? 0) > 0) {
+      setRawMovies(cached.data.movies);
+      setRawSeries(cached.data.series || []);
+      setLoading(false);
+    }
     let cancelled = false;
     proxyFetch<{ movies: CatalogItem[]; series: CatalogItem[] }>(
       "/api/lounge/catalog?trending=true",
     )
       .then((data) => {
         if (cancelled) return;
-        setRawMovies(data.movies || []);
-        setRawSeries(data.series || []);
+        const movies = data.movies || [];
+        const series = data.series || [];
+        // A failed/empty refetch must not blank rails painted from the cache.
+        if (movies.length > 0) {
+          setRawMovies(movies);
+          setRawSeries(series);
+          cacheTrending(movies, series);
+        }
       })
       .catch(() => {})
       .finally(() => {
@@ -59,7 +92,7 @@ export default function HomeClient({
     return () => {
       cancelled = true;
     };
-  }, [initialMovies.length]);
+  }, [initialMovies, initialSeries]);
 
   // Curate (drop holiday/non-English, sort by "watching now") — was applied in the
   // old client fetch handler; keep it here so ordering/filtering is unchanged.
