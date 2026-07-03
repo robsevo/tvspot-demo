@@ -7,7 +7,7 @@ import { useContinueWatching } from "@/hooks/useContinueWatching";
 import Link from "next/link";
 import { ChevronLeft, Play } from "lucide-react";
 import VodPlayer from "@/components/VodPlayer";
-import { providerName, filterEmbeds } from "@/lib/sources";
+import { mergeSources } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { ExternalLink } from "lucide-react";
@@ -63,24 +63,13 @@ export default function VodMoviePage() {
     };
   }, [tmdbId]);
 
-  // Unified source list: resolved CLEAN streams first (default), then any
-  // backend direct streams, then the vidlink embed LAST as fallback.
-  // Capped at 5 per product requirement.
-  const sources = useMemo(() => {
-    // Resolved order is already best-first (direct panel mp4 → Origin HD → provider-a
-    // → remux last). The old "drop HD1" hack predates that ordering and was
-    // throwing away the single most reliable source on every multi-source title.
-    const clean = resolved.map((url, i) => ({
-      url, kind: "stream" as const, label: `HD ${i + 1}`,
-    }));
-    const streams = (detail?.stream_urls ?? []).map((url, i) => ({
-      url, kind: "stream" as const, label: `Source ${i + 1}`,
-    }));
-    const embeds = filterEmbeds(detail?.embed_urls).map((url) => ({
-      url, kind: "embed" as const, label: providerName(url),
-    }));
-    return [...clean, ...streams.slice(0, 4), ...embeds].slice(0, 6);
-  }, [detail, resolved]);
+  // Unified source list: backend "Source N" first (stable default — see mergeSources
+  // for why leading with them stops the player restarting when HD resolves in), then
+  // the clean HD streams as one-tap alternatives, embeds last.
+  const sources = useMemo(
+    () => mergeSources(resolved, detail?.stream_urls, detail?.embed_urls),
+    [detail, resolved],
+  );
   const idx = Math.min(sourceIndex, Math.max(0, sources.length - 1));
   const current = sources[idx];
 
@@ -105,6 +94,9 @@ export default function VodMoviePage() {
   const pickSource = useCallback((i: number) => {
     setAllFailed(false);
     setAutoResume(false);
+    // Carry the current position into the picked source so switching resumes where
+    // you were instead of restarting (the player remounts on the new URL).
+    if (posRef.current > 5) setResumeTime(posRef.current);
     setSourceIndex(i);
   }, []);
 
@@ -113,6 +105,8 @@ export default function VodMoviePage() {
   const { items: cwItems, updateProgress } = useContinueWatching();
   const [resumeTime, setResumeTime] = useState<number | undefined>(undefined);
   const resumeCaptured = useRef(false);
+  // Latest playback position, so switching source resumes there instead of at zero.
+  const posRef = useRef(0);
   useEffect(() => {
     if (resumeCaptured.current) return;
     const it = cwItems.find((i) => i.tmdbId === Number(tmdbId) && i.kind === "movie");
@@ -124,6 +118,7 @@ export default function VodMoviePage() {
 
   const handleProgress = useCallback(
     (t: number, d: number) => {
+      if (t > 0) posRef.current = t;
       if (!detail || !d) return;
       updateProgress({
         tmdbId: Number(tmdbId),

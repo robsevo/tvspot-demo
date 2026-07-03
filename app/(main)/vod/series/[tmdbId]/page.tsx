@@ -7,7 +7,7 @@ import { useContinueWatching } from "@/hooks/useContinueWatching";
 import Link from "next/link";
 import { ChevronLeft, ChevronDown, Play } from "lucide-react";
 import VodPlayer from "@/components/VodPlayer";
-import { providerName, filterEmbeds } from "@/lib/sources";
+import { mergeSources } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { ExternalLink } from "lucide-react";
@@ -179,27 +179,10 @@ export default function VodSeriesPage() {
                       const epKey = `${season.season_number}-${ep.episode_number}`;
                       const isPlaying = playingEpisode === epKey;
                       // One labeled source list: resolved CLEAN streams FIRST
-                      // (default, already best-first: direct mp4 → Origin HD →
-                      // provider-a → remux last), then backend streams, embeds last.
+                      // (default), then the backend "Source N" streams (reserved —
+                      // confirmed-working, never crowded out by HD), embeds last.
                       const epResolved = resolvedByEp[epKey] ?? [];
-                      const clean = epResolved.map((url, n) => ({
-                        url,
-                        kind: "stream" as const,
-                        label: `HD ${n + 1}`,
-                      }));
-                      const sources = [
-                        ...clean,
-                        ...(ep.stream_urls ?? []).map((url, n) => ({
-                          url,
-                          kind: "stream" as const,
-                          label: `Source ${n + 1}`,
-                        })).slice(0, 4),
-                        ...filterEmbeds(ep.embed_urls).map((url) => ({
-                          url,
-                          kind: "embed" as const,
-                          label: providerName(url),
-                        })),
-                      ].slice(0, 6);
+                      const sources = mergeSources(epResolved, ep.stream_urls, ep.embed_urls);
                       const epSrcIdx = Math.min(episodeSourceIdx[epKey] ?? 0, Math.max(0, sources.length - 1));
                       const currentSource = sources[epSrcIdx];
                       // Clean streams resolve on-demand when the row is tapped, so the

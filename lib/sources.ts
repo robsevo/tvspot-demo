@@ -112,3 +112,55 @@ export function providerName(url: string): string {
     return "Source";
   }
 }
+
+export interface PlayableSource {
+  url: string;
+  kind: "stream" | "embed";
+  label: string;
+}
+
+/**
+ * Build the player's failover source list for a VOD title/episode, shared by the
+ * movie and series pages so they stay in sync.
+ *
+ * Backend direct streams ("Source N", from detail/ep.stream_urls) LEAD, for two
+ * reasons:
+ *  1. They're present from the first render (the detail fetch), while the HD
+ *     streams resolve asynchronously a few seconds later. Keeping them first means
+ *     `sources[0]` is STABLE across that async update — so the active source never
+ *     changes out from under an already-playing video, which would remount the
+ *     player (key={url}) and restart playback from zero. That "restart every time"
+ *     the HD streams arrived was the whole complaint.
+ *  2. They're confirmed-working.
+ * HD (clean, castable, ad-free) follow as one-tap alternatives; embeds last.
+ * Previously HD led and `.slice(0, 6)` also dropped every Source once six HD
+ * resolved — putting Source first fixes both. De-duped by URL, cap 8.
+ */
+export function mergeSources(
+  resolved: string[],
+  backendStreams: string[] | undefined | null,
+  embedUrls: string[] | undefined | null,
+): PlayableSource[] {
+  const CAP = 8;
+  const MAX_BACKEND = 4;
+  const streams: PlayableSource[] = (backendStreams ?? []).slice(0, MAX_BACKEND).map((url, i) => ({
+    url,
+    kind: "stream",
+    label: `Source ${i + 1}`,
+  }));
+  const hd: PlayableSource[] = resolved.map((url, i) => ({
+    url,
+    kind: "stream",
+    label: `HD ${i + 1}`,
+  }));
+  const embeds: PlayableSource[] = filterEmbeds(embedUrls).map((url) => ({
+    url,
+    kind: "embed",
+    label: providerName(url),
+  }));
+  // Source N first (stable default), HD next (fills remaining slots), embeds last.
+  const seen = new Set<string>();
+  return [...streams, ...hd, ...embeds]
+    .filter((s) => (seen.has(s.url) ? false : (seen.add(s.url), true)))
+    .slice(0, CAP);
+}
