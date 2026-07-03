@@ -161,6 +161,22 @@ export default function VideoPlayer({
         // discard big-memory tabs, which is what made the app "restart").
         maxMaxBufferLength: 90,
         backBufferLength: 6,
+        // Stall-recovery tuning for a remuxed flaky-TS origin. Our upstreams
+        // are IPTV panels remuxed to HLS by the relay, so the media timeline
+        // routinely has sub-second gaps (a dropped TS packet, a segment that's
+        // a few ms short) AND full PTS discontinuities when the relay LRU-evicts
+        // and respawns a channel's ffmpeg (it emits discont_start for exactly
+        // this). At the hls.js default maxBufferHole 0.1s the player STALLS on
+        // those and shows the spinner. 1.5s is the value the RELAY was built
+        // around (see iptv_relay.py: "the player's maxBufferHole=1.5s ... flushes
+        // the MSE source buffer cleanly at the marker instead of stalling on PTS
+        // jumps after an LRU-evict + respawn") — it was never actually set on the
+        // player until now. Steps over the gap/marker and keeps playing; no added
+        // latency, and skipping a <=1.5s hole beats a spinner when we're already
+        // 36s behind live.
+        maxBufferHole: 1.5,
+        nudgeOffset: 0.2,
+        nudgeMaxRetry: 5,
         // Sit a fixed 36 SECONDS behind the live edge (not a segment COUNT). The
         // relay's transmux window is 36×3s = 108s, designed for exactly this — but
         // a count of 4 only bought ~12s on those 3s segments, leaving almost no
