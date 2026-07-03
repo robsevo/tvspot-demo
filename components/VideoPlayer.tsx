@@ -173,6 +173,12 @@ export default function VideoPlayer({
         // edge of passthrough sources).
         liveSyncDuration: 36,
         liveMaxLatencyDuration: 50,
+        // Catch up to the live edge by GENTLY speeding playback (≤1.1×, barely
+        // audible) instead of hard-seeking. Without this hls.js does nothing until
+        // latency crosses liveMaxLatencyDuration, then jumps forward ~14s+ mid-watch
+        // (the "big forward jumps"). The rate nudge holds latency near the 36s target
+        // so a hard seek only fires on a genuine outage that blows past 50s behind.
+        maxLiveSyncPlaybackRate: 1.1,
         fragLoadPolicy: resilient(dc.fragLoadPolicy),
         playlistLoadPolicy: resilient(dc.playlistLoadPolicy),
         manifestLoadPolicy: resilient(dc.manifestLoadPolicy),
@@ -412,8 +418,12 @@ export default function VideoPlayer({
       } else {
         try { hlsRef.current?.startLoad(); } catch {}
         if (isLive && hlsRef.current) {
+          // Only ever catch UP to the live edge, never jump backward, and only when
+          // we've genuinely fallen behind (stale after a real background). Resyncing
+          // when already near the edge is what made live lurch forward OR backward on
+          // every incidental tab blur (lock screen, notification shade) on mobile.
           const pos = hlsRef.current.liveSyncPosition;
-          if (typeof pos === "number" && isFinite(pos)) {
+          if (typeof pos === "number" && isFinite(pos) && pos > video.currentTime + 10) {
             try { video.currentTime = pos; } catch {}
           }
         }
