@@ -28,6 +28,7 @@ export default async function RootLayout({
         {/* PNG apple-touch-icon (180x180, opaque) — iOS requires PNG, not SVG,
             for the add-to-home-screen icon. */}
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-icon.png" />
+        <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-title" content="TVSpot" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
