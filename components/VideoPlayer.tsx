@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import type Hls from "hls.js"; // type only — the library is imported lazily below
 import { Play, Pause, Maximize, Minimize, SkipBack, SkipForward, Monitor, Cast, Volume2, VolumeX, Volume1 } from "lucide-react";
 import { castMedia, loadCastSDK } from "@/lib/cast";
+import { setPlaybackActive } from "@/lib/playbackState";
 
 interface Props {
   src?: string;
@@ -281,8 +282,10 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
-    const onPlayHandler = () => { setPlaying(true); setAwaitingPlay(false); onPlay?.(); };
-    const onPauseHandler = () => { setPlaying(false); onPause?.(); };
+    // setPlaybackActive: tell the deploy-reload gates a stream is on screen so a
+    // version-skew reload waits for playback to stop instead of interrupting it.
+    const onPlayHandler = () => { setPlaying(true); setAwaitingPlay(false); setPlaybackActive(true); onPlay?.(); };
+    const onPauseHandler = () => { setPlaying(false); setPlaybackActive(false); onPause?.(); };
     const onTimeHandler = () => {
       if (video.duration) {
         setProgress(video.currentTime / video.duration);
@@ -294,7 +297,7 @@ export default function VideoPlayer({
         }
       }
     };
-    const onEndedHandler = () => onEnded?.();
+    const onEndedHandler = () => { setPlaybackActive(false); onEnded?.(); };
     const onErrorHandler = () => { setAwaitingPlay(false); onError?.("Video playback error"); };
 
     video.addEventListener("play", onPlayHandler);
@@ -309,6 +312,10 @@ export default function VideoPlayer({
       video.removeEventListener("timeupdate", onTimeHandler);
       video.removeEventListener("ended", onEndedHandler);
       video.removeEventListener("error", onErrorHandler);
+      // Player torn down (navigated away, source swapped) → no longer watching.
+      // Guards against the flag sticking true if the element unmounts without a
+      // pause event firing.
+      setPlaybackActive(false);
     };
   }, [onPlay, onPause, onTimeUpdate, onEnded, onError]);
 

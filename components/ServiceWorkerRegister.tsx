@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { isPlaybackActive, onPlaybackChange } from "@/lib/playbackState";
 
 /**
  * Registers the app-shell service worker (public/sw.js).
@@ -29,17 +30,29 @@ export default function ServiceWorkerRegister() {
     // Reload once when a NEW worker takes over after a deploy, so users aren't
     // left on a half-updated shell. `hadController` is false on the very first
     // install (initial clients.claim), so we don't reload on first visit.
+    // NEVER reload while a stream is playing — defer to the moment playback stops
+    // so a deploy never cuts the video (same gate as DeployRefresh).
     const hadController = !!navigator.serviceWorker.controller;
     let refreshed = false;
-    const onControllerChange = () => {
-      if (refreshed || !hadController) return;
+    let pending = false;
+    const doReload = () => {
+      if (refreshed) return;
       refreshed = true;
       window.location.reload();
     };
+    const onControllerChange = () => {
+      if (refreshed || !hadController) return;
+      if (isPlaybackActive()) { pending = true; return; }
+      doReload();
+    };
+    const unsubPlayback = onPlaybackChange((active) => {
+      if (!active && pending) doReload();
+    });
     navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
 
     return () => {
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      unsubPlayback();
       window.removeEventListener("load", register);
     };
   }, []);

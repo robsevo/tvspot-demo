@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { isPlaybackActive, onPlaybackChange } from "@/lib/playbackState";
 
 /**
  * Reload gracefully when THIS page's build no longer matches the deployment
@@ -23,6 +24,11 @@ import { useEffect } from "react";
  *    → at re-entry, before the user starts doing anything. NEVER mid-use —
  *    a foreground reload, however "idle" the app looks, reads as the app
  *    hard-resetting itself; mid-use mismatches wait for the next background.
+ *  - NEVER while a stream is playing (isPlaybackActive), even at re-entry — a
+ *    reload mid-watch cuts the video. A pending reload instead fires shortly
+ *    after playback stops (a short grace absorbs channel switches), or on the
+ *    next background — whichever comes first. This is what makes a production
+ *    deploy painless for someone actively watching.
  *  - 60s sessionStorage guard so no failure mode can reload-cycle the app.
  */
 const MY_BUILD = process.env.NEXT_PUBLIC_BUILD_ID || "dev";
@@ -64,9 +70,12 @@ export default function DeployRefresh() {
       // A different build is live and this page is stale. NEVER reload while
       // the user is actively in the app ("the app hard reset on me") — only
       // when it's invisible (hidden) or at the natural re-entry boundary,
-      // before they've started doing anything.
-      if (document.visibilityState === "hidden" || atReentry) void reload();
-      else pendingReload = true;
+      // before they've started doing anything. And NEVER while a stream is
+      // playing, even at re-entry — that would cut the video. Deferred reloads
+      // fire when playback stops (below) or on the next background.
+      if (document.visibilityState === "hidden") { void reload(); return; }
+      if (atReentry && !isPlaybackActive()) { void reload(); return; }
+      pendingReload = true;
     };
 
     const onVisibility = () => {
@@ -80,6 +89,21 @@ export default function DeployRefresh() {
       if (pendingReload) void reload();
     };
 
+    // When playback stops with an update pending, reload after a short grace so
+    // the user lands on the new build at the natural "done watching" moment. The
+    // grace absorbs a channel switch (old player pauses → new player plays within
+    // ~1s); if playback resumes, cancel and keep waiting.
+    let stopTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearStopTimer = () => { if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; } };
+    const unsubPlayback = onPlaybackChange((active) => {
+      if (active) { clearStopTimer(); return; }
+      if (!pendingReload || disposed) return;
+      clearStopTimer();
+      stopTimer = setTimeout(() => {
+        if (!disposed && pendingReload && !isPlaybackActive()) void reload();
+      }, 2500);
+    });
+
     void check();
     const interval = setInterval(() => void check(), 10 * 60_000);
     document.addEventListener("visibilitychange", onVisibility);
@@ -87,6 +111,8 @@ export default function DeployRefresh() {
 
     return () => {
       disposed = true;
+      clearStopTimer();
+      unsubPlayback();
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", onPageHide);
