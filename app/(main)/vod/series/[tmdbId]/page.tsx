@@ -254,12 +254,16 @@ export default function VodSeriesPage() {
                       )}
                       {isPlaying && currentSource && (
                         <div className="mt-2 space-y-2">
-                          {/* Source switcher + open-in-new-tab escape hatch */}
+                          {/* Source switcher + open-in-new-tab escape hatch.
+                              Source buttons open externally like the "Open" button. */}
                           <div className="flex flex-wrap items-center gap-1.5">
                             {sources.length > 1 &&
                               sources.map((src, n) => (
-                                <button
+                                <a
                                   key={n}
+                                  href={src.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
                                   onClick={() => {
                                     setAutoResume(false);
                                     setAllFailed(false);
@@ -272,7 +276,7 @@ export default function VodSeriesPage() {
                                   }`}
                                 >
                                   {src.label}
-                                </button>
+                                </a>
                               ))}
                             <a
                               href={currentSource.url}

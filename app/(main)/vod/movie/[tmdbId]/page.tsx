@@ -210,19 +210,26 @@ export default function VodMoviePage() {
                 <span className="text-text-muted text-[10px] font-normal">· finding clean stream…</span>
               )}
             </h2>
-            {/* Unified source list: direct streams first, vidlink last (≤5). */}
+            {/* Unified source list: direct streams first, vidlink last (≤5).
+                Clicking a source opens it directly (external), like the Open button. */}
             <div className="flex flex-wrap items-center gap-1.5 mb-2">
               {sources.length > 1 &&
                 sources.map((s, i) => (
-                  <button
+                  <a
                     key={i}
-                    onClick={() => pickSource(i)}
+                    href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      // Still track which source was picked for the "Open" button
+                      pickSource(i);
+                    }}
                     className={`text-[10px] px-2.5 py-1 rounded-full transition-colors ${
                       idx === i ? "bg-brand text-white hud-glow" : "glass-card text-text-muted hover:text-white"
                     }`}
                   >
                     {s.label}
-                  </button>
+                  </a>
                 ))}
               <a
                 href={current.url}
