@@ -1,15 +1,12 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { proxyFetch } from "@/lib/api";
-import { useContinueWatching } from "@/hooks/useContinueWatching";
 import Link from "next/link";
-import { ChevronLeft, Play } from "lucide-react";
-import VodPlayer from "@/components/VodPlayer";
+import { ChevronLeft } from "lucide-react";
 import { mergeSources } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
-import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { ExternalLink } from "lucide-react";
 import type { VodDetail } from "@/lib/types";
 
@@ -17,13 +14,8 @@ export default function VodMoviePage() {
   const { tmdbId } = useParams<{ tmdbId: string }>();
   const [detail, setDetail] = useState<VodDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  // Sources: direct streams first, then backend sources, embeds last.
   const [sourceIndex, setSourceIndex] = useState(0);
-  // Click-to-play gate: the embed iframe autoplays on mount no matter what allow/
-  // sandbox we set, so we DON'T mount it until the user taps play. Tracked by the
-  // source URL so switching sources re-gates (render-time derive, no setState-in-effect).
-  const [startedUrl, setStartedUrl] = useState<string | null>(null);
-  // Clean direct HLS streams resolved on-demand (ad-free, played in our own
-  // VideoPlayer). Empty until /api/vod-extract returns; embed is the fallback.
   const [resolved, setResolved] = useState<string[]>([]);
   const [resolving, setResolving] = useState(true);
 
@@ -63,9 +55,6 @@ export default function VodMoviePage() {
     };
   }, [tmdbId]);
 
-  // Unified source list: backend "Source N" first (stable default — see mergeSources
-  // for why leading with them stops the player restarting when HD resolves in), then
-  // the clean HD streams as one-tap alternatives, embeds last.
   const sources = useMemo(
     () => mergeSources(resolved, detail?.stream_urls, detail?.embed_urls),
     [detail, resolved],
@@ -76,65 +65,10 @@ export default function VodMoviePage() {
   // Auto-failover: when the playing source is pronounced dead (error / stall /
   // never-started timeout), advance to the next and keep playing without a
   // re-tap. Wraps nothing — past the last source we show an honest failure.
-  const [autoResume, setAutoResume] = useState(false);
-  const [allFailed, setAllFailed] = useState(false);
-  const advanceSource = useCallback((lastTime: number) => {
-    // Carry the position into the next source so failover resumes where the
-    // dead source stopped, instead of restarting the movie. Threshold matches
-    // pickSource (>5s): the old 30s cutoff meant every early-playback failure
-    // restarted the NEXT source from 0:00 — chained across sources, that's the
-    // "movie keeps restarting" loop.
-    if (lastTime > 5) setResumeTime(lastTime);
-    setSourceIndex((i) => {
-      if (i + 1 >= sources.length) {
-        setAllFailed(true);
-        return i;
-      }
-      setAutoResume(true);
-      return i + 1;
-    });
-  }, [sources.length]);
   const pickSource = useCallback((i: number) => {
-    setAllFailed(false);
-    setAutoResume(false);
-    // Carry the current position into the picked source so switching resumes where
-    // you were instead of restarting (the player remounts on the new URL).
-    if (posRef.current > 5) setResumeTime(posRef.current);
     setSourceIndex(i);
   }, []);
 
-  // Continue Watching: resume position captured ONCE (so ongoing progress writes
-  // don't keep re-seeking the player), plus a throttled save back to the store.
-  const { items: cwItems, updateProgress } = useContinueWatching();
-  const [resumeTime, setResumeTime] = useState<number | undefined>(undefined);
-  const resumeCaptured = useRef(false);
-  // Latest playback position, so switching source resumes there instead of at zero.
-  const posRef = useRef(0);
-  useEffect(() => {
-    if (resumeCaptured.current) return;
-    const it = cwItems.find((i) => i.tmdbId === Number(tmdbId) && i.kind === "movie");
-    if (it && it.duration) {
-      resumeCaptured.current = true;
-      setResumeTime((it.progress / 100) * it.duration);
-    }
-  }, [cwItems, tmdbId]);
-
-  const handleProgress = useCallback(
-    (t: number, d: number) => {
-      if (t > 0) posRef.current = t;
-      if (!detail || !d) return;
-      updateProgress({
-        tmdbId: Number(tmdbId),
-        title: detail.title,
-        poster: detail.backdrop,
-        kind: "movie",
-        progress: (t / d) * 100,
-        duration: d,
-        updatedAt: Date.now(), // overwritten by the hook; required by the type
-      });
-    },
-    [detail, tmdbId, updateProgress],
-  );
 
   if (loading) {
     return (
@@ -251,57 +185,6 @@ export default function VodMoviePage() {
                 <span className="text-text-secondary">Open</span> to play it in a new tab.
               </span>
             </p>
-            <div className="rounded-xl overflow-hidden bg-black">
-              {current.kind === "embed" ? (
-                startedUrl === current.url ? (
-                  <iframe
-                    src={current.url}
-                    allowFullScreen
-                    allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
-                    // Mounted only after the user taps play, so this is a user-gesture
-                    // start (not autoplay). Sandbox stays off so providers play.
-                    className="w-full h-full aspect-video"
-                    style={{ border: "none" }}
-                    key={current.url}
-                  />
-                ) : (
-                  <button
-                    onClick={() => setStartedUrl(current.url)}
-                    className="relative w-full aspect-video bg-black flex items-center justify-center group"
-                    aria-label="Play"
-                  >
-                    {detail.backdrop && (
-                      <img src={detail.backdrop} alt="" className="absolute inset-0 w-full h-full object-cover opacity-40" />
-                    )}
-                    <span className="relative w-16 h-16 rounded-full bg-brand/90 flex items-center justify-center group-hover:scale-105 transition-transform">
-                      <Play className="w-8 h-8 text-white fill-white" />
-                    </span>
-                  </button>
-                )
-              ) : (
-                <VodPlayer
-                  src={current.url}
-                  autoPlay={autoResume}
-                  title={detail.title}
-                  poster={detail.backdrop}
-                  initialTime={resumeTime}
-                  onProgress={handleProgress}
-                  onSourceFail={advanceSource}
-                  key={current.url}
-                />
-              )}
-            </div>
-            {autoResume && !allFailed && (
-              <p className="text-text-muted text-[10px] mt-1.5">
-                Previous source failed — switched to {current.label}.
-              </p>
-            )}
-            {allFailed && (
-              <p className="text-red-400/90 text-xs mt-1.5">
-                None of the sources are playing right now. Try again in a minute, or pick a source above to retry.
-              </p>
-            )}
-            <SourceTroubleHint resetKey={idx} />
           </div>
         )}
       </div>

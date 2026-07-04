@@ -1,15 +1,12 @@
 "use client";
 
-import { useParams, useSearchParams } from "next/navigation";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useParams } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
 import { proxyFetch } from "@/lib/api";
-import { useContinueWatching } from "@/hooks/useContinueWatching";
 import Link from "next/link";
-import { ChevronLeft, ChevronDown, Play } from "lucide-react";
-import VodPlayer from "@/components/VodPlayer";
+import { ChevronLeft, ChevronDown } from "lucide-react";
 import { mergeSources } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
-import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { ExternalLink } from "lucide-react";
 import type { SeriesDetail } from "@/lib/types";
 
@@ -19,80 +16,27 @@ export default function VodSeriesPage() {
   const [loading, setLoading] = useState(true);
   const [playingEpisode, setPlayingEpisode] = useState<string | null>(null);
   const [episodeSourceIdx, setEpisodeSourceIdx] = useState<Record<string, number>>({});
-  // Clean direct HLS streams resolved on-demand per episode (ad-free, played in
-  // our own VideoPlayer). Keyed by "S-E". Empty/absent → embed iframe fallback.
   const [resolvedByEp, setResolvedByEp] = useState<Record<string, string[]>>({});
-  const inFlight = useRef<Set<string>>(new Set());
-  // Click-to-play gate for embeds (they autoplay on mount otherwise). Tracks the
-  // started embed URL; switching source/episode re-gates. Render-time derive.
-  const [startedUrl, setStartedUrl] = useState<string | null>(null);
-  // Auto-failover state for the episode currently playing: advance past a dead
-  // source without a re-tap; past the last source, show an honest failure.
-  const [autoResume, setAutoResume] = useState(false);
-  const [allFailed, setAllFailed] = useState(false);
   // Seasons start COLLAPSED — tap a season header to expand its episodes.
   const [expandedSeasons, setExpandedSeasons] = useState<Record<number, boolean>>({});
   const toggleSeason = (n: number) =>
     setExpandedSeasons((prev) => ({ ...prev, [n]: !prev[n] }));
 
-  // Resolve a clean direct stream for one episode (once). The sandboxed embed
-  // plays instantly meanwhile; when this returns, the clean stream is prepended
-  // as the default "HD" source and the player auto-upgrades to it.
   const resolveEpisode = useCallback(
     (epKey: string, season: number, episode: number) => {
       if (!tmdbId) return;
-      if (resolvedByEp[epKey] !== undefined || inFlight.current.has(epKey)) return;
-      // Instant if a poster prewarm already resolved this episode (S1E1).
+      if (resolvedByEp[epKey] !== undefined) return;
       const warm = getPrewarmed("series", tmdbId, season, episode);
       if (warm) {
         setResolvedByEp((prev) => ({ ...prev, [epKey]: warm }));
         return;
       }
-      inFlight.current.add(epKey);
       resolveVod("series", tmdbId, season, episode)
         .then((urls) => setResolvedByEp((prev) => ({ ...prev, [epKey]: urls })))
-        .catch(() => setResolvedByEp((prev) => ({ ...prev, [epKey]: [] })))
-        .finally(() => inFlight.current.delete(epKey));
+        .catch(() => setResolvedByEp((prev) => ({ ...prev, [epKey]: [] })));
     },
     [tmdbId, resolvedByEp],
   );
-
-  // Continue Watching, keyed per episode (tmdbId + season + episode). Resume
-  // position is captured ONCE per episode-open (into episodeResume) so the ongoing
-  // progress writes below don't keep re-seeking the player mid-playback.
-  const { items: cwItems, updateProgress } = useContinueWatching();
-  const cwRef = useRef(cwItems);
-  useEffect(() => { cwRef.current = cwItems; }, [cwItems]);
-  const [episodeResume, setEpisodeResume] = useState<Record<string, number | undefined>>({});
-
-  // Continue Watching deep-link: /vod/series/[id]?s=&e= auto-opens that episode,
-  // resumes it, and scrolls to it — so tapping a Continue Watching card picks up
-  // exactly where you left off instead of dumping you on the season list.
-  const searchParams = useSearchParams();
-  const autoOpened = useRef(false);
-  useEffect(() => {
-    if (autoOpened.current || !detail) return;
-    const s = searchParams.get("s");
-    const e = searchParams.get("e");
-    if (!s || !e) return;
-    autoOpened.current = true;
-    const season = Number(s), episode = Number(e);
-    const epKey = `${season}-${episode}`;
-    setExpandedSeasons((prev) => ({ ...prev, [season]: true }));
-    setPlayingEpisode(epKey);
-    resolveEpisode(epKey, season, episode);
-    const it = cwRef.current.find(
-      (i) => i.tmdbId === Number(tmdbId) && i.kind === "series"
-        && i.season === season && i.episode === episode,
-    );
-    setEpisodeResume((prev) => ({
-      ...prev,
-      [epKey]: it && it.duration ? (it.progress / 100) * it.duration : undefined,
-    }));
-    setTimeout(() => {
-      document.getElementById(`ep-${epKey}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 300);
-  }, [detail, searchParams, resolveEpisode, tmdbId]);
 
   useEffect(() => {
     if (!tmdbId) return;
@@ -194,19 +138,8 @@ export default function VodSeriesPage() {
                         onClick={() => {
                           const opening = !isPlaying;
                           setPlayingEpisode(isPlaying ? null : epKey);
-                          setAutoResume(false);
-                          setAllFailed(false);
                           if (opening) {
                             resolveEpisode(epKey, season.season_number, ep.episode_number);
-                            // Snapshot this episode's resume point at open time.
-                            const it = cwRef.current.find(
-                              (i) => i.tmdbId === Number(tmdbId) && i.kind === "series"
-                                && i.season === season.season_number && i.episode === ep.episode_number,
-                            );
-                            setEpisodeResume((prev) => ({
-                              ...prev,
-                              [epKey]: it && it.duration ? (it.progress / 100) * it.duration : undefined,
-                            }));
                           }
                         }}
                         className="w-full flex items-center gap-3 glass-card rounded-xl px-3 py-2.5 text-left hover:bg-card/60 transition-colors"
@@ -265,8 +198,6 @@ export default function VodSeriesPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onClick={() => {
-                                    setAutoResume(false);
-                                    setAllFailed(false);
                                     setEpisodeSourceIdx((prev) => ({ ...prev, [epKey]: n }));
                                   }}
                                   className={`text-[10px] px-2.5 py-1 rounded-full transition-colors ${
@@ -289,95 +220,6 @@ export default function VodSeriesPage() {
                               Open
                             </a>
                           </div>
-                          {/* Persistent tip: a looping/restarting episode is a
-                              stuck source; Open plays it directly in a new tab. */}
-                          <p className="text-[10px] text-text-muted flex items-center gap-1">
-                            <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-                            <span>
-                              If an episode keeps restarting or looping, tap{" "}
-                              <span className="text-text-secondary">Open</span> to play it in a new tab.
-                            </span>
-                          </p>
-                          <div className="rounded-xl overflow-hidden bg-black">
-                            {currentSource.kind === "embed" ? (
-                              startedUrl === currentSource.url ? (
-                                <iframe
-                                  src={currentSource.url}
-                                  allowFullScreen
-                                  allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
-                                  // Mounted only after a play tap = user-gesture start,
-                                  // not autoplay. Sandbox stays off so providers play.
-                                  className="w-full h-full aspect-video"
-                                  style={{ border: "none" }}
-                                  key={currentSource.url}
-                                />
-                              ) : (
-                                <button
-                                  onClick={() => setStartedUrl(currentSource.url)}
-                                  className="relative w-full aspect-video bg-black flex items-center justify-center group"
-                                  aria-label="Play"
-                                >
-                                  {ep.still_url && (
-                                    <img src={ep.still_url} alt="" className="absolute inset-0 w-full h-full object-cover opacity-40" />
-                                  )}
-                                  <span className="relative w-14 h-14 rounded-full bg-brand/90 flex items-center justify-center group-hover:scale-105 transition-transform">
-                                    <Play className="w-7 h-7 text-white fill-white" />
-                                  </span>
-                                </button>
-                              )
-                            ) : (
-                              <VodPlayer
-                                src={currentSource.url}
-                                autoPlay={autoResume}
-                                title={detail?.title}
-                                initialTime={episodeResume[epKey]}
-                                onProgress={(t, d) => {
-                                  if (!detail || !d) return;
-                                  updateProgress({
-                                    tmdbId: Number(tmdbId),
-                                    title: detail.title,
-                                    poster: detail.poster,
-                                    kind: "series",
-                                    season: season.season_number,
-                                    episode: ep.episode_number,
-                                    progress: (t / d) * 100,
-                                    duration: d,
-                                    updatedAt: Date.now(), // overwritten by the hook; required by the type
-                                  });
-                                }}
-                                onSourceFail={(lastTime) => {
-                                  // Carry the position so the next source resumes
-                                  // where the dead one stopped, not from 0:00.
-                                  // >5s (not 30) — an early failure restarting the
-                                  // next source from zero is the restart loop.
-                                  if (lastTime > 5) {
-                                    setEpisodeResume((prev) => ({ ...prev, [epKey]: lastTime }));
-                                  }
-                                  setEpisodeSourceIdx((prev) => {
-                                    const cur = Math.min(prev[epKey] ?? 0, Math.max(0, sources.length - 1));
-                                    if (cur + 1 >= sources.length) {
-                                      setAllFailed(true);
-                                      return prev;
-                                    }
-                                    setAutoResume(true);
-                                    return { ...prev, [epKey]: cur + 1 };
-                                  });
-                                }}
-                                key={currentSource.url}
-                              />
-                            )}
-                          </div>
-                          {autoResume && !allFailed && (
-                            <p className="text-text-muted text-[10px]">
-                              Previous source failed — switched to {currentSource.label}.
-                            </p>
-                          )}
-                          {allFailed && (
-                            <p className="text-red-400/90 text-xs">
-                              None of the sources are playing right now. Try again in a minute, or pick a source above to retry.
-                            </p>
-                          )}
-                          <SourceTroubleHint resetKey={`${epKey}-${epSrcIdx}`} />
                         </div>
                       )}
                       </div>
