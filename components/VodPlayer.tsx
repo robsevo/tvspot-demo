@@ -32,9 +32,18 @@ interface Props {
 // Remux sources get a longer runway: a cold relay ffmpeg spawn takes ~20-24s
 // to produce the first manifest (the relay holds the request meanwhile), and
 // failing over AWAY from the last-resort source because it was still warming
-// up defeats its purpose.
-const NEVER_STARTED_MS = 15_000;
+// up defeats its purpose. Direct sources are double-proxied (vod-stream →
+// stream-proxy → origin) and a cold chain regularly needs >15s to first frame —
+// killing them at 15s cycled the player through GOOD sources ("keeps
+// restarting" while the same URL played fine via Open, which has no timeout).
+const NEVER_STARTED_MS = 25_000;
 const NEVER_STARTED_REMUX_MS = 35_000;
+
+// VOD stall window (VideoPlayer's watchdog runs two strikes of this). Wider
+// than the live default: a cold proxied file rebuffering 10-20s is normal and
+// self-recovers — the user sees the buffering ring/notice meanwhile — whereas a
+// false failover restarts the movie on another source.
+const STALL_MS = 15_000;
 
 export default function VodPlayer({
   src,
@@ -98,6 +107,7 @@ export default function VodPlayer({
       title={title}
       initialTime={isRemux ? undefined : initialTime}
       autoPlay={autoPlay}
+      stallMs={STALL_MS}
       onProgress={onProgress}
       onTimeUpdate={(t) => {
         // Remux playback clocks from 0 at the baked offset — track absolute

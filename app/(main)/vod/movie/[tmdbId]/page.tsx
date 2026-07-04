@@ -80,8 +80,11 @@ export default function VodMoviePage() {
   const [allFailed, setAllFailed] = useState(false);
   const advanceSource = useCallback((lastTime: number) => {
     // Carry the position into the next source so failover resumes where the
-    // dead source stopped, instead of restarting the movie.
-    if (lastTime > 30) setResumeTime(lastTime);
+    // dead source stopped, instead of restarting the movie. Threshold matches
+    // pickSource (>5s): the old 30s cutoff meant every early-playback failure
+    // restarted the NEXT source from 0:00 — chained across sources, that's the
+    // "movie keeps restarting" loop.
+    if (lastTime > 5) setResumeTime(lastTime);
     setSourceIndex((i) => {
       if (i + 1 >= sources.length) {
         setAllFailed(true);

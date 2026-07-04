@@ -34,6 +34,12 @@ interface Props {
   isLive?: boolean;
   /** Seek here once metadata loads (resume-where-you-left-off for VOD). */
   initialTime?: number;
+  /** Stall-watchdog window (ms) before a recovery strike / failover. Live keeps
+   *  the tight default (a stalled channel should fail over fast — another source
+   *  has the same content); VOD passes a longer window because cold double-proxied
+   *  files legitimately rebuffer for 10-20s and a false failover restarts the
+   *  movie, which is worse than waiting. */
+  stallMs?: number;
 }
 
 export default function VideoPlayer({
@@ -54,6 +60,7 @@ export default function VideoPlayer({
   title,
   isLive = false,
   initialTime,
+  stallMs = 10000,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -115,6 +122,11 @@ export default function VideoPlayer({
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+
+    // One-shot position restore used by the native-HLS fallback below. Tracked at
+    // effect scope so a source swap removes a not-yet-fired listener before it
+    // could mis-seek the NEXT source's metadata load.
+    let restoreSeek: (() => void) | null = null;
 
     // Check if it's an HLS URL
     const isHlsUrl = typeof src === 'string' && src.includes(".m3u8");
@@ -255,6 +267,31 @@ export default function VideoPlayer({
           }
           return;
         }
+        // hls.js is done with this source. On Safari-family browsers the NATIVE
+        // HLS engine is a second, more forgiving player for the SAME url — it's
+        // exactly what the "Open in new tab" escape hatch uses, and it rides out
+        // streams hls.js chokes on. Hand playback over in place (resuming
+        // position) before declaring the source dead: press Open for the user,
+        // without the tab. VOD only — live failover is cheap (same content on
+        // the next source) and the live path is tuned around hls.js buffering.
+        // One-shot by construction: hls.destroy() means no further events from
+        // this instance; if native then errors/stalls, the element's own error
+        // handler / stall watchdog escalate to the parent as before.
+        if (!isLive && !cancelled && video.canPlayType("application/vnd.apple.mpegurl")) {
+          const at = video.currentTime;
+          try { hls.destroy(); } catch {}
+          if (hlsRef.current === hls) hlsRef.current = null;
+          if (at > 5) {
+            restoreSeek = () => {
+              restoreSeek = null;
+              try { video.currentTime = at; } catch {}
+            };
+            video.addEventListener("loadedmetadata", restoreSeek, { once: true });
+          }
+          video.src = src;
+          safePlay();
+          return;
+        }
         // Unrecoverable, or recovery budget exhausted → let the parent fail over.
         onError?.("HLS playback error");
       });
@@ -271,6 +308,7 @@ export default function VideoPlayer({
 
     return () => {
       cancelled = true;
+      if (restoreSeek) video.removeEventListener("loadedmetadata", restoreSeek);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -386,7 +424,7 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (!video || !src) return;
 
-    const STALL_MS = 10000;
+    const STALL_MS = stallMs;
     let lastTime = video.currentTime;
     let lastProgressAt = Date.now();
     let recovering = false; // attempted self-heal, awaiting fresh progress
@@ -409,21 +447,27 @@ export default function VideoPlayer({
       if (Date.now() - lastProgressAt <= STALL_MS) return;
 
       // No forward progress past the threshold.
-      if (!recovering && hlsRef.current) {
-        // First strike: try to recover in place; give it a fresh window.
+      if (!recovering) {
+        // First strike: try to recover in place; give it a fresh window. Native
+        // playback (iOS Safari HLS, progressive MP4 — hlsRef null) gets the same
+        // second chance: it used to fail over on the FIRST freeze, which turned
+        // an ordinary 10-20s rebuffer on a cold proxied source into a source
+        // switch + restart ("the movie keeps restarting"). The browser's own
+        // fetcher usually rides a freeze out — same as when the raw URL is
+        // opened in a new tab, which is why "Open" worked when in-app didn't.
         recovering = true;
         lastProgressAt = Date.now();
-        try { hlsRef.current.startLoad(); } catch {}
+        try { hlsRef.current?.startLoad(); } catch {}
         v.play().catch(() => {});
         return;
       }
-      // Second strike (or no hls to recover) → genuine drop, fail over once.
+      // Second strike → genuine drop, fail over once.
       lastProgressAt = Date.now(); // avoid re-firing every tick before src swaps
       onStall?.();
     }, 1000);
 
     return () => clearInterval(id);
-  }, [src, onStall]);
+  }, [src, onStall, stallMs]);
 
   // Background/foreground lifecycle — the core anti-eviction fix. When the tab is
   // backgrounded, a playing video keeps a decoder + big buffer alive, making the

@@ -344,7 +344,9 @@ export default function VodSeriesPage() {
                                 onSourceFail={(lastTime) => {
                                   // Carry the position so the next source resumes
                                   // where the dead one stopped, not from 0:00.
-                                  if (lastTime > 30) {
+                                  // >5s (not 30) — an early failure restarting the
+                                  // next source from zero is the restart loop.
+                                  if (lastTime > 5) {
                                     setEpisodeResume((prev) => ({ ...prev, [epKey]: lastTime }));
                                   }
                                   setEpisodeSourceIdx((prev) => {
