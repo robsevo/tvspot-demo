@@ -6,7 +6,7 @@ import VideoPlayer from "./VideoPlayer";
 import { channelSlug } from "@/lib/sources";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, X, Loader2, RefreshCw, Info } from "lucide-react";
+import { ArrowLeft, Check, X, Loader2, RefreshCw, Info, ExternalLink } from "lucide-react";
 
 /** How many sources to probe / show at most. */
 const MAX_SOURCES = 6;
@@ -190,6 +190,25 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
         onError={handleSourceFailure}
       />
 
+      {/* Open the current source directly in a new tab — the same escape hatch as
+          VOD. When the in-app player loops or stalls, this plays the raw stream
+          outside it (iOS Safari plays the .m3u8 natively). Always available, even
+          on single-source channels. */}
+      {src && (
+        <div className="flex items-center justify-end px-1 -mt-1">
+          <a
+            href={src}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] px-2.5 py-1 rounded-full bg-card text-text-muted hover:text-white transition-colors flex items-center gap-1"
+            title="If this source won't play here, open it in a new tab"
+          >
+            <ExternalLink className="w-3 h-3" />
+            Open
+          </a>
+        </div>
+      )}
+
       {/* No auto-switch once playing — user picks a source below. Nudge after 30s. */}
       <SourceTroubleHint resetKey={src} message="Trouble with this channel? Try another source below." />
 
@@ -250,7 +269,9 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
         <span>
           Live streams cycle as providers come and go. If a channel stalls, buffers, or
           won&apos;t load, tap <span className="text-text-secondary font-medium">Recheck</span> every
-          now and then to refresh the source list, or pick another source above.
+          now and then to refresh the source list, pick another source above, or tap{" "}
+          <span className="text-text-secondary font-medium">Open</span> to play the current
+          source in a new tab.
         </span>
       </p>
     </div>
