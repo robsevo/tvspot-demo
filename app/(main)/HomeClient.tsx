@@ -8,7 +8,7 @@ import { PageSkeleton } from "@/components/LoadingSkeleton";
 import { useEvents } from "@/hooks/useEvents";
 import { useChannels } from "@/hooks/useChannels";
 import { channelSlug } from "@/lib/sources";
-import { carrierForLeague } from "@/lib/leagues";
+import { broadcastersForLeague } from "@/lib/leagues";
 import { curate, trendingScore, trendingNow, topRated, adultAnimation } from "@/lib/discovery";
 import { prewarmVod } from "@/lib/vodPrewarm";
 import { readCache, writeCache } from "@/lib/localCache";
@@ -128,7 +128,9 @@ export default function HomeClient({
         new Date(a.g.dateUtc).getTime() - new Date(b.g.dateUtc).getTime(),
     );
     return all.slice(0, 2).map(({ lg, g }) => {
-      const carrier = carrierForLeague(lg.key, channels, channelSlug);
+      // All OUR channels carrying this league (brand-deduped, online first), so
+      // the hero surfaces every channel that features the game, not just one.
+      const carriers = broadcastersForLeague(lg.key, channels, channelSlug, 4);
       return {
         id: g.id,
         leagueName: lg.name,
@@ -138,8 +140,7 @@ export default function HomeClient({
         dateUtc: g.dateUtc,
         state: g.state,
         detail: g.detail,
-        watchSlug: carrier ? channelSlug(carrier.name) : null,
-        watchName: carrier ? carrier.name : null,
+        carriers: carriers.map((c) => ({ slug: channelSlug(c.name), name: c.name })),
       };
     });
   }, [eventsData, channels]);

@@ -321,7 +321,17 @@ export default function LivePage() {
                 <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${status === "live" ? "live-dot" : ""}`} />
                 <span className="flex items-center gap-1 whitespace-nowrap">
                   <TeamMark team={game.away} active={active} />
-                  <span className={active ? "text-white/70" : "text-text-muted"}>v</span>
+                  {game.away.score != null && game.away.score !== "" &&
+                  game.home.score != null && game.home.score !== "" ? (
+                    // Live/finished game → show the score in place of the "v".
+                    <span className={`tabular-nums font-semibold ${active ? "text-white" : "text-white/90"}`}>
+                      {game.away.score}
+                      <span className={`mx-0.5 font-normal ${active ? "text-white/50" : "text-text-muted"}`}>–</span>
+                      {game.home.score}
+                    </span>
+                  ) : (
+                    <span className={active ? "text-white/70" : "text-text-muted"}>v</span>
+                  )}
                   <TeamMark team={game.home} active={active} />
                 </span>
                 <span className={`text-[10px] whitespace-nowrap ${active ? "text-white/80" : s.text}`}>

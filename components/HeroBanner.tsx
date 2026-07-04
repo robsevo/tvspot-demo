@@ -8,6 +8,11 @@ import type { CatalogItem } from "@/lib/types";
 import type { EventTeam } from "@/lib/leagues";
 
 /** An event surfaced in the hero (built by HomePage from /api/events). */
+export interface HeroCarrier {
+  slug: string;
+  name: string;
+}
+
 export interface HeroEvent {
   id: string;
   leagueName: string;
@@ -17,9 +22,8 @@ export interface HeroEvent {
   dateUtc: string;
   state: "pre" | "in" | "post";
   detail: string;
-  /** OUR channel slug carrying it, or null. */
-  watchSlug: string | null;
-  watchName: string | null;
+  /** OUR channels carrying it (brand-deduped, online first); empty if none. */
+  carriers: HeroCarrier[];
 }
 
 interface Props {
@@ -215,6 +219,8 @@ function EventContent({ ev }: { ev: HeroEvent }) {
   const live = ev.state === "in";
   const final = ev.state === "post";
   const showScore = live || final;
+  const primary = ev.carriers[0] || null;
+  const extra = ev.carriers.slice(1);
   return (
     <>
       <div className="flex items-center gap-2 mb-2">
@@ -232,13 +238,13 @@ function EventContent({ ev }: { ev: HeroEvent }) {
         <HeroTeam team={ev.home} score={ev.home.score} showScore={showScore} />
       </div>
       <div className="flex items-center gap-3 flex-wrap">
-        {ev.watchSlug ? (
+        {primary ? (
           <Link
-            href={`/live/${ev.watchSlug}`}
+            href={`/live/${primary.slug}`}
             className="flex items-center gap-1.5 bg-white text-black px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-white/90 transition-all hover:scale-105 active:scale-95"
           >
             <Play className="w-4 h-4 fill-black" />
-            {live ? "Watch Live" : ev.watchName ? `Watch on ${ev.watchName}` : "Watch"}
+            {live ? "Watch Live" : `Watch on ${primary.name}`}
           </Link>
         ) : (
           <span className="bg-white/10 text-white/80 px-5 py-2.5 rounded-full text-sm font-medium backdrop-blur-sm">
@@ -250,6 +256,22 @@ function EventContent({ ev }: { ev: HeroEvent }) {
           {live ? ev.detail : final ? ev.detail || "Final" : etTime(ev.dateUtc)}
         </span>
       </div>
+      {/* Other channels we carry that also feature this game — brand-deduped
+          (TSN1..5 → one TSN), each a direct deep-link. */}
+      {extra.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
+          <span className="text-white/50 text-xs">Also on</span>
+          {extra.map((c) => (
+            <Link
+              key={c.slug}
+              href={`/live/${c.slug}`}
+              className="px-2.5 py-1 rounded-full bg-white/10 text-white/90 text-xs font-medium backdrop-blur-sm hover:bg-white/20 transition-colors"
+            >
+              {c.name}
+            </Link>
+          ))}
+        </div>
+      )}
     </>
   );
 }
