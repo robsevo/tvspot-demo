@@ -216,6 +216,17 @@ async function main(): Promise<void> {
 
   log(`  Candidates: ${storeCount} from list, ${backendCount} from backend, ${scrapedCount} scraped across ${candidateMap.size} channels`);
 
+  // Save Origin's URLs per slug so we can inject them as guaranteed fallbacks after
+  // verification — relay.example.com routinely 403s during the verify window, which
+  // drops Origin's own sources from the output even when they work fine on-site.
+  const catalogUrlsBySlug = new Map<string, string[]>();
+  for (const ch of channels) {
+    if (!ch.name) continue;
+    const slug = slugify(ch.name);
+    const urls = [ch.primary_url, ...(ch.backup_urls || [])].filter((u): u is string => Boolean(u));
+    if (urls.length) catalogUrlsBySlug.set(slug, urls);
+  }
+
   // Release heavy stage 1-6 data before verification. The merged M3U entries,
   // channel list, and matches all live in main() scope — combined with the
   // verifier's playlist buffers they exceed Node's 4 GB heap and get OOM-killed.
@@ -291,11 +302,13 @@ async function main(): Promise<void> {
 
     const active: typeof loadable = [];
     const taken = new Set<string>();
-    // 1) Keep previously-active links that are still loadable (sticky — no replace).
+    // 1) Keep previously-active links that are still loadable AND live (sticky — no replace).
+    //    Non-live previously-active sources lose their sticky slot so live scraped
+    //    sources can fill it instead of being stuck on the waiting bench.
     for (const url of prevActiveUrls) {
       if (active.length >= ACTIVE_CAP) break;
       const s = byUrl.get(url);
-      if (s && !taken.has(url)) { active.push(s); taken.add(url); }
+      if (s && s.live && !taken.has(url)) { active.push(s); taken.add(url); }
     }
     // 2) Fill remaining slots from the rest (already ranked live-first).
     for (const s of loadable) {
@@ -329,6 +342,7 @@ async function main(): Promise<void> {
     for (const [slug, vc] of Object.entries(existing.channels)) {
       if (channelsSection[slug]) continue; // already (re)verified fresh this run
       const fresh = (vc.sources || []).filter((s) => {
+        if (!s.live) return false;
         const t = Date.parse(s.verifiedUtc || s.firstSeenUtc || "");
         return Number.isFinite(t) && nowMs - t < GRACE_MS;
       });
@@ -344,6 +358,43 @@ async function main(): Promise<void> {
   }
   if (carriedChannels) {
     log(`  Carried ${carriedChannels} recently-verified channels forward (blipped this run, within ${GRACE_DAYS}d)`);
+  }
+
+  // Origin fallback injection. relay.example.com 403s during the verify window often
+  // enough that Origin's own sources get dropped from the output even though they
+  // work fine on the site. For every channel Origin knows about, inject its URLs
+  // into open active slots — they're always present if the channel exists on Origin.
+  let catalogInjected = 0;
+  const catalogFallbackUtc = now();
+  for (const [slug, catalogUrls] of catalogUrlsBySlug) {
+    const existing_ch = channelsSection[slug];
+    const takenUrls = new Set(existing_ch?.sources?.map((s) => s.url) ?? []);
+    const toInject = catalogUrls.filter((u) => !takenUrls.has(u));
+    if (!toInject.length) continue;
+    if (!existing_ch) {
+      // Channel got no verified sources at all — seed it with Origin's URLs.
+      const sources = toInject.slice(0, ACTIVE_CAP).map((u) => ({
+        url: u, tier: 2, latencyMs: 0, verifiedUtc: catalogFallbackUtc,
+        origin: "backend" as const, live: false,
+      }));
+      channelsSection[slug] = { name: nameBySlug.get(slug) || slug, sources };
+      activeTotal += sources.length;
+      catalogInjected += sources.length;
+    } else {
+      // Fill open slots in the existing active set.
+      const openSlots = ACTIVE_CAP - (existing_ch.sources?.length ?? 0);
+      if (openSlots <= 0) continue;
+      const fill = toInject.slice(0, openSlots).map((u) => ({
+        url: u, tier: 2, latencyMs: 0, verifiedUtc: catalogFallbackUtc,
+        origin: "backend" as const, live: false,
+      }));
+      existing_ch.sources = [...(existing_ch.sources ?? []), ...fill];
+      activeTotal += fill.length;
+      catalogInjected += fill.length;
+    }
+  }
+  if (catalogInjected) {
+    log(`  Injected ${catalogInjected} Origin fallback URLs into open active slots`);
   }
 
   log(`  Active ${activeTotal} (≤5/ch) + waiting ${waitingTotal} across ${Object.keys(channelsSection).length} channels`);
