@@ -243,6 +243,36 @@ async function main(): Promise<void> {
   for (const sources of verified.values()) totalVerified += sources.length;
   log(`  Kept ${totalVerified} loadable sources across ${verified.size} channels`);
 
+  // Liveness-collapse guard. A run where EVERYTHING loadable failed the
+  // liveness probe is a broken verify window (box/relay degraded mid-run),
+  // not a hundred streams dying in the same minute — 2026-07-04 one such run
+  // stamped 183/190 sources live:false while an upstream host/bgdc/mundo2 were
+  // serving fine. When the signal collapses, carry each URL's live flag
+  // forward from the previous run instead of publishing the false flags.
+  // Only ever restores live:true (never flips live→dead), and verifiedUtc
+  // still updates — these sources DID pass the loadability tiers this run.
+  if (totalVerified >= 30 && existing?.channels) {
+    let totalLive = 0;
+    for (const sources of verified.values()) for (const s of sources) if (s.live) totalLive++;
+    if (totalLive === 0) {
+      const prevLiveUrls = new Set<string>();
+      for (const vc of Object.values(existing.channels)) {
+        for (const s of [...(vc.sources || []), ...(vc.waiting || [])]) {
+          if (s.live) prevLiveUrls.add(s.url);
+        }
+      }
+      let restored = 0;
+      for (const sources of verified.values()) {
+        for (const s of sources) {
+          if (prevLiveUrls.has(s.url)) { s.live = true; restored++; }
+        }
+        // Re-rank live-first: the verifier sorted on the broken flags.
+        sources.sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0));
+      }
+      log(`  LIVENESS COLLAPSE: 0/${totalVerified} loadable passed liveness — broken verify window; restored ${restored} live flags from the previous run`);
+    }
+  }
+
   // Build output — per channel, split loadable links into a STICKY active set
   // (≤5) plus an unbounded waiting bench. Stickiness preserves whatever was
   // active before (so a working channel is never torn out on a flaky run); empty
