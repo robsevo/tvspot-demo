@@ -285,6 +285,15 @@ export default function VodSeriesPage() {
                               Open
                             </a>
                           </div>
+                          {/* Persistent tip: a looping/restarting episode is a
+                              stuck source; Open plays it directly in a new tab. */}
+                          <p className="text-[10px] text-text-muted flex items-center gap-1">
+                            <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                            <span>
+                              If an episode keeps restarting or looping, tap{" "}
+                              <span className="text-text-secondary">Open</span> to play it in a new tab.
+                            </span>
+                          </p>
                           <div className="rounded-xl overflow-hidden bg-black">
                             {currentSource.kind === "embed" ? (
                               startedUrl === currentSource.url ? (

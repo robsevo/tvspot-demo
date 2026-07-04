@@ -232,6 +232,15 @@ export default function VodMoviePage() {
                 Open
               </a>
             </div>
+            {/* Persistent tip: a stream that loops or keeps restarting is a stuck
+                source; the Open escape hatch plays it directly in a new tab. */}
+            <p className="text-[10px] text-text-muted mb-2 flex items-center gap-1">
+              <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+              <span>
+                If a stream keeps restarting or looping, tap{" "}
+                <span className="text-text-secondary">Open</span> to play it in a new tab.
+              </span>
+            </p>
             <div className="rounded-xl overflow-hidden bg-black">
               {current.kind === "embed" ? (
                 startedUrl === current.url ? (
