@@ -288,7 +288,7 @@ async function main(): Promise<void> {
   // (≤5) plus an unbounded waiting bench. Stickiness preserves whatever was
   // active before (so a working channel is never torn out on a flaky run); empty
   // active slots are filled from the rest, live-verified first.
-  const ACTIVE_CAP = 5;
+  const ACTIVE_CAP = 12;
   const channelsSection: Record<string, VerifiedChannel> = {};
   let activeTotal = 0;
   let waitingTotal = 0;
