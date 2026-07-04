@@ -72,14 +72,42 @@ export default function DeployRefresh() {
       // when it's invisible (hidden) or at the natural re-entry boundary,
       // before they've started doing anything. And NEVER while a stream is
       // playing, even at re-entry — that would cut the video. Deferred reloads
-      // fire when playback stops (below) or on the next background.
+      // fire when playback stops (below), at the next idle lull (armIdleTimer),
+      // or on the next background.
       if (document.visibilityState === "hidden") { void reload(); return; }
       if (atReentry && !isPlaybackActive()) { void reload(); return; }
       pendingReload = true;
+      armIdleTimer(); // mid-session deploy: reload at the next foreground lull
     };
+
+    // Idle-reload: a deploy detected mid-session (while foreground) can't reload
+    // immediately — that reads as a hard reset under active use. But if we do
+    // nothing, the user's next tap trips Next's skew reload, which is the SAME
+    // reset at a WORSE moment (feels tap-triggered). So when the user goes quiet
+    // — no interaction for IDLE_MS while still foreground — reload at that lull,
+    // beating the tap. Any interaction re-arms the timer, so we never reload out
+    // from under someone actively browsing; playback blocks it outright.
+    const IDLE_MS = 20_000;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearIdleTimer = () => { if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } };
+    const armIdleTimer = () => {
+      clearIdleTimer();
+      if (!pendingReload || disposed) return;
+      idleTimer = setTimeout(() => {
+        if (disposed || !pendingReload) return;
+        if (document.visibilityState !== "visible") return; // hidden path owns this
+        if (isPlaybackActive()) return;                      // never cut a stream
+        void reload();
+      }, IDLE_MS);
+    };
+    // Cheap no-op until an update is pending, so the always-on listeners cost
+    // nothing in the common case.
+    const onActivity = () => { if (pendingReload) armIdleTimer(); };
+    const activityEvents = ["pointerdown", "keydown", "touchstart", "scroll"] as const;
 
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
+        clearIdleTimer();
         if (pendingReload) void reload();
       } else {
         void check(true); // re-entry: catch deploys that shipped while backgrounded
@@ -96,7 +124,7 @@ export default function DeployRefresh() {
     let stopTimer: ReturnType<typeof setTimeout> | null = null;
     const clearStopTimer = () => { if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; } };
     const unsubPlayback = onPlaybackChange((active) => {
-      if (active) { clearStopTimer(); return; }
+      if (active) { clearStopTimer(); clearIdleTimer(); return; }
       if (!pendingReload || disposed) return;
       clearStopTimer();
       stopTimer = setTimeout(() => {
@@ -104,18 +132,30 @@ export default function DeployRefresh() {
       }, 2500);
     });
 
-    void check();
-    const interval = setInterval(() => void check(), 10 * 60_000);
+    // First mount IS a re-entry boundary — "re-opened, before the user does
+    // anything." When the service worker serves a stale shell after a deploy,
+    // this is the ONE safe moment to reload cleanly (cache-cleared → new build)
+    // BEFORE the user taps a channel and trips Next's mid-navigation skew reload
+    // ("tapped a channel and the site rebuilt"). Guarded by !isPlaybackActive()
+    // inside check() and the 60s sessionStorage backstop against loops.
+    void check(true);
+    // Poll often enough that a mid-session deploy is detected within a couple of
+    // minutes — so the idle-lull reload has a chance to fire before the user's
+    // next tap trips Next's skew reload. /api/version is a tiny no-store function.
+    const interval = setInterval(() => void check(), 2 * 60_000);
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("pagehide", onPageHide);
+    activityEvents.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
 
     return () => {
       disposed = true;
       clearStopTimer();
+      clearIdleTimer();
       unsubPlayback();
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", onPageHide);
+      activityEvents.forEach((e) => window.removeEventListener(e, onActivity));
     };
   }, []);
 
