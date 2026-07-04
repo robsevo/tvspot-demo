@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Cap on extra URLs returned per request. */
-const MAX_EXTRA = 8;
+const MAX_EXTRA = 12;
 
 /**
  * POST { slug: string; exclude: string[] } -> { urls: string[] }

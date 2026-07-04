@@ -38,7 +38,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
       channel.primary_url,
       ...(channel.backup_urls || []),
     ].filter((u): u is string => Boolean(u));
-    return Array.from(new Set(merged)).slice(0, 10);
+    return Array.from(new Set(merged)).slice(0, 20);
   }, [channel]);
 
   // Extra sources fetched dynamically when the initial probe comes up mostly dead.
@@ -46,10 +46,10 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   const [extraUrls, setExtraUrls] = useState<string[]>([]);
   const expansionFired = useRef(false);
 
-  // Merge extra sources into the probe pool, deduped, capped at 14.
+  // Merge extra sources into the probe pool, deduped, capped at 24.
   const allUrls = useMemo(
     () => (extraUrls.length > 0
-      ? [...new Set([...probedUrls, ...extraUrls])].slice(0, 14)
+      ? [...new Set([...probedUrls, ...extraUrls])].slice(0, 24)
       : probedUrls),
     [probedUrls, extraUrls],
   );
