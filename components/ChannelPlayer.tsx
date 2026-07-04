@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useChannels } from "@/hooks/useChannels";
 import { getChannelSources } from "@/lib/sources";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
@@ -41,7 +41,65 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     return Array.from(new Set(merged)).slice(0, 10);
   }, [channel]);
 
-  const { statusOf, workingCount, busyCount, loading, recheck } = useStreamCheck(probedUrls);
+  // Extra sources fetched dynamically when the initial probe comes up mostly dead.
+  // Declared before allUrls so the memo can reference it without hoisting issues.
+  const [extraUrls, setExtraUrls] = useState<string[]>([]);
+  const expansionFired = useRef(false);
+
+  // Merge extra sources into the probe pool, deduped, capped at 14.
+  const allUrls = useMemo(
+    () => (extraUrls.length > 0
+      ? [...new Set([...probedUrls, ...extraUrls])].slice(0, 14)
+      : probedUrls),
+    [probedUrls, extraUrls],
+  );
+
+  const { statusOf, workingCount, busyCount, loading, recheck } = useStreamCheck(allUrls);
+
+  // Reset expansion when the channel changes.
+  const channelSlugValue = channel ? channelSlug(channel.name) : "";
+  const prevChannelSlug = useRef(channelSlugValue);
+  useEffect(() => {
+    if (channelSlugValue === prevChannelSlug.current) return;
+    prevChannelSlug.current = channelSlugValue;
+    expansionFired.current = false;
+    setExtraUrls([]);
+  }, [channelSlugValue]);
+
+  // After the initial probe settles with < 2 working sources, fetch the
+  // waiting-bench URLs for this channel and re-probe the grown set.
+  useEffect(() => {
+    if (loading) return;
+    if (workingCount >= 2) return;
+    if (expansionFired.current) return;
+    if (probedUrls.length === 0) return;
+
+    expansionFired.current = true;
+    const slug = channelSlugValue;
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const res = await fetch("/api/extra-sources", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug, exclude: probedUrls }),
+          signal: controller.signal,
+        });
+        if (!res.ok) return;
+        const data: { urls?: string[] } = await res.json();
+        if (Array.isArray(data.urls) && data.urls.length > 0) {
+          setExtraUrls(data.urls);
+        }
+      } catch {
+        // Aborted (channel changed) or network error — silently ignore.
+      }
+    })();
+
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, workingCount, channelSlugValue]);
+
   // The source ACTUALLY playing — playback is ground truth, so the verifier can
   // never mark it dead or claim "no sources online" while it's on screen.
   const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
@@ -94,21 +152,21 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // failed ones, cap the list. If everything is gone, show them anyway so the user
   // can still try. A manual pick stays visible even if it died.
   const displayUrls = useMemo(() => {
-    const alive = probedUrls.filter((u) => !isDead(u));
-    const base = (alive.length > 0 ? alive : probedUrls).slice(0, MAX_SOURCES);
-    if (pickedUrl && probedUrls.includes(pickedUrl) && !base.includes(pickedUrl)) {
+    const alive = allUrls.filter((u) => !isDead(u));
+    const base = (alive.length > 0 ? alive : allUrls).slice(0, MAX_SOURCES);
+    if (pickedUrl && allUrls.includes(pickedUrl) && !base.includes(pickedUrl)) {
       return [pickedUrl, ...base].slice(0, MAX_SOURCES);
     }
     return base;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [probedUrls, statusOf, pickedUrl, failedAt]);
+  }, [allUrls, statusOf, pickedUrl, failedAt]);
 
   // Playback: honor a manual pick (unless it has since dropped); otherwise the
   // BEST auto source. Preference cycles past busy (connection-limited) accounts to
   // a free one: confirmed-working non-busy first, then still-checking/unknown, then
   // busy last (only if nothing better). During probing nothing is verified yet, so
   // source 1 plays instantly; verdicts then promote a non-busy working source.
-  const pickValid = pickedUrl != null && probedUrls.includes(pickedUrl) && !isDead(pickedUrl);
+  const pickValid = pickedUrl != null && allUrls.includes(pickedUrl) && !isDead(pickedUrl);
   const pickRank = (u: string): number => {
     if (u === confirmedUrl) return -1;         // already playing → never displace it
     const s = statusOf(u);
@@ -117,7 +175,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     if (s === "busy") return 2;                // connection-limited → last resort
     return 3;                                   // dead
   };
-  const firstAlive = probedUrls
+  const firstAlive = allUrls
     .filter((u) => !isDead(u))
     .sort((a, b) => pickRank(a) - pickRank(b))[0];
   // If every source is cooling down (a global relay outage), keep trying the
@@ -125,7 +183,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // likely to have recovered, and the player's own recovery reconnects in place.
   const fallback =
     firstAlive ??
-    [...probedUrls].sort((a, b) => (failedAt[a] ?? 0) - (failedAt[b] ?? 0))[0] ??
+    [...allUrls].sort((a, b) => (failedAt[a] ?? 0) - (failedAt[b] ?? 0))[0] ??
     "";
   const src = pickValid ? (pickedUrl as string) : fallback;
 
@@ -212,7 +270,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
       {/* No auto-switch once playing — user picks a source below. Nudge after 30s. */}
       <SourceTroubleHint resetKey={src} message="Trouble with this channel? Try another source below." />
 
-      {probedUrls.length > 1 && (
+      {allUrls.length > 1 && (
         <div className="flex flex-col gap-2">
           {/* Verification summary */}
           <div className="flex items-center justify-between px-1 text-xs text-text-muted">
@@ -220,10 +278,10 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
               {loading
                 ? "Checking sources…"
                 : shownWorking > 0
-                  ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${probedUrls.length}`
+                  ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}`
                   : busyCount > 0
                     ? `${busyCount} source${busyCount > 1 ? "s" : ""} busy — will connect when free`
-                    : `0 of ${probedUrls.length} sources online`}
+                    : `0 of ${allUrls.length} sources online`}
             </span>
             <button
               onClick={recheckAll}
