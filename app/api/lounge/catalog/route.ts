@@ -13,6 +13,10 @@ const BYPASS_TV_IDS = [93405, 71446, 70523, 110316, 99966, 96648, 210905, 96677]
 const BYPASS_MOVIE_IDS = [496243, 396535, 670];
 const BYPASS_IDS = new Set<number>([...BYPASS_TV_IDS, ...BYPASS_MOVIE_IDS]);
 
+/** Services whose content is foreign-origin BY DESIGN, so the US/CA-origin gate
+ *  must not apply (it would drop nearly everything). Crunchyroll = anime. */
+const ORIGIN_GATE_EXEMPT = new Set<string>(["Crunchyroll"]);
+
 /** Normalize backend items: backend uses `name` not `title`, `rating` not `vote_average` */
 function fixImageUrl(url: string | undefined | null, size: string = "w500"): string {
   if (!url) return "";
@@ -429,13 +433,21 @@ export async function GET(request: NextRequest) {
     ]);
     applyRegionScores(normalized.movies || [], movieRegion.scores);
     applyRegionScores(normalized.series || [], seriesRegion.scores);
-    // Keep ALL US/CA-English titles (not just the popularity allowlist): confirm
-    // the long tail against TMDB by id. This is what lifts a service from ~67 to
-    // the full set of its genuine US/CA English titles.
-    [normalized.movies, normalized.series] = await Promise.all([
-      filterUsCaEn(normalized.movies || [], "movie", movieRegion.allow),
-      filterUsCaEn(normalized.series || [], "tv", seriesRegion.allow),
-    ]);
+    // The US/CA-origin gate drops everything not US/CA-origin — right for the
+    // mainstream services (it removes the foreign dramas the backend mixes in),
+    // but it would gut a foreign-BY-NATURE service. Crunchyroll is ~100%
+    // Japanese-origin anime, so the gate left ~10 of ~500. Services in
+    // ORIGIN_GATE_EXEMPT keep all their titles (still English-metadata'd by the
+    // backend's language=en-US discover) and are only re-ranked by popularity.
+    if (!ORIGIN_GATE_EXEMPT.has(service)) {
+      // Keep ALL US/CA-English titles (not just the popularity allowlist):
+      // confirm the long tail against TMDB by id. Lifts a service from ~67 to
+      // the full set of its genuine US/CA English titles.
+      [normalized.movies, normalized.series] = await Promise.all([
+        filterUsCaEn(normalized.movies || [], "movie", movieRegion.allow),
+        filterUsCaEn(normalized.series || [], "tv", seriesRegion.allow),
+      ]);
+    }
 
     return NextResponse.json(normalized);
   }
