@@ -4,13 +4,12 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { useChannels } from "@/hooks/useChannels";
 import { getChannelType } from "@/lib/logos";
 import { LogoImage } from "@/components/LogoImage";
-import { proxyFetch } from "@/lib/api";
 import { channelSlug } from "@/lib/sources";
 import { useEvents } from "@/hooks/useEvents";
+import { useEpg } from "@/hooks/useEpg";
 import { carriersForLeague, type GameEvent } from "@/lib/leagues";
 import Link from "next/link";
-import { Tv, CalendarDays } from "lucide-react";
-import type { EpgResponse } from "@/lib/types";
+import { Tv, CalendarDays, RefreshCw } from "lucide-react";
 
 const HOUR_WIDTH = 240; // pixels per hour
 const NOW_COLOR = "#38bdf8";
@@ -51,11 +50,12 @@ function TeamMark({ team, active }: { team: GameEvent["home"]; active: boolean }
 }
 
 export default function LivePage() {
-  const { channels, loading } = useChannels();
+  const { channels, loading, refetch } = useChannels();
   const { data: eventsData } = useEvents();
   const [activeCat, setActiveCat] = useState("All");
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
-  const [epgData, setEpgData] = useState<Record<string, { title: string; start: Date; end: Date }[]>>({});
+  const channelNames = useMemo(() => channels.map((c) => c.name), [channels]);
+  const { epg, ready: epgReady } = useEpg(channelNames);
   const scrollRef = useRef<HTMLDivElement>(null);
   const timeRulerRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(new Date());
@@ -88,47 +88,42 @@ export default function LivePage() {
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch EPG data
-  useEffect(() => {
-    if (channels.length === 0) return;
-    const names = channels.map((c) => c.name).join(",");
-    proxyFetch<EpgResponse>(`/api/lounge/epg?channels=${encodeURIComponent(names)}`)
-      .then((data) => {
-        const parsed: Record<string, { title: string; start: Date; end: Date }[]> = {};
-        for (const [name, progs] of Object.entries(data.programmes || {})) {
-          // First pass: merge overlapping/contiguous entries with the same title
-          const sorted = progs
-            .map((p) => ({
-              title: p.title,
-              start: new Date(p.start_utc),
-              end: new Date(p.stop_utc),
-            }))
-            .sort((a, b) => a.start.getTime() - b.start.getTime());
-          const merged: typeof sorted = [];
-          for (const p of sorted) {
-            const last = merged[merged.length - 1];
-            if (last && last.title === p.title && p.start.getTime() <= last.end.getTime() + 300000) {
-              if (p.end > last.end) last.end = p.end;
-            } else {
-              merged.push({ title: p.title, start: p.start, end: p.end });
-            }
-          }
-          // Second pass: remove any remaining overlaps between different titles
-          const deduped: typeof merged = [];
-          for (const p of merged) {
-            const last = deduped[deduped.length - 1];
-            if (last && p.start.getTime() < last.end.getTime()) {
-              // Overlaps with previous — different titles, skip the duplicate
-            } else {
-              deduped.push(p);
-            }
-          }
-          parsed[name] = deduped;
+  // Parse + de-overlap the raw guide into render-ready rows. Fetching, caching,
+  // and retry all live in useEpg — this memo is pure shaping.
+  const epgData = useMemo(() => {
+    const parsed: Record<string, { title: string; start: Date; end: Date }[]> = {};
+    for (const [name, progs] of Object.entries(epg)) {
+      // First pass: merge overlapping/contiguous entries with the same title
+      const sorted = progs
+        .map((p) => ({
+          title: p.title,
+          start: new Date(p.start_utc),
+          end: new Date(p.stop_utc),
+        }))
+        .sort((a, b) => a.start.getTime() - b.start.getTime());
+      const merged: typeof sorted = [];
+      for (const p of sorted) {
+        const last = merged[merged.length - 1];
+        if (last && last.title === p.title && p.start.getTime() <= last.end.getTime() + 300000) {
+          if (p.end > last.end) last.end = p.end;
+        } else {
+          merged.push({ title: p.title, start: p.start, end: p.end });
         }
-        setEpgData(parsed);
-      })
-      .catch(() => {});
-  }, [channels]);
+      }
+      // Second pass: remove any remaining overlaps between different titles
+      const deduped: typeof merged = [];
+      for (const p of merged) {
+        const last = deduped[deduped.length - 1];
+        if (last && p.start.getTime() < last.end.getTime()) {
+          // Overlaps with previous — different titles, skip the duplicate
+        } else {
+          deduped.push(p);
+        }
+      }
+      parsed[name] = deduped;
+    }
+    return parsed;
+  }, [epg]);
 
   // Time window: 1 hour before to 5 hours after
   const windowStart = useMemo(() => {
@@ -228,6 +223,26 @@ export default function LivePage() {
             <div key={i} className="h-16 bg-card rounded-3xl animate-pulse" />
           ))}
         </div>
+      </div>
+    );
+  }
+
+  if (channels.length === 0) {
+    // Nothing cached AND the lineup fetch failed (backend restarting / offline).
+    // Without this the page rendered an empty "0 channels" shell with no way
+    // forward — same dead end the channel page had.
+    return (
+      <div className="pt-14 min-h-screen pb-20 px-4 flex flex-col items-center justify-center text-center">
+        <p className="text-text-secondary text-sm">
+          Can&apos;t reach the TV service right now — it may be restarting.
+        </p>
+        <button
+          onClick={refetch}
+          className="mt-4 inline-flex items-center gap-1.5 bg-brand text-white text-sm font-medium px-4 py-2.5 rounded-xl min-h-[44px]"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Try again
+        </button>
       </div>
     );
   }
@@ -342,6 +357,16 @@ export default function LivePage() {
           })
         )}
       </div>
+
+      {/* Guide-outage notice: only when there is nothing at all to draw — no
+          cached guide and no successful fetch yet. useEpg keeps retrying in the
+          background; tuning in still works because streams don't need the guide. */}
+      {epgReady && Object.keys(epg).length === 0 && (
+        <div className="mx-4 mb-3.5 px-3.5 py-2.5 rounded-xl bg-amber-400/10 ring-1 ring-amber-400/25 text-amber-300/90 text-[11px] leading-relaxed">
+          TV guide is temporarily unavailable — retrying in the background. Channels
+          still play: tap any row to tune in.
+        </div>
+      )}
 
       {/* EPG Grid */}
       {filteredChannels.length === 0 && selectedEntry ? (

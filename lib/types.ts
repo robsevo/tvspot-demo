@@ -59,6 +59,8 @@ export interface Channel {
   logo_url?: string;
   primary_url?: string;
   backup_urls?: string[];
+  /** Sports game-guide entries the backend attaches per channel on live-channels. */
+  programs?: EpgProgram[];
 }
 
 export interface VodDetail {
@@ -121,7 +123,7 @@ export interface ContinueWatchingItem {
 }
 
 export interface ChannelsResponse {
-  channels: (Channel & { programs?: EpgProgram[] })[];
+  channels: Channel[];
 }
 
 export interface Service {

@@ -24,7 +24,21 @@ export async function GET(
   });
 
   response.headers.set("Access-Control-Allow-Origin", "*");
-  response.headers.set("Cache-Control", "no-store");
+  // The EPG is identical for every user and slow-moving, so let Vercel's edge
+  // cache absorb backend restarts: s-maxage serves it CDN-side for 15 min and
+  // stale-while-revalidate keeps serving the last good guide for up to a day
+  // while the box is down/warming. max-age=0 keeps browsers revalidating to
+  // the edge. Auth still runs per-request in middleware BEFORE the cache, and
+  // only 200s get the cacheable header. Everything else stays no-store —
+  // live-channels carries rotating tokenized stream URLs.
+  if (pathStr === "epg" && res.ok) {
+    response.headers.set(
+      "Cache-Control",
+      "public, max-age=0, s-maxage=900, stale-while-revalidate=86400",
+    );
+  } else {
+    response.headers.set("Cache-Control", "no-store");
+  }
 
   const ct = res.headers.get("content-type");
   if (ct) response.headers.set("Content-Type", ct);

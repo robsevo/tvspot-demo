@@ -2,36 +2,51 @@
 
 import { channelSlug } from "@/lib/sources";
 import { useParams } from "next/navigation";
-import { useState, useEffect } from "react";
-import { proxyFetch } from "@/lib/api";
+import { useChannels } from "@/hooks/useChannels";
 import Link from "next/link";
 import ChannelPlayer from "@/components/ChannelPlayer";
-import type { ChannelsResponse } from "@/lib/types";
+import { RefreshCw } from "lucide-react";
 
 export default function ChannelPage() {
   const { channelName } = useParams<{ channelName: string }>();
-  const [channel, setChannel] = useState<ChannelsResponse["channels"][number] | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Cached-first channel lineup (the same hook the player itself uses): a
+  // backend blip or restart no longer blocks tuning — the last-good list from
+  // localStorage resolves the channel, and the player's baked-in verified
+  // sources still play. The old version did its own uncached live-channels
+  // fetch here and rendered "Channel not found" whenever that one request
+  // failed — which is exactly what happened during nightly API bounces.
+  const { channels, loading, refetch } = useChannels();
 
-  useEffect(() => {
-    if (!channelName) return;
-    setLoading(true);
-    proxyFetch<ChannelsResponse>("/api/lounge/live-channels")
-      .then((data) => {
-        const found = data.channels.find(
-          (ch) => channelSlug(ch.name) === channelName
-        );
-        setChannel(found || null);
-      })
-      .catch((err) => console.error("Channel fetch failed:", err))
-      .finally(() => setLoading(false));
-  }, [channelName]);
+  const channel = channels.find((ch) => channelSlug(ch.name) === channelName) || null;
 
-  if (loading) {
+  if (!channel && loading) {
     return (
       <div className="pt-3 min-h-screen pb-20 animate-pulse px-4">
         <div className="h-6 bg-card rounded w-1/2 mb-4" />
         <div className="h-32 bg-card rounded" />
+      </div>
+    );
+  }
+
+  if (!channel && channels.length === 0) {
+    // No lineup at all (nothing cached AND the fetch failed) — a transient
+    // backend window, not a bad channel link. Offer a retry instead of the
+    // dead-end "Channel not found".
+    return (
+      <div className="pt-3 min-h-screen pb-20 px-4 text-center">
+        <p className="text-text-secondary">
+          Can&apos;t reach the TV service right now — it may be restarting.
+        </p>
+        <button
+          onClick={refetch}
+          className="mt-4 inline-flex items-center gap-1.5 bg-brand text-white text-sm font-medium px-4 py-2.5 rounded-xl min-h-[44px]"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Try again
+        </button>
+        <div>
+          <Link href="/live" className="text-brand text-sm mt-4 inline-block">Back to Live TV</Link>
+        </div>
       </div>
     );
   }
