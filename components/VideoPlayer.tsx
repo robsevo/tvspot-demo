@@ -115,19 +115,40 @@ export default function VideoPlayer({
   // PiP capability — standard API (Chrome/Edge/Android) or WebKit presentation
   // mode (Safari mac/iPhone/iPad). Firefox exposes neither (its PiP is
   // browser-chrome-only), so the button simply doesn't render there.
+  //
+  // Keyed on `src`, NOT mount: the <video> element only exists once a src is
+  // set (the component renders a "No stream available" placeholder while a VOD
+  // title resolves or a live channel picks a source), so a mount-only check ran
+  // against a null ref and left pipSupported=false forever — the button never
+  // appeared. iOS also only reports webkitSupportsPresentationMode reliably once
+  // metadata loads, so we re-detect on loadedmetadata too.
   useEffect(() => {
     const video = videoRef.current as any;
     if (!video) return;
-    const standard = typeof document !== "undefined" && (document as any).pictureInPictureEnabled;
-    const webkit =
-      typeof video.webkitSupportsPresentationMode === "function" &&
-      video.webkitSupportsPresentationMode("picture-in-picture") &&
-      typeof video.webkitSetPresentationMode === "function";
-    setPipSupported(Boolean(standard || webkit));
-  }, []);
+    const detect = () => {
+      const standard =
+        typeof document !== "undefined" &&
+        (document as any).pictureInPictureEnabled &&
+        !video.disablePictureInPicture;
+      const webkit =
+        typeof video.webkitSupportsPresentationMode === "function" &&
+        video.webkitSupportsPresentationMode("picture-in-picture") &&
+        typeof video.webkitSetPresentationMode === "function";
+      setPipSupported(Boolean(standard || webkit));
+    };
+    detect();
+    video.addEventListener("loadedmetadata", detect);
+    video.addEventListener("canplay", detect);
+    return () => {
+      video.removeEventListener("loadedmetadata", detect);
+      video.removeEventListener("canplay", detect);
+    };
+  }, [src]);
 
   // Keep pipActive in sync however PiP is entered/left (our button, the
-  // browser's own control, or the PiP window's close button).
+  // browser's own control, or the PiP window's close button). Keyed on `src`
+  // too so the listeners bind to the CURRENT video element (a src→empty→src
+  // cycle remounts <video>, giving a fresh ref the mount-only effect missed).
   useEffect(() => {
     const video = videoRef.current as any;
     if (!video) return;
@@ -143,7 +164,7 @@ export default function VideoPlayer({
       video.removeEventListener("leavepictureinpicture", onLeave);
       video.removeEventListener("webkitpresentationmodechanged", onWebkitMode);
     };
-  }, []);
+  }, [src]);
 
   const togglePip = useCallback(async () => {
     const video = videoRef.current as any;
