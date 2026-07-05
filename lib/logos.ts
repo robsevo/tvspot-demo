@@ -227,6 +227,22 @@ function getShowLogoUrl(name: string): string | null {
   const n = name.toLowerCase().replace(/^24\/7\s+/, "").trim();
   return SHOW_LOGO_URLS[n] ?? null;
 }
+
+/** Distinct logo images for channels that would otherwise COLLIDE on a shared
+ *  brand favicon. The whole ESPN family maps to espn.com, so ESPN / ESPN2 /
+ *  ESPNU / ESPNews / ESPN+ rendered the identical round mark and looked like
+ *  duplicates in the grid. These give each a distinct wordmark (verified
+ *  Wikimedia thumbnails, 2026-07-05); a broken URL falls through to the favicon
+ *  via the <img> onError chain. ESPNU has no Wikimedia file — it keeps the
+ *  round espn.com favicon, still distinct from the wordmarks here. */
+const CHANNEL_LOGO_URLS: Record<string, string> = {
+  "ESPN": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/ESPN_wordmark.svg/250px-ESPN_wordmark.svg.png",
+  "ESPN2": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/bf/ESPN2_logo.svg/250px-ESPN2_logo.svg.png",
+  "ESPN 2": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/bf/ESPN2_logo.svg/250px-ESPN2_logo.svg.png",
+  "ESPNU": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/ESPN_U_logo.svg/250px-ESPN_U_logo.svg.png",
+  "ESPNews": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/ESPNews.svg/250px-ESPNews.svg.png",
+  "ESPN+": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/80/ESPN_Plus.svg/250px-ESPN_Plus.svg.png",
+};
 /** Resolve a logo domain for a channel name, tolerating numbers/regions/prefixes
  *  ("TSN1", "Sportsnet East", "24/7 Family Guy") via normalized brand matching. */
 /** Normalize a channel name to a brand key: drop "24/7 " prefix, lowercase, strip
@@ -328,6 +344,13 @@ export function getLogoCandidates(name: string, opts?: { skipChannelOverride?: b
   // safely falls through to the next candidate via the <img> onError chain.
   // Skipped for VOD SERVICE cards — those want the clean white brand marks
   // (SimpleIcons/wordmarks), not a colored live-channel logo (e.g. Paramount+).
+  // Exact full-name logo FIRST — most specific, so it beats channelLogoOverride's
+  // loose prefix match. Without this ordering, CHANNEL_LOGO_OVERRIDES["espn"]
+  // (a startsWith match) forced the ESPN wordmark onto ESPN2/ESPNU/ESPNews/ESPN+
+  // — the "they look like dups" the user hit. Each ESPN sibling now shows its
+  // own mark. Gated by skipChannelOverride like the other channel logos.
+  const directUrl = opts?.skipChannelOverride ? undefined : CHANNEL_LOGO_URLS[name];
+  if (directUrl) out.push(directUrl);
   const override = opts?.skipChannelOverride ? undefined : channelLogoOverride(name);
   if (override) out.push(override);
   const showUrl = getShowLogoUrl(name);
