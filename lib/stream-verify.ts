@@ -128,3 +128,63 @@ export async function checkStream(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): 
 export async function checkStreams(urls: string[], timeoutMs = DEFAULT_TIMEOUT_MS): Promise<StreamCheck[]> {
   return Promise.all(urls.map((u) => checkStream(u, timeoutMs)));
 }
+
+/** VOD probes wait longer: a cold relay remux / double-proxied file can take
+ *  several seconds to answer its first byte and that's still a good source. */
+const VOD_TIMEOUT_MS = 10_000;
+
+/**
+ * Probe a single VOD source. VOD candidates aren't all HLS playlists — they're
+ * progressive MP4/MKV (often via the same-origin /api/vod-stream range proxy),
+ * relay remux URLs, and embed PAGES (vidlink & co). So the live playlist
+ * validation doesn't apply; reachability is the signal: HEAD first (cheap),
+ * and on 405/501 (hosts that reject HEAD) retry as a 1-byte range GET.
+ * `origin` resolves same-origin relative URLs ("/api/vod-stream?…") since this
+ * runs server-side.
+ */
+export async function checkVodSource(url: string, origin: string): Promise<StreamCheck> {
+  const start = Date.now();
+  const abs = url.startsWith("/") ? `${origin}${url}` : url;
+  const probe = async (method: "HEAD" | "GET"): Promise<Response> => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), VOD_TIMEOUT_MS);
+    try {
+      return await fetch(abs, {
+        method,
+        signal: ctrl.signal,
+        headers: {
+          "User-Agent": "tvspot-stream-check/1.0",
+          ...(method === "GET" ? { Range: "bytes=0-0" } : {}),
+        },
+        cache: "no-store",
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  try {
+    let res = await probe("HEAD");
+    if (res.status === 405 || res.status === 501) res = await probe("GET");
+    // Drain nothing: a range GET body is ≤1 byte; HEAD has none.
+    const latencyMs = Date.now() - start;
+    if (res.ok || res.status === 206) {
+      return { url, ok: true, status: res.status, latencyMs, reason: "ok" };
+    }
+    const busy = res.status === 456 || res.status === 429 || res.status === 509;
+    return {
+      url,
+      ok: false,
+      busy,
+      status: res.status,
+      latencyMs,
+      reason: busy ? "busy (connection limit)" : httpReason(res.status),
+    };
+  } catch {
+    return { url, ok: false, status: 0, latencyMs: Date.now() - start, reason: "unreachable" };
+  }
+}
+
+/** Probe many VOD sources concurrently. Order of results matches input order. */
+export async function checkVodSources(urls: string[], origin: string): Promise<StreamCheck[]> {
+  return Promise.all(urls.map((u) => checkVodSource(u, origin)));
+}

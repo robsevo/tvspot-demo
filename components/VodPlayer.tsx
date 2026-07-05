@@ -27,6 +27,8 @@ interface Props {
   /** This source is dead — advance. Receives the last playback position so
    *  the parent can resume the NEXT source there instead of restarting. */
   onSourceFail?: (lastTime: number) => void;
+  /** Fired when playback actually starts (first frame ready). */
+  onPlay?: () => void;
 }
 
 // Remux sources get a longer runway: a cold relay ffmpeg spawn takes ~20-24s
@@ -53,6 +55,7 @@ export default function VodPlayer({
   autoPlay = false,
   onProgress,
   onSourceFail,
+  onPlay: onPlayProp,
 }: Props) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const failed = useRef(false);
@@ -108,7 +111,15 @@ export default function VodPlayer({
       initialTime={isRemux ? undefined : initialTime}
       autoPlay={autoPlay}
       stallMs={STALL_MS}
-      onProgress={onProgress}
+      onProgress={
+        onProgress &&
+        ((t, d) => {
+          // Remux playback clocks from 0 at the baked offset — report ABSOLUTE
+          // position/duration or continue-watching regresses to ~0% on resume.
+          const off = isRemux && initialTime ? initialTime : 0;
+          onProgress(off + t, off + d);
+        })
+      }
       onTimeUpdate={(t) => {
         // Remux playback clocks from 0 at the baked offset — track absolute
         // position so a further failover resumes at the right spot.
@@ -118,6 +129,7 @@ export default function VodPlayer({
       onPlay={() => {
         setStarted(true);
         clear();
+        onPlayProp?.();
       }}
       onError={fail}
       onStall={fail}

@@ -26,15 +26,18 @@ interface UseStreamCheck {
 }
 
 /**
- * Probes a set of live-TV source URLs via /api/stream-check and reports which
+ * Probes a set of source URLs via /api/stream-check and reports which
  * actually play. Re-probes whenever the set of URLs changes (keyed by content,
  * not array identity, so a re-render with an equivalent array won't refetch).
+ * mode "live" (default) validates HLS playlists server-side; "vod" is a
+ * reachability probe for progressive/remux/embed sources.
  *
  * `loading` is derived from whether `results` belong to the current URL set,
  * so the effect only ever calls setState after the fetch resolves — never
  * synchronously in the effect body.
  */
-export function useStreamCheck(urls: string[]): UseStreamCheck {
+export function useStreamCheck(urls: string[], opts?: { mode?: "live" | "vod" }): UseStreamCheck {
+  const mode = opts?.mode ?? "live";
   const [results, setResults] = useState<Record<string, StreamCheck>>({});
   // The URL-set key that `results` were produced for. "" = nothing probed yet.
   const [checkedKey, setCheckedKey] = useState("");
@@ -51,7 +54,7 @@ export function useStreamCheck(urls: string[]): UseStreamCheck {
         const res = await fetch("/api/stream-check", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ urls }),
+          body: JSON.stringify({ urls, mode }),
         });
         const data: { results?: StreamCheck[] } = await res.json();
         if (!active) return;
@@ -70,9 +73,9 @@ export function useStreamCheck(urls: string[]): UseStreamCheck {
     return () => {
       active = false;
     };
-    // `key`/`nonce` capture the meaningful inputs; `urls` identity is excluded.
+    // `key`/`nonce`/`mode` capture the meaningful inputs; `urls` identity is excluded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, nonce]);
+  }, [key, nonce, mode]);
 
   const current = checkedKey === key;
 
@@ -93,14 +96,14 @@ export function useStreamCheck(urls: string[]): UseStreamCheck {
       const res = await fetch("/api/stream-check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls: us }),
+        body: JSON.stringify({ urls: us, mode }),
       });
       const data: { results?: StreamCheck[] } = await res.json();
       const map: Record<string, StreamCheck> = {};
       for (const r of data.results || []) map[r.url] = r;
       setResults((prev) => ({ ...prev, ...map }));
     } catch {}
-  }, []);
+  }, [mode]);
 
   useEffect(() => {
     if (!current || workingNow >= TARGET_WORKING) return;

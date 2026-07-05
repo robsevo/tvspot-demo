@@ -1,24 +1,66 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { proxyFetch } from "@/lib/api";
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
-import { mergeSources } from "@/lib/sources";
+import { ChevronLeft, Check, X, Loader2, RefreshCw, ExternalLink, Info } from "lucide-react";
+import { mergeSources, type PlayableSource } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
-import { ExternalLink } from "lucide-react";
+import VodPlayer from "@/components/VodPlayer";
+import { useContinueWatching } from "@/hooks/useContinueWatching";
+import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
+import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import type { VodDetail } from "@/lib/types";
+
+/** Maximum sources to display. */
+const MAX_SOURCES = 6;
+
+/** Sources that dropped DURING playback cool down before retry — VOD sources
+ *  that die mid-file usually need a couple of minutes (relay slot, provider). */
+const FAIL_COOLDOWN_MS = 120000;
+
+/** Small status indicator for a source button. */
+function StatusDot({ status }: { status: SourceStatus }) {
+  if (status === "checking") return <Loader2 className="w-3 h-3 animate-spin text-text-muted" />;
+  if (status === "working") return <Check className="w-3 h-3 text-green-400" />;
+  if (status === "dead") return <X className="w-3 h-3 text-red-400" />;
+  if (status === "busy") return <span className="w-2 h-2 rounded-full bg-amber-400" title="Busy — connection limit" />;
+  return null;
+}
 
 export default function VodMoviePage() {
   const { tmdbId } = useParams<{ tmdbId: string }>();
   const [detail, setDetail] = useState<VodDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  // Sources: direct streams first, then backend sources, embeds last.
-  const [sourceIndex, setSourceIndex] = useState(0);
+
+  // Resolved direct stream URLs (prewarm cache + fresh resolution)
   const [resolved, setResolved] = useState<string[]>([]);
   const [resolving, setResolving] = useState(true);
 
+  // Source selection: index into merged sources array
+  const [sourceIndex, setSourceIndex] = useState(0);
+  // Sources that dropped during playback → when, for cooldown-based recovery.
+  const [failedAt, setFailedAt] = useState<Record<string, number>>({});
+  // The URL that actually reached first frame — playback is ground truth, so a
+  // probe verdict can never mark the on-screen source dead.
+  const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
+
+  // Continue Watching integration
+  const cwId = useMemo(() => (tmdbId ? Number(tmdbId) : 0), [tmdbId]);
+  const { items, updateProgress, remove } = useContinueWatching();
+  // Resume position is snapshotted ONCE per title. Deriving it live from the
+  // continue-watching entry (which playback rewrites every few seconds) fed an
+  // ever-changing initialTime into the player — and for remux sources that
+  // param is baked into the stream URL, so the movie restarted on every save.
+  const resumeRef = useRef<number | null>(null);
+  if (resumeRef.current === null && items.length > 0) {
+    const e = items.find((i) => i.tmdbId === cwId && i.kind === "movie");
+    resumeRef.current = e?.duration && e.duration > 0 ? (e.progress / 100) * e.duration : 0;
+  }
+  const resumeTime = resumeRef.current ?? 0;
+
+  // Fetch movie details
   useEffect(() => {
     if (!tmdbId) return;
     setLoading(true);
@@ -28,10 +70,7 @@ export default function VodMoviePage() {
       .finally(() => setLoading(false));
   }, [tmdbId]);
 
-  // Resolve a clean direct stream in parallel with the detail fetch. Goes through
-  // the shared prewarm cache: if a poster press/hover already resolved this title
-  // it paints instantly; otherwise it dedupes onto the in-flight request so we
-  // never double-resolve.
+  // Resolve direct streams with prewarm caching
   useEffect(() => {
     if (!tmdbId) return;
     let cancelled = false;
@@ -55,20 +94,109 @@ export default function VodMoviePage() {
     };
   }, [tmdbId]);
 
-  const sources = useMemo(
+  // Merge sources: direct streams first, then backend sources, embeds last
+  const sources: PlayableSource[] = useMemo(
     () => mergeSources(resolved, detail?.stream_urls, detail?.embed_urls),
-    [detail, resolved],
+    [detail, resolved]
   );
-  const idx = Math.min(sourceIndex, Math.max(0, sources.length - 1));
-  const current = sources[idx];
 
-  // Auto-failover: when the playing source is pronounced dead (error / stall /
-  // never-started timeout), advance to the next and keep playing without a
-  // re-tap. Wraps nothing — past the last source we show an honest failure.
-  const pickSource = (i: number) => {
-    setSourceIndex(i);
-  };
+  // Server-side reachability probe (same machinery as live channels, VOD mode:
+  // HEAD / range-GET — these are files and embed pages, not HLS playlists).
+  const probeUrls = useMemo(() => sources.slice(0, MAX_SOURCES).map((s) => s.url), [sources]);
+  const { statusOf, workingCount, busyCount, loading: checking, recheck } = useStreamCheck(probeUrls, { mode: "vod" });
 
+  // Ensure source index is valid
+  const validIndex = Math.min(sourceIndex, Math.max(0, sources.length - 1));
+  const currentSource = sources[validIndex];
+
+  // Cooldown tick so a cooled-down source comes back on its own.
+  useEffect(() => {
+    const id = setInterval(() => setFailedAt((prev) => ({ ...prev })), 10000);
+    return () => clearInterval(id);
+  }, []);
+
+  // A source is unusable if it dropped during playback (cooldown window) or the
+  // probe judged it dead — unless it's the one actually playing right now.
+  const isDead = useCallback(
+    (src: PlayableSource) => {
+      const url = src.url;
+      if (failedAt[url] && Date.now() - failedAt[url] < FAIL_COOLDOWN_MS) return true;
+      if (url === confirmedUrl) return false; // on screen and playing — reality wins
+      return statusOf(url) === "dead";
+    },
+    [failedAt, statusOf, confirmedUrl]
+  );
+
+  // Working count that trusts playback: never claim "0 online" while a source plays.
+  const shownWorking = workingCount + (confirmedUrl && statusOf(confirmedUrl) !== "working" ? 1 : 0);
+
+  // Display sources: usable first; if everything is judged dead show them all
+  // anyway so the user can still try (probes can be wrong for embeds).
+  const displaySources = useMemo(() => {
+    const alive = sources.filter((s) => !isDead(s));
+    return (alive.length > 0 ? alive : sources).slice(0, MAX_SOURCES);
+  }, [sources, isDead]);
+
+  // Auto failover: if the current source is judged dead before it ever played,
+  // advance to the first usable one. (Once playing, confirmedUrl shields it.)
+  useEffect(() => {
+    if (sources.length === 0) return;
+    if (currentSource && !isDead(currentSource)) return;
+    const usable = sources.find((s) => !isDead(s));
+    if (usable) {
+      const idx = sources.indexOf(usable);
+      if (idx >= 0 && idx !== validIndex) setSourceIndex(idx);
+    }
+  }, [sources, isDead, currentSource, validIndex]);
+
+  // Player pronounced the current source dead (stall / error / never started):
+  // cool it down and advance, resuming the next source where this one died.
+  const handleSourceFailure = useCallback(
+    (_lastTime: number) => {
+      if (!currentSource) return;
+      const failedUrl = currentSource.url;
+      setConfirmedUrl((c) => (c === failedUrl ? null : c));
+      setFailedAt((prev) => ({ ...prev, [failedUrl]: Date.now() }));
+      const after = sources.findIndex(
+        (s, i) => i > validIndex && s.url !== failedUrl && !isDead(s)
+      );
+      const idx = after >= 0 ? after : sources.findIndex((s) => s.url !== failedUrl && !isDead(s));
+      if (idx >= 0 && idx !== validIndex) setSourceIndex(idx);
+    },
+    [currentSource, sources, validIndex, isDead]
+  );
+
+  // Save progress to Continue Watching. VideoPlayer already throttles this
+  // callback (~8s), so no extra gating here. Finishing the movie clears the row.
+  const handleProgress = useCallback(
+    (currentTime: number, duration: number) => {
+      if (!detail || !cwId || !duration || duration <= 0) return;
+      if (currentTime >= duration - 30) {
+        remove(cwId, "movie");
+        return;
+      }
+      updateProgress({
+        tmdbId: cwId,
+        title: detail.title,
+        poster: detail.backdrop,
+        kind: "movie",
+        progress: Math.round((currentTime / duration) * 100),
+        duration,
+        updatedAt: Date.now(),
+      });
+    },
+    [detail, cwId, updateProgress, remove]
+  );
+
+  const handlePlay = useCallback(() => {
+    if (currentSource) setConfirmedUrl(currentSource.url);
+  }, [currentSource]);
+
+  // Recheck: re-probe AND give playback-failed sources another chance.
+  const recheckAll = useCallback(() => {
+    setFailedAt({});
+    recheck();
+  }, [recheck]);
 
   if (loading) {
     return (
@@ -121,8 +249,7 @@ export default function VodMoviePage() {
         </div>
         <p className="text-text-secondary text-sm mb-4">{detail.overview}</p>
 
-        {/* No source yet: show resolving feedback (gap titles take ~10-13s via the
-            ad-free provider-a resolver) or an honest message — never a blank screen. */}
+        {/* No sources yet */}
         {sources.length === 0 && (
           <div className="mb-6 rounded-xl bg-black/40 aspect-video flex items-center justify-center">
             {resolving ? (
@@ -136,53 +263,99 @@ export default function VodMoviePage() {
           </div>
         )}
 
-        {sources.length > 0 && (
-          <div className="mb-6">
-            <h2 className="text-white text-sm font-semibold mb-2 flex items-center gap-2">
-              Watch Now
-              {resolving && (
-                <span className="text-text-muted text-[10px] font-normal">· finding clean stream…</span>
-              )}
-            </h2>
-            {/* Unified source list: direct streams first, vidlink last (≤5).
-                Clicking a source opens it directly (external), like the Open button. */}
-            <div className="flex flex-wrap items-center gap-1.5 mb-2">
-              {sources.length > 1 &&
-                sources.map((s, i) => (
-                  <a
-                    key={i}
-                    href={s.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => {
-                      // Still track which source was picked for the "Open" button
-                      pickSource(i);
-                    }}
-                    className={`text-[10px] px-2.5 py-1 rounded-full transition-colors ${
-                      idx === i ? "bg-brand text-white hud-glow" : "glass-card text-text-muted hover:text-white"
-                    }`}
-                  >
-                    {s.label}
-                  </a>
-                ))}
+        {/* Player and source management */}
+        {sources.length > 0 && currentSource && (
+          <div className="mb-6 space-y-3">
+            <VodPlayer
+              src={currentSource.url}
+              poster={detail.backdrop}
+              title={detail.title}
+              initialTime={resumeTime}
+              autoPlay
+              onProgress={handleProgress}
+              onSourceFail={handleSourceFailure}
+              onPlay={handlePlay}
+            />
+
+            {/* Open in new tab escape hatch */}
+            <div className="flex items-center justify-end px-1">
               <a
-                href={current.url}
+                href={currentSource.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[10px] px-2.5 py-1 rounded-full bg-card text-text-muted hover:text-white transition-colors flex items-center gap-1 ml-auto"
+                className="text-[10px] px-2.5 py-1 rounded-full bg-card text-text-muted hover:text-white transition-colors flex items-center gap-1"
                 title="If this source won't play here, open it in a new tab"
               >
                 <ExternalLink className="w-3 h-3" />
                 Open
               </a>
             </div>
-            {/* Persistent tip: a stream that loops or keeps restarting is a stuck
-                source; the Open escape hatch plays it directly in a new tab. */}
-            <p className="text-[10px] text-text-muted mb-2 flex items-center gap-1">
-              <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+
+            <SourceTroubleHint
+              resetKey={currentSource.url}
+              message="Trouble with this stream? Try another source below."
+            />
+
+            {/* Source selector */}
+            {sources.length > 1 && (
+              <div className="flex flex-col gap-2">
+                {/* Verification summary */}
+                <div className="flex items-center justify-between px-1 text-xs text-text-muted">
+                  <span>
+                    {checking
+                      ? "Checking sources…"
+                      : shownWorking > 0
+                        ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${probeUrls.length}`
+                        : busyCount > 0
+                          ? `${busyCount} source${busyCount > 1 ? "s" : ""} busy — will connect when free`
+                          : `0 of ${probeUrls.length} sources online`}
+                  </span>
+                  <button
+                    onClick={recheckAll}
+                    disabled={checking}
+                    className="flex items-center gap-1 text-text-secondary hover:text-white transition-colors disabled:opacity-50 min-h-[32px]"
+                    aria-label="Re-check sources"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${checking ? "animate-spin" : ""}`} />
+                    <span>Recheck</span>
+                  </button>
+                </div>
+
+                <div className="flex gap-2 overflow-x-auto px-1">
+                  {displaySources.map((src, idx) => {
+                    const isCurrent = src.url === currentSource?.url;
+                    const srcStatus: SourceStatus = isDead(src) ? "dead" : statusOf(src.url);
+                    return (
+                      <button
+                        key={src.url}
+                        onClick={() => {
+                          const sourceIdx = sources.indexOf(src);
+                          if (sourceIdx >= 0) setSourceIndex(sourceIdx);
+                        }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                          isCurrent
+                            ? "bg-brand text-white"
+                            : srcStatus === "dead"
+                              ? "bg-card text-text-muted opacity-60 hover:opacity-100"
+                              : "bg-card text-text-secondary hover:text-white"
+                        }`}
+                      >
+                        <StatusDot status={srcStatus} />
+                        {idx + 1}. {src.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Helpful tip */}
+            <p className="flex items-start gap-1.5 px-1 text-[11px] text-text-muted">
+              <Info className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
               <span>
                 If a stream keeps restarting or looping, tap{" "}
-                <span className="text-text-secondary">Open</span> to play it in a new tab.
+                <span className="text-text-secondary font-medium">Open</span> to play it in a new tab
+                or try another source above.
               </span>
             </p>
           </div>

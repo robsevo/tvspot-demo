@@ -72,6 +72,14 @@ export default function VideoPlayer({
   // the callback identity changes each render.
   const onProgressRef = useRef(onProgress);
   useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
+  // onError/onStall likewise live in refs: they sit in the ATTACH and WATCHDOG
+  // effects, and a parent re-creating these callbacks (probe verdicts landing,
+  // playback state flips) must never re-run those — re-assigning video.src
+  // restarts playback from 0 and silently discards the resume seek.
+  const onErrorRef = useRef(onError);
+  useEffect(() => { onErrorRef.current = onError; }, [onError]);
+  const onStallRef = useRef(onStall);
+  useEffect(() => { onStallRef.current = onStall; }, [onStall]);
   const [playing, setPlaying] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -293,7 +301,7 @@ export default function VideoPlayer({
           return;
         }
         // Unrecoverable, or recovery budget exhausted → let the parent fail over.
-        onError?.("HLS playback error");
+        onErrorRef.current?.("HLS playback error");
       });
       })();
     } else if (isHlsUrl && video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -314,7 +322,7 @@ export default function VideoPlayer({
         hlsRef.current = null;
       }
     };
-  }, [src, autoPlay, onError, isLive]);
+  }, [src, autoPlay, isLive]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -463,11 +471,11 @@ export default function VideoPlayer({
       }
       // Second strike → genuine drop, fail over once.
       lastProgressAt = Date.now(); // avoid re-firing every tick before src swaps
-      onStall?.();
+      onStallRef.current?.();
     }, 1000);
 
     return () => clearInterval(id);
-  }, [src, onStall, stallMs]);
+  }, [src, stallMs]);
 
   // Background/foreground lifecycle — the core anti-eviction fix. When the tab is
   // backgrounded, a playing video keeps a decoder + big buffer alive, making the
