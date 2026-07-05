@@ -26,6 +26,7 @@ const serviceColors: Record<string, string> = {
   "Hulu": "from-green-500 to-emerald-800",
   "Peacock": "from-teal-500 to-cyan-800",
   "Crave": "from-sky-600 to-blue-900",
+  "Crunchyroll": "from-orange-500 to-orange-900",
   "Other": "from-zinc-600 to-zinc-900",
   "Classics": "from-amber-600 to-yellow-900",
   "Theater": "from-blue-800 to-blue-950",
