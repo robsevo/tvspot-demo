@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { proxyFetch } from "@/lib/api";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
@@ -65,9 +65,9 @@ export default function VodMoviePage() {
   // Auto-failover: when the playing source is pronounced dead (error / stall /
   // never-started timeout), advance to the next and keep playing without a
   // re-tap. Wraps nothing — past the last source we show an honest failure.
-  const pickSource = useCallback((i: number) => {
+  const pickSource = (i: number) => {
     setSourceIndex(i);
-  }, []);
+  };
 
 
   if (loading) {

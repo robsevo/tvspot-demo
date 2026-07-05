@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { proxyFetch } from "@/lib/api";
 import Link from "next/link";
 import { ChevronLeft, ChevronDown } from "lucide-react";
@@ -22,21 +22,18 @@ export default function VodSeriesPage() {
   const toggleSeason = (n: number) =>
     setExpandedSeasons((prev) => ({ ...prev, [n]: !prev[n] }));
 
-  const resolveEpisode = useCallback(
-    (epKey: string, season: number, episode: number) => {
-      if (!tmdbId) return;
-      if (resolvedByEp[epKey] !== undefined) return;
-      const warm = getPrewarmed("series", tmdbId, season, episode);
-      if (warm) {
-        setResolvedByEp((prev) => ({ ...prev, [epKey]: warm }));
-        return;
-      }
-      resolveVod("series", tmdbId, season, episode)
-        .then((urls) => setResolvedByEp((prev) => ({ ...prev, [epKey]: urls })))
-        .catch(() => setResolvedByEp((prev) => ({ ...prev, [epKey]: [] })));
-    },
-    [tmdbId, resolvedByEp],
-  );
+  const resolveEpisode = (epKey: string, season: number, episode: number) => {
+    if (!tmdbId) return;
+    if (resolvedByEp[epKey] !== undefined) return;
+    const warm = getPrewarmed("series", tmdbId, season, episode);
+    if (warm) {
+      setResolvedByEp((prev) => ({ ...prev, [epKey]: warm }));
+      return;
+    }
+    resolveVod("series", tmdbId, season, episode)
+      .then((urls) => setResolvedByEp((prev) => ({ ...prev, [epKey]: urls })))
+      .catch(() => setResolvedByEp((prev) => ({ ...prev, [epKey]: [] })));
+  };
 
   useEffect(() => {
     if (!tmdbId) return;
