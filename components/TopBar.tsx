@@ -32,7 +32,10 @@ export default function TopBar() {
     <header
       className={`fixed top-0 left-0 right-0 z-40 safe-area-top transition-all duration-300 ${
         showBg
-          ? "bg-[#0c1426]/85 backdrop-blur-xl border-b border-white/10 shadow-lg shadow-black/60"
+          ? // Frosted glass: low-opacity tint + heavy blur/saturate does the work,
+            // an inset top highlight sells the pane edge. Content stays readable
+            // because the blur averages whatever scrolls under it.
+            "bg-[#0c1426]/55 backdrop-blur-2xl backdrop-saturate-150 border-b border-white/10 shadow-lg shadow-black/40 [box-shadow:inset_0_1px_0_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.4)]"
           : "bg-transparent"
       }`}
     >

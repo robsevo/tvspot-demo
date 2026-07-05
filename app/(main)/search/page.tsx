@@ -33,8 +33,13 @@ function scoreMatch(title: string, q: string): number {
   return 30;
 }
 
+/** What the user is searching for — pick BEFORE typing to narrow everything. */
+const SCOPES = ["All", "Channels", "Movies", "TV Shows"] as const;
+type Scope = (typeof SCOPES)[number];
+
 export default function SearchPage() {
   const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<Scope>("All");
   const [corpus, setCorpus] = useState<{ movies: CatalogItem[]; series: CatalogItem[] }>({ movies: [], series: [] });
   const [corpusLoading, setCorpusLoading] = useState(true);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -98,12 +103,22 @@ export default function SearchPage() {
       .map((x) => x.ch);
   }, [query, channels]);
 
-  // Title suggestions derived from real matches (top of both lists).
+  // Sections gated by the selected scope.
+  const showChannels = scope === "All" || scope === "Channels";
+  const showMovies = scope === "All" || scope === "Movies";
+  const showSeries = scope === "All" || scope === "TV Shows";
+
+  // Title suggestions derived from real matches (top of the in-scope lists).
   const suggestions = useMemo(() => {
     if (query.trim().length < 2) return [];
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const it of [...channelResults.map((c) => ({ title: c.name })), ...results.movies, ...results.series]) {
+    const pool = [
+      ...(showChannels ? channelResults.map((c) => ({ title: c.name })) : []),
+      ...(showMovies ? results.movies : []),
+      ...(showSeries ? results.series : []),
+    ];
+    for (const it of pool) {
       const t = it.title?.trim();
       if (t && !seen.has(norm(t))) {
         seen.add(norm(t));
@@ -112,7 +127,7 @@ export default function SearchPage() {
       if (out.length >= 6) break;
     }
     return out;
-  }, [results, channelResults, query]);
+  }, [results, channelResults, query, showChannels, showMovies, showSeries]);
 
   const commitRecent = useCallback((term: string) => {
     const t = term.trim();
@@ -133,7 +148,9 @@ export default function SearchPage() {
   const hasQuery = query.trim().length >= 1;
   const noResults =
     hasQuery && !corpusLoading &&
-    results.movies.length === 0 && results.series.length === 0 && channelResults.length === 0;
+    (!showMovies || results.movies.length === 0) &&
+    (!showSeries || results.series.length === 0) &&
+    (!showChannels || channelResults.length === 0);
 
   return (
     <div className="hud-grid-bg pt-14 min-h-screen pb-20 animate-page-rise">
@@ -200,6 +217,23 @@ export default function SearchPage() {
           )}
         </div>
 
+        {/* Scope picker — narrow to channels / movies / shows BEFORE typing. */}
+        <div className="flex gap-2 overflow-x-auto poster-rail mt-3">
+          {SCOPES.map((s) => (
+            <button
+              key={s}
+              onClick={() => setScope(s)}
+              className={`flex-shrink-0 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                scope === s
+                  ? "bg-brand text-white ring-1 ring-brand/50 shadow-md shadow-brand/30"
+                  : "glass-card text-text-secondary hover:text-white"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
         {/* Recent searches (shown when query is empty) */}
         {!hasQuery && recentSearches.length > 0 && (
           <div className="mt-4">
@@ -234,7 +268,7 @@ export default function SearchPage() {
             </div>
           ) : (
             <>
-              {channelResults.length > 0 && (
+              {showChannels && channelResults.length > 0 && (
                 <div className="mb-5">
                   <h2 className="text-white text-sm font-semibold px-4 mb-2">
                     Channels ({channelResults.length})
@@ -263,10 +297,10 @@ export default function SearchPage() {
                   </div>
                 </div>
               )}
-              {results.movies.length > 0 && (
+              {showMovies && results.movies.length > 0 && (
                 <PosterRail title={`Movies (${results.movies.length})`} items={results.movies.slice(0, 30)} kind="movie" />
               )}
-              {results.series.length > 0 && (
+              {showSeries && results.series.length > 0 && (
                 <PosterRail title={`Series (${results.series.length})`} items={results.series.slice(0, 30)} kind="series" />
               )}
             </>

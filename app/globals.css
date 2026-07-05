@@ -285,14 +285,29 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
   position: relative;
 }
 .hud-grid-bg::before {
-  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  /* z-index -1 tucks the grid BEHIND in-flow content, so children need no
+     forced z-index of their own. The old approach (z-0 grid + an unlayered
+     `.hud-grid-bg > * { z-index: 1 }`) silently overrode Tailwind z-*
+     utilities (unlayered CSS beats layered, and the build flattens custom
+     @layer wrappers) — which is how the search suggestions dropdown ended up
+     UNDER the results rail with glass-card tiles alpha-blending over its
+     text ("fused fonts"). */
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background: var(--hud-grid);
   -webkit-mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 75%);
           mask-image: radial-gradient(ellipse at 50% 0%, #000 0%, transparent 75%);
   animation: hudGridDrift 40s linear infinite;
   opacity: 0.6;
 }
-.hud-grid-bg > * { position: relative; z-index: 1; }
+
+/* iOS Safari zooms the whole page when focusing an input whose font-size is
+   under 16px (our inputs are text-sm = 14px). Force 16px on iOS only — the
+   canonical no-auto-zoom fix that keeps pinch-zoom accessibility intact. */
+@supports (-webkit-touch-callout: none) {
+  input[type="text"], input[type="search"], input[type="email"], input[type="password"] {
+    font-size: 16px;
+  }
+}
 
 /* HUD corner brackets — the signature Origin panel accent, brand-red. */
 .hud-corners { position: relative; }
