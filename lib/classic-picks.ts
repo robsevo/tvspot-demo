@@ -22,4 +22,5 @@ export const CLASSIC_MOVIE_PICKS = [
 export const CLASSIC_TV_PICKS = [
   31343,                    // Jersey Shore
   607,                      // The Powerpuff Girls (1998)
+  31677,                    // 30 for 30 (ESPN documentary series, 2009) — user request 2026-07-05
 ];

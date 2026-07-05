@@ -118,13 +118,24 @@ const CHANNEL_DOMAINS: Record<string, string> = {
   "beIN Sports 3": "beinsports.com", "beIN Sports 4": "beinsports.com",
   "beIN Sports 5": "beinsports.com",
   "Court TV": "courttv.com",
-  "True Crime Network": "truecrimenetwork.com",
   "ID": "investigationdiscovery.com",
   "Cinemax": "cinemax.com",
   "Starz": "starz.com",
   "Showtime": "sho.com",
   "FXX": "fxnetworks.com",
   "Teletoon": "teletoon.com",
+  // ── League + US sports networks (added 2026-07-05) ──
+  // NBA TV + ESPN+ already mapped above.
+  "ESPNU": "espn.com",
+  "ESPNews": "espn.com",
+  "CBS Sports Golazo": "cbssports.com",
+  "beIN Sports Xtra": "beinsports.com",
+  "Champions League": "uefa.com",
+  "MLS": "mlssoccer.com",
+  "Serie A": "legaseriea.com",
+  "LaLiga TV": "laliga.com",
+  "Peacock Premier League": "premierleague.com",
+  "Sky Sport Bundesliga": "bundesliga.com",
 };
 
 /**
@@ -186,6 +197,14 @@ const BRAND_DOMAINS: Record<string, string> = {
   boomerang: "boomerang.com", starz: "starz.com", cinemax: "cinemax.com",
   showtime: "sho.com", fxx: "fxnetworks.com", teletoon: "teletoon.com",
   bravo: "bravotv.com", syfy: "syfy.com", "a&e": "aetv.com",
+  // League + US sports families (numbered/regional variants → base brand).
+  // "cbs sports" already mapped above.
+  "bein sports": "beinsports.com", bein: "beinsports.com",
+  "cbs sports golazo": "cbssports.com",
+  mls: "mlssoccer.com", "champions league": "uefa.com", "serie a": "legaseriea.com",
+  laliga: "laliga.com", "la liga": "laliga.com", bundesliga: "bundesliga.com",
+  "premier league": "premierleague.com", peacock: "peacocktv.com",
+  espnu: "espn.com", espnews: "espn.com", nba: "nba.com",
 };
 
 /** Known logo URLs (Wikipedia thumbnails) for 24/7 single-show channels
@@ -704,7 +723,7 @@ export function getChannelType(name: string): string {
   // brand+number names like "TSN1"/"FS1" ("n"→"1" is not a word boundary), which
   // wrongly dumped all of TSN into Entertainment. Leading-boundary matches the
   // brand at a word start and tolerates trailing digits/suffixes.
-  if (/\b(tsn|sportsnet|espn|fs1|fs2|fox sports|nfl|nba|nhl|mlb|dazn|bein|nesn|fanduel|cbs sports|rds|tva sports|redzone|golf|ufc|wwe|sport|serie a|premier league|laliga|la liga|bundesliga)/.test(n))
+  if (/\b(tsn|sportsnet|espn|fs1|fs2|fox sports|nfl|nba|nhl|mlb|dazn|bein|nesn|fanduel|cbs sports|golazo|rds|tva sports|redzone|golf|ufc|wwe|sport|serie a|premier league|laliga|la liga|bundesliga|champions league|\bmls\b)/.test(n))
     return "Sports";
   if (/\b(cnn|fox news|msnbc|hln|bloomberg|bnn|cbc news|ctv news|cp24|global news|news)/.test(n))
     return "News";
