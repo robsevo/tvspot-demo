@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { proxyFetch } from "@/lib/api";
 import Link from "next/link";
 import { ChevronLeft, ChevronDown, Check, X, Loader2, RefreshCw, ExternalLink, Info } from "lucide-react";
@@ -143,6 +143,9 @@ export default function VodSeriesPage() {
     [playingSources]
   );
   const { statusOf, workingCount, busyCount, loading: checking, recheck } = useStreamCheck(probeUrls, { mode: "vod" });
+  // Ref mirror for handleSourceFailure, which reads it inside a state updater.
+  const checkingRef = useRef(checking);
+  useEffect(() => { checkingRef.current = checking; }, [checking]);
 
   // Cooldown tick so cooled-down sources come back on their own.
   useEffect(() => {
@@ -169,7 +172,9 @@ export default function VodSeriesPage() {
     ? Math.min(playingState.sourceIndex, Math.max(0, playingSources.length - 1))
     : 0;
   useEffect(() => {
-    if (!playingEpisode || playingSources.length === 0) return;
+    // Frozen while a probe round is in flight — see the movie page: advancing
+    // through unverified sources mid-recheck is the flicker.
+    if (checking || !playingEpisode || playingSources.length === 0) return;
     const current = playingSources[playingIndex];
     if (current && !isEpSourceDead(playingEpisode, current)) return;
     const usable = playingSources.find((s) => !isEpSourceDead(playingEpisode, s));
@@ -177,9 +182,11 @@ export default function VodSeriesPage() {
       const idx = playingSources.indexOf(usable);
       if (idx >= 0 && idx !== playingIndex) setEpStateField(playingEpisode, "sourceIndex", idx);
     }
-  }, [playingEpisode, playingSources, playingIndex, isEpSourceDead, setEpStateField]);
+  }, [checking, playingEpisode, playingSources, playingIndex, isEpSourceDead, setEpStateField]);
 
   // Player pronounced the playing source dead: cool it down and advance.
+  // Mid-probe (checking), record the cooldown but hold position — the effect
+  // above jumps once to a verified source when verdicts land.
   const handleSourceFailure = useCallback((epKey: string) => (_lastTime: number) => {
     setEpState((prev) => {
       const state = prev[epKey] ?? EMPTY_EP_STATE;
@@ -190,6 +197,9 @@ export default function VodSeriesPage() {
       const current = sources[idx];
       if (!current) return prev;
       const failedAt = { ...state.failedAt, [current.url]: Date.now() };
+      if (checkingRef.current) {
+        return { ...prev, [epKey]: { ...state, failedAt } };
+      }
       const usable = (s: PlayableSource) =>
         s.url !== current.url && !(failedAt[s.url] && Date.now() - failedAt[s.url] < FAIL_COOLDOWN_MS);
       const after = sources.findIndex((s, i) => i > idx && usable(s));

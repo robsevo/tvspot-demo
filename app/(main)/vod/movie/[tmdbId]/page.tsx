@@ -139,31 +139,37 @@ export default function VodMoviePage() {
 
   // Auto failover: if the current source is judged dead before it ever played,
   // advance to the first usable one. (Once playing, confirmedUrl shields it.)
+  // Frozen while a probe round is in flight: verdicts are seconds away, and
+  // hopping through unverified sources meanwhile is the recheck flicker.
   useEffect(() => {
-    if (sources.length === 0) return;
+    if (checking || sources.length === 0) return;
     if (currentSource && !isDead(currentSource)) return;
     const usable = sources.find((s) => !isDead(s));
     if (usable) {
       const idx = sources.indexOf(usable);
       if (idx >= 0 && idx !== validIndex) setSourceIndex(idx);
     }
-  }, [sources, isDead, currentSource, validIndex]);
+  }, [checking, sources, isDead, currentSource, validIndex]);
 
   // Player pronounced the current source dead (stall / error / never started):
   // cool it down and advance, resuming the next source where this one died.
+  // While a probe is in flight, record the failure but DON'T advance — the
+  // auto-failover effect jumps once to a verified-working source when verdicts
+  // land, instead of walking the unverified list.
   const handleSourceFailure = useCallback(
     (_lastTime: number) => {
       if (!currentSource) return;
       const failedUrl = currentSource.url;
       setConfirmedUrl((c) => (c === failedUrl ? null : c));
       setFailedAt((prev) => ({ ...prev, [failedUrl]: Date.now() }));
+      if (checking) return;
       const after = sources.findIndex(
         (s, i) => i > validIndex && s.url !== failedUrl && !isDead(s)
       );
       const idx = after >= 0 ? after : sources.findIndex((s) => s.url !== failedUrl && !isDead(s));
       if (idx >= 0 && idx !== validIndex) setSourceIndex(idx);
     },
-    [currentSource, sources, validIndex, isDead]
+    [currentSource, sources, validIndex, isDead, checking]
   );
 
   // Save progress to Continue Watching. VideoPlayer already throttles this

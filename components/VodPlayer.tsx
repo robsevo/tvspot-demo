@@ -41,6 +41,14 @@ interface Props {
 const NEVER_STARTED_MS = 25_000;
 const NEVER_STARTED_REMUX_MS = 35_000;
 
+// Minimum time a source stays on screen before its failure is REPORTED. Dead
+// relay URLs error in well under a second; reporting instantly made failover
+// strobe through the source list ("flickers between sources really fast",
+// especially right after Recheck lifts every cooldown at once). The verdict
+// itself is still immediate — only the advance is paced. Late failures
+// (stalls minutes in) are past the dwell and report with zero delay.
+const FAIL_DWELL_MS = 1_500;
+
 // VOD stall window (VideoPlayer's watchdog runs two strikes of this). Wider
 // than the live default: a cold proxied file rebuffering 10-20s is normal and
 // self-recovers — the user sees the buffering ring/notice meanwhile — whereas a
@@ -58,8 +66,12 @@ export default function VodPlayer({
   onPlay: onPlayProp,
 }: Props) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Separate from `timer`: arm()/clear() manage the never-started watchdog and
+  // must never cancel a pending (dwell-delayed) failure report.
+  const reportTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const failed = useRef(false);
   const lastTime = useRef(0);
+  const mountedAt = useRef(Date.now());
   const [started, setStarted] = useState(false);
 
   const clear = () => {
@@ -71,7 +83,12 @@ export default function VodPlayer({
     if (failed.current) return; // one verdict per source
     failed.current = true;
     clear();
-    onSourceFail?.(lastTime.current);
+    const wait = Math.max(0, FAIL_DWELL_MS - (Date.now() - mountedAt.current));
+    if (wait === 0) {
+      onSourceFail?.(lastTime.current);
+    } else {
+      reportTimer.current = setTimeout(() => onSourceFail?.(lastTime.current), wait);
+    }
   }, [onSourceFail]);
 
   const arm = useCallback(() => {
@@ -89,9 +106,16 @@ export default function VodPlayer({
   // play attempt starts immediately — arm the never-started timeout now.
   useEffect(() => {
     failed.current = false;
+    mountedAt.current = Date.now();
     setStarted(false);
     if (autoPlay) arm();
-    return clear;
+    return () => {
+      clear();
+      // Source changed (advance landed / manual pick) — a stale pending
+      // report must not fire against the new source's parent state.
+      if (reportTimer.current) clearTimeout(reportTimer.current);
+      reportTimer.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
