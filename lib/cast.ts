@@ -64,15 +64,32 @@ export function isCastAvailable(): boolean {
   return !!window.chrome?.cast?.isAvailable;
 }
 
+// The live cast session, so the player can end it ("Play here instead") and so
+// a second castMedia can reuse/replace it cleanly.
+let activeSession: any = null;
+
+/** End the current cast session (stops playback on the TV). Safe to call always. */
+export function endCastSession(): void {
+  try {
+    activeSession?.stop(() => {}, () => {});
+  } catch {}
+  activeSession = null;
+}
+
 export async function castMedia(
   url: string,
   title: string,
-  poster?: string
+  poster?: string,
+  opts?: {
+    /** Fired once when the TV session ends/disconnects (either side). */
+    onSessionEnd?: () => void;
+  }
 ): Promise<void> {
   await loadCastSDK();
   return new Promise((resolve, reject) => {
     window.chrome.cast.requestSession(
       (session: any) => {
+        activeSession = session;
         const mediaInfo = new window.chrome.cast.media.MediaInfo(
           url,
           "application/x-mpegURL"
@@ -83,7 +100,22 @@ export async function castMedia(
           mediaInfo.metadata.images = [new window.chrome.cast.Image(poster)];
         }
         const request = new window.chrome.cast.media.LoadRequest(mediaInfo);
-        session.loadMedia(request, resolve, reject);
+        session.loadMedia(
+          request,
+          () => {
+            if (opts?.onSessionEnd) {
+              const listener = (isAlive: boolean) => {
+                if (isAlive) return;
+                try { session.removeUpdateListener(listener); } catch {}
+                if (activeSession === session) activeSession = null;
+                opts.onSessionEnd!();
+              };
+              try { session.addUpdateListener(listener); } catch {}
+            }
+            resolve();
+          },
+          reject
+        );
       },
       reject
     );

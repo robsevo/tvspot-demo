@@ -2,8 +2,8 @@
 
 import { useRef, useEffect, useState, useCallback } from "react";
 import type Hls from "hls.js"; // type only — the library is imported lazily below
-import { Play, Pause, Maximize, Minimize, SkipBack, SkipForward, Monitor, Cast, Volume2, VolumeX, Volume1 } from "lucide-react";
-import { castMedia, loadCastSDK } from "@/lib/cast";
+import { Play, Pause, Maximize, Minimize, SkipBack, SkipForward, Monitor, Cast, Volume2, VolumeX, Volume1, PictureInPicture2 } from "lucide-react";
+import { castMedia, loadCastSDK, endCastSession } from "@/lib/cast";
 import { setPlaybackActive } from "@/lib/playbackState";
 
 interface Props {
@@ -95,6 +95,15 @@ export default function VideoPlayer({
   const [awaitingPlay, setAwaitingPlay] = useState(false);
   const [castAvailable, setCastAvailable] = useState(false);
   const [airPlaySupported, setAirPlaySupported] = useState(false);
+  // A cast session is live: local playback is stopped and an overlay explains
+  // where the stream went. Cleared when the TV session ends (either side).
+  const [casting, setCasting] = useState(false);
+  // Picture-in-picture: the video plays on in the floating window while the
+  // inline area shows a placeholder. Ref mirror for the visibility handler.
+  const [pipSupported, setPipSupported] = useState(false);
+  const [pipActive, setPipActive] = useState(false);
+  const pipActiveRef = useRef(false);
+  useEffect(() => { pipActiveRef.current = pipActive; }, [pipActive]);
   const controlsTimer = useRef<NodeJS.Timeout | null>(null);
   const hlsRef = useRef<Hls | null>(null);
 
@@ -102,6 +111,87 @@ export default function VideoPlayer({
   useEffect(() => {
     loadCastSDK().then(() => setCastAvailable(true)).catch(() => {});
   }, []);
+
+  // PiP capability — standard API (Chrome/Edge/Android) or WebKit presentation
+  // mode (Safari mac/iPhone/iPad). Firefox exposes neither (its PiP is
+  // browser-chrome-only), so the button simply doesn't render there.
+  useEffect(() => {
+    const video = videoRef.current as any;
+    if (!video) return;
+    const standard = typeof document !== "undefined" && (document as any).pictureInPictureEnabled;
+    const webkit =
+      typeof video.webkitSupportsPresentationMode === "function" &&
+      video.webkitSupportsPresentationMode("picture-in-picture") &&
+      typeof video.webkitSetPresentationMode === "function";
+    setPipSupported(Boolean(standard || webkit));
+  }, []);
+
+  // Keep pipActive in sync however PiP is entered/left (our button, the
+  // browser's own control, or the PiP window's close button).
+  useEffect(() => {
+    const video = videoRef.current as any;
+    if (!video) return;
+    const onEnter = () => setPipActive(true);
+    const onLeave = () => setPipActive(false);
+    const onWebkitMode = () =>
+      setPipActive(video.webkitPresentationMode === "picture-in-picture");
+    video.addEventListener("enterpictureinpicture", onEnter);
+    video.addEventListener("leavepictureinpicture", onLeave);
+    video.addEventListener("webkitpresentationmodechanged", onWebkitMode);
+    return () => {
+      video.removeEventListener("enterpictureinpicture", onEnter);
+      video.removeEventListener("leavepictureinpicture", onLeave);
+      video.removeEventListener("webkitpresentationmodechanged", onWebkitMode);
+    };
+  }, []);
+
+  const togglePip = useCallback(async () => {
+    const video = videoRef.current as any;
+    const doc = document as any;
+    if (!video) return;
+    try {
+      if (doc.pictureInPictureEnabled) {
+        if (doc.pictureInPictureElement) await doc.exitPictureInPicture();
+        else await video.requestPictureInPicture();
+        return;
+      }
+      if (typeof video.webkitSetPresentationMode === "function") {
+        // Safari path
+        const inPip = video.webkitPresentationMode === "picture-in-picture";
+        video.webkitSetPresentationMode(inPip ? "inline" : "picture-in-picture");
+      }
+    } catch {}
+  }, []);
+
+  // Cast: hand the stream to the TV and STOP playing it here — both playing at
+  // once was the old behavior. Local buffering stops too (bandwidth/battery);
+  // when the TV session ends we rebuild, snap live back to the edge, and resume.
+  const startCast = useCallback(async () => {
+    const video = videoRef.current;
+    if (!src) return;
+    try {
+      await castMedia(src, channelName || title || "TVSPOT", poster, {
+        onSessionEnd: () => {
+          setCasting(false);
+          const v = videoRef.current;
+          try { hlsRef.current?.startLoad(); } catch {}
+          if (isLive && hlsRef.current) {
+            const pos = hlsRef.current.liveSyncPosition;
+            if (typeof pos === "number" && isFinite(pos) && pos > (v?.currentTime ?? 0) + 10) {
+              try { if (v) v.currentTime = pos; } catch {}
+            }
+          }
+          if (v) { const p = v.play(); if (p) p.catch(() => {}); }
+        },
+      });
+      // Media is loaded on the TV → stop local playback + segment pulling.
+      video?.pause();
+      try { hlsRef.current?.stopLoad(); } catch {}
+      setCasting(true);
+    } catch {
+      // User closed the device picker / session failed — leave local playing.
+    }
+  }, [src, channelName, title, poster, isLive]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -487,6 +577,10 @@ export default function VideoPlayer({
       const video = videoRef.current;
       if (!video) return;
       if (document.hidden) {
+        // Picture-in-picture IS backgrounded viewing — pausing on hide would
+        // freeze the floating window the moment the user switches apps/tabs,
+        // which is the whole thing PiP exists for. Keep playing.
+        if (pipActiveRef.current) return;
         wasPlayingRef.current = !video.paused;
         if (!video.paused) video.pause();
         try { hlsRef.current?.stopLoad(); } catch {}
@@ -719,6 +813,42 @@ export default function VideoPlayer({
         x-webkit-airplay="allow"
       />
 
+      {/* Casting: the stream plays on the TV; local playback is stopped. z-40
+          sits above the center play button so a paused local player can't
+          invite a tap that double-plays. */}
+      {casting && (
+        <div className="absolute inset-0 z-40 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+          <Cast className="w-10 h-10 text-brand" />
+          <p className="text-white text-sm font-medium">
+            Playing on TV{channelName ? ` — ${channelName}` : ""}
+          </p>
+          <button
+            onClick={() => endCastSession()}
+            className="mt-1 text-xs font-medium bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl min-h-[44px] transition-colors"
+          >
+            Stop casting · play here
+          </button>
+        </div>
+      )}
+
+      {/* Picture-in-picture: playback continues in the floating window; the
+          inline area is intentionally parked. Below the controls so the PiP
+          button stays reachable to bring it back. */}
+      {pipActive && !casting && (
+        // Opaque: Chrome paints its own placeholder text on the video surface
+        // in PiP; anything translucent double-exposes it through ours.
+        <div className="absolute inset-0 z-10 bg-black flex flex-col items-center justify-center gap-3 pointer-events-none">
+          <PictureInPicture2 className="w-10 h-10 text-brand" />
+          <p className="text-white text-sm font-medium">Playing in picture-in-picture</p>
+          <button
+            onClick={togglePip}
+            className="mt-1 text-xs font-medium bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl min-h-[44px] transition-colors pointer-events-auto"
+          >
+            Bring it back
+          </button>
+        </div>
+      )}
+
       {/* Buffering ring — shown whenever the stream is rebuffering */}
       {buffering && playing && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
@@ -746,7 +876,7 @@ export default function VideoPlayer({
           otherwise reached the center and swallowed the tap. After a tap, the
           icon becomes a spinner until playback actually starts (or errors) —
           a slow source must never look like a dead button. */}
-      {!playing && (
+      {!playing && !casting && (
         <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
           <button
             onClick={togglePlay}
@@ -838,15 +968,26 @@ export default function VideoPlayer({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Picture-in-picture (live TV) — the stream keeps playing in the
+                floating window; the inline area shows the placeholder overlay. */}
+            {isLive && pipSupported && (
+              <button
+                onClick={togglePip}
+                className={`min-w-[44px] min-h-[44px] flex items-center justify-center ${
+                  pipActive ? "text-brand" : "text-white/80 hover:text-white"
+                }`}
+                aria-label={pipActive ? "Exit picture-in-picture" : "Picture-in-picture"}
+              >
+                <PictureInPicture2 className="w-4 h-4" />
+              </button>
+            )}
             {/* Cast button (Chrome/Android) */}
             {castAvailable && src && (
               <button
-                onClick={async () => {
-                  try {
-                    await castMedia(src, channelName || "TVSPOT", poster);
-                  } catch {}
-                }}
-                className="text-white/80 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center"
+                onClick={startCast}
+                className={`min-w-[44px] min-h-[44px] flex items-center justify-center ${
+                  casting ? "text-brand" : "text-white/80 hover:text-white"
+                }`}
                 aria-label="Cast"
               >
                 <Cast className="w-4 h-4" />
