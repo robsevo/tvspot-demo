@@ -704,7 +704,7 @@ export function getChannelType(name: string): string {
   // brand+number names like "TSN1"/"FS1" ("n"→"1" is not a word boundary), which
   // wrongly dumped all of TSN into Entertainment. Leading-boundary matches the
   // brand at a word start and tolerates trailing digits/suffixes.
-  if (/\b(tsn|sportsnet|espn|fs1|fs2|fox sports|nfl|nba|nhl|mlb|dazn|bein|nesn|fanduel|cbs sports|rds|tva sports|redzone|golf|ufc|wwe|sport)/.test(n))
+  if (/\b(tsn|sportsnet|espn|fs1|fs2|fox sports|nfl|nba|nhl|mlb|dazn|bein|nesn|fanduel|cbs sports|rds|tva sports|redzone|golf|ufc|wwe|sport|serie a|premier league|laliga|la liga|bundesliga)/.test(n))
     return "Sports";
   if (/\b(cnn|fox news|msnbc|hln|bloomberg|bnn|cbc news|ctv news|cp24|global news|news)/.test(n))
     return "News";
@@ -712,9 +712,10 @@ export function getChannelType(name: string): string {
     return "Movies";
   if (/\b(cartoon|adult swim|teletoon|boomerang|nick|disney|pbs kids|24\/7|pokemon|family guy|simpsons|rick and morty|american dad|south park|futurama|kids)/.test(n))
     return "Kids";
-  if (/\b(mtv|much|vevo|cmt|stingray|music choice|bet)/.test(n))
+  // "bet" removed from Music: it swallowed flagship BET (general entertainment).
+  if (/\b(mtv|much|vevo|cmt|stingray|music choice)/.test(n))
     return "Music";
-  if (/\b(discovery|history|national geographic|nat geo|science|tlc|food network|hgtv|animal|nature|curiosity|nasa)/.test(n))
+  if (/\b(discovery|history|national geographic|nat geo|science|tlc|food network|hgtv|animal|nature|curiosity|nasa|travel channel|lifetime)/.test(n))
     return "Lifestyle";
   return "Entertainment";
 }
