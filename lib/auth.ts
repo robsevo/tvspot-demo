@@ -1,3 +1,5 @@
+import { nextRolloverMs } from "@/lib/dailyBoundary";
+
 export interface TokenPayload {
   username: string;
   iat?: number;
@@ -45,7 +47,9 @@ export async function signToken(username: string): Promise<string> {
     JSON.stringify({
       username,
       iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 86400,
+      // Expire at the next 4 AM ET rollover (nightly forced-logout) instead of a
+      // rolling 24h — an expired cookie is redirected to /login by middleware.
+      exp: Math.floor(nextRolloverMs() / 1000),
     })
   );
   const sig = await hmacSign(`${header}.${payload}`, secret);

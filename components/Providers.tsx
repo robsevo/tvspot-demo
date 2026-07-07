@@ -2,6 +2,7 @@
 
 import { AuthProvider } from "@/hooks/useAuth";
 import { PlayerProvider } from "@/hooks/usePlayer";
+import DailySplash from "@/components/DailySplash";
 
 /**
  * Client provider tree, split out of the (now server-rendered) root layout so the
@@ -17,7 +18,10 @@ export default function Providers({
 }) {
   return (
     <AuthProvider initialUsername={initialUsername}>
-      <PlayerProvider>{children}</PlayerProvider>
+      <PlayerProvider>
+        <DailySplash />
+        {children}
+      </PlayerProvider>
     </AuthProvider>
   );
 }

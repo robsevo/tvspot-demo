@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateCredentials, signToken } from "@/lib/auth";
+import { nextRolloverMs } from "@/lib/dailyBoundary";
 
 export async function POST(request: NextRequest) {
   const ip =
@@ -43,12 +44,14 @@ export async function POST(request: NextRequest) {
 
     const token = await signToken(username);
     const response = NextResponse.json({ ok: true });
+    // Mirror the cookie lifetime to the token's exp (next 4 AM ET rollover).
+    const maxAge = Math.max(60, Math.floor((nextRolloverMs() - Date.now()) / 1000));
     response.cookies.set("tvspot_session", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 86400,
+      maxAge,
     });
     return response;
   } catch (e) {
