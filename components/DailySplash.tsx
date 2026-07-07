@@ -162,10 +162,23 @@ export default function DailySplash() {
     <div
       role="status"
       aria-label="Loading TVSpot"
-      className={`fixed inset-0 z-[70] flex flex-col items-center justify-center bg-surface hud-grid-bg transition-opacity duration-[450ms] ${
+      className={`fixed inset-0 z-[70] flex flex-col items-center justify-center overflow-hidden bg-surface transition-opacity duration-[450ms] ${
         leaving ? "opacity-0 pointer-events-none" : "opacity-100 animate-fade-in"
       }`}
     >
+      {/* Faint HUD grid — inline (not the .hud-grid-bg class, which forces
+          position:relative and would collapse the fixed overlay to the top). */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            "repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 34px), repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 34px)",
+          WebkitMaskImage:
+            "radial-gradient(ellipse at 50% 20%, #000 0%, transparent 78%)",
+          maskImage:
+            "radial-gradient(ellipse at 50% 20%, #000 0%, transparent 78%)",
+        }}
+      />
       {/* Soft brand glow behind the lockup */}
       <div
         className="pointer-events-none absolute inset-0"
