@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { proxyFetch } from "@/lib/api";
+import { proxyFetch, HttpError } from "@/lib/api";
 import Link from "next/link";
 import { ChevronLeft, ChevronDown, Check, X, Loader2, RefreshCw, ExternalLink, Info } from "lucide-react";
 import { mergeSources, type PlayableSource } from "@/lib/sources";
@@ -47,6 +47,10 @@ export default function VodSeriesPage() {
   const { tmdbId } = useParams<{ tmdbId: string }>();
   const [detail, setDetail] = useState<SeriesDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  // Fetch blew up for a reason OTHER than 404 (backend restarting, proxy 504…)
+  // — the title probably exists, so offer Retry instead of "not found".
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
   const [playingEpisode, setPlayingEpisode] = useState<string | null>(null);
   // Per-episode state keyed by "season-episode"
   const [epState, setEpState] = useState<Record<string, EpisodeState>>({});
@@ -108,11 +112,15 @@ export default function VodSeriesPage() {
   useEffect(() => {
     if (!tmdbId) return;
     setLoading(true);
+    setFetchFailed(false);
     proxyFetch<SeriesDetail>(`/api/lounge/vod/series/${tmdbId}`)
       .then((d) => setDetail(d))
-      .catch((err) => console.error("Series detail fetch failed:", err))
+      .catch((err) => {
+        console.error("Series detail fetch failed:", err);
+        setFetchFailed(!(err instanceof HttpError && err.status === 404));
+      })
       .finally(() => setLoading(false));
-  }, [tmdbId]);
+  }, [tmdbId, retryTick]);
 
   // Pure source list for an episode (no side effects — verification is driven
   // by the playing episode's probe hook below).
@@ -258,8 +266,26 @@ export default function VodSeriesPage() {
   if (!detail) {
     return (
       <div className="pt-3 min-h-screen pb-20 px-4 text-center pt-20">
-        <p className="text-text-secondary">Series not found</p>
-        <Link href="/vod" className="text-brand text-sm mt-2 inline-block">Back to VOD</Link>
+        {fetchFailed ? (
+          <>
+            <p className="text-text-secondary">Couldn&apos;t load this title</p>
+            <p className="text-text-muted text-xs mt-1">
+              The server didn&apos;t respond — it may be restarting. Try again in a moment.
+            </p>
+            <div className="mt-4">
+              <button
+                onClick={() => setRetryTick((t) => t + 1)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand text-white text-sm font-medium min-h-[44px]"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Retry
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="text-text-secondary">Series not found</p>
+        )}
+        <Link href="/vod" className="text-brand text-sm mt-3 inline-block">Back to VOD</Link>
       </div>
     );
   }

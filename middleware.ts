@@ -18,7 +18,13 @@ export async function middleware(request: NextRequest) {
     // Public root static assets (the TVSpot logo etc.) must load on the LOGIN page,
     // where there's no auth cookie — otherwise the <img> request gets redirected to
     // /login (HTML) and renders as a broken image.
-    pathname.endsWith(".svg")
+    pathname.endsWith(".svg") ||
+    // Build-id endpoint (deploy detection) is public: it only returns the commit
+    // sha, and DeployRefresh polls it from EVERY open page — including /login and
+    // apps whose session died at the 4 AM rollover. Gating it turned each of
+    // those into an all-night 401 stream and blinded deploy detection exactly
+    // where a stale build is most likely to be sitting.
+    pathname === "/api/version"
   ) {
     return NextResponse.next();
   }

@@ -3,6 +3,7 @@
 import { AuthProvider } from "@/hooks/useAuth";
 import { PlayerProvider } from "@/hooks/usePlayer";
 import DailySplash from "@/components/DailySplash";
+import SessionRollover from "@/components/SessionRollover";
 
 /**
  * Client provider tree, split out of the (now server-rendered) root layout so the
@@ -20,6 +21,7 @@ export default function Providers({
     <AuthProvider initialUsername={initialUsername}>
       <PlayerProvider>
         <DailySplash />
+        <SessionRollover />
         {children}
       </PlayerProvider>
     </AuthProvider>

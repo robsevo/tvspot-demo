@@ -59,12 +59,19 @@ function etWallToUtc(year: number, month: number, day: number, hour: number): nu
   return guess - tzOffsetMs(utc1);
 }
 
-/** Epoch ms of the first 4 AM ET strictly after `nowMs` (with a min-TTL guard). */
-export function nextRolloverMs(nowMs: number = Date.now()): number {
+/**
+ * Epoch ms of the first 4 AM ET strictly after `nowMs`.
+ *
+ * `minTtlMs` defaults to the token-issuance guard (a 3:30 AM login shouldn't be
+ * kicked at 4:00). Pass 0 to get the RAW next boundary — the client-side
+ * session watcher needs that: a page whose token expires at today's 4 AM must
+ * watch today's 4 AM even if it happens to (re)mount at 3:59.
+ */
+export function nextRolloverMs(nowMs: number = Date.now(), minTtlMs: number = MIN_TTL_MS): number {
   const { year, month, day } = etDateParts(nowMs);
   let target = etWallToUtc(year, month, day, ROLLOVER_HOUR);
   let guard = 0;
-  while (target <= nowMs + MIN_TTL_MS && guard < 4) {
+  while (target <= nowMs + minTtlMs && guard < 4) {
     const next = etDateParts(target + 26 * 60 * 60 * 1000); // safely into next ET day
     target = etWallToUtc(next.year, next.month, next.day, ROLLOVER_HOUR);
     guard++;
