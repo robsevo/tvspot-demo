@@ -37,9 +37,11 @@ export async function POST(request: NextRequest) {
   }
 
   const capped = urls.slice(0, MAX_URLS);
+  // Forward the requester's cookie so same-origin proxy URLs (/api/vod-stream…)
+  // clear the auth middleware; checkVodSource only attaches it same-origin.
   const results =
     mode === "vod"
-      ? await checkVodSources(capped, request.nextUrl.origin)
+      ? await checkVodSources(capped, request.nextUrl.origin, request.headers.get("cookie") ?? "")
       : await checkStreams(capped);
   return NextResponse.json({ results }, { headers: { "Cache-Control": "no-store" } });
 }

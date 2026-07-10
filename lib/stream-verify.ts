@@ -137,13 +137,23 @@ const VOD_TIMEOUT_MS = 10_000;
  * Probe a single VOD source. VOD candidates aren't all HLS playlists — they're
  * progressive MP4/MKV (often via the same-origin /api/vod-stream range proxy),
  * relay remux URLs, and embed PAGES (vidlink & co). So the live playlist
- * validation doesn't apply; reachability is the signal: HEAD first (cheap),
- * and on 405/501 (hosts that reject HEAD) retry as a 1-byte range GET.
- * `origin` resolves same-origin relative URLs ("/api/vod-stream?…") since this
- * runs server-side.
+ * validation doesn't apply; reachability is the signal.
+ *
+ * Same-origin URLs ("/api/vod-stream?…") need two things externals must not
+ * get:
+ *   • the requester's Cookie — these routes sit behind the auth middleware,
+ *     and a cookie-less probe 401s on EVERY source, badging dead what plays
+ *     fine in the browser (the "0 online but it plays" bug). The cookie is
+ *     never sent to external hosts.
+ *   • a 1-byte range GET instead of HEAD — /api/vod-stream treats a request
+ *     with no Range as "fetch the WHOLE upstream file and sniff it", so a
+ *     HEAD probe would trigger a full movie download upstream.
+ * External hosts keep HEAD-first (cheap), with a range-GET retry on 405/501.
+ * `origin` resolves same-origin relative URLs since this runs server-side.
  */
-export async function checkVodSource(url: string, origin: string): Promise<StreamCheck> {
+export async function checkVodSource(url: string, origin: string, cookie = ""): Promise<StreamCheck> {
   const start = Date.now();
+  const sameOrigin = url.startsWith("/") || url.startsWith(`${origin}/`);
   const abs = url.startsWith("/") ? `${origin}${url}` : url;
   const probe = async (method: "HEAD" | "GET"): Promise<Response> => {
     const ctrl = new AbortController();
@@ -155,6 +165,7 @@ export async function checkVodSource(url: string, origin: string): Promise<Strea
         headers: {
           "User-Agent": "tvspot-stream-check/1.0",
           ...(method === "GET" ? { Range: "bytes=0-0" } : {}),
+          ...(sameOrigin && cookie ? { Cookie: cookie } : {}),
         },
         cache: "no-store",
       });
@@ -163,8 +174,8 @@ export async function checkVodSource(url: string, origin: string): Promise<Strea
     }
   };
   try {
-    let res = await probe("HEAD");
-    if (res.status === 405 || res.status === 501) res = await probe("GET");
+    let res = await probe(sameOrigin ? "GET" : "HEAD");
+    if (!sameOrigin && (res.status === 405 || res.status === 501)) res = await probe("GET");
     // Drain nothing: a range GET body is ≤1 byte; HEAD has none.
     const latencyMs = Date.now() - start;
     if (res.ok || res.status === 206) {
@@ -185,6 +196,6 @@ export async function checkVodSource(url: string, origin: string): Promise<Strea
 }
 
 /** Probe many VOD sources concurrently. Order of results matches input order. */
-export async function checkVodSources(urls: string[], origin: string): Promise<StreamCheck[]> {
-  return Promise.all(urls.map((u) => checkVodSource(u, origin)));
+export async function checkVodSources(urls: string[], origin: string, cookie = ""): Promise<StreamCheck[]> {
+  return Promise.all(urls.map((u) => checkVodSource(u, origin, cookie)));
 }
