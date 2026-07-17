@@ -1493,11 +1493,16 @@ export default function VideoPlayer({
                     >
                       {ccOptions.length === 0 ? (
                         // Live, no caption track yet. Left open, this swaps to
-                        // real rows the moment the first cue parses.
+                        // real rows the moment the first cue parses. Mentions
+                        // the source picker because caption presence is a
+                        // per-SOURCE property: providers that re-encode video
+                        // strip CEA-608 (verified: fox-news sources 1-2 none,
+                        // 3-4 captioned, same minute) — switching sources is
+                        // the actual remedy, not waiting.
                         <p className="px-4 py-3 text-xs leading-relaxed text-white/60 w-56">
-                          No captions in this stream yet. On channels that
-                          broadcast them, captions appear a few seconds after
-                          a captioned show starts.
+                          No captions in this stream yet. Not every source
+                          carries them — try another source below the player,
+                          or wait a moment after a captioned show starts.
                         </p>
                       ) : (
                         <>
