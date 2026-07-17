@@ -1070,7 +1070,7 @@ export default function VideoPlayer({
     const compute = () => {
       const w = el.clientWidth;
       const h = el.clientHeight;
-      if (w > 0) setCcFontPx(Math.round(Math.min(30, Math.max(14, w * 0.04))));
+      if (w > 0) setCcFontPx(Math.round(Math.min(26, Math.max(13, w * 0.034))));
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       if (vw > 0 && vh > 0 && w > 0 && h > 0) {
