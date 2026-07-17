@@ -369,10 +369,26 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 }
 
 
-/* Closed captions. The browser renders cues natively (hls.js decodes CEA-608 for
-   live; VOD gets WebVTT <track>s), so ::cue is the only styling hook available.
-   The default UA style is a hard black box with a small system font — legible,
-   but it reads like a browser artifact rather than part of the player. */
+/* Closed captions.
+   Primary renderer is the player's own overlay (VideoPlayer draws active cues
+   from a `hidden` track): one .cc-line per caption line, bottom-centered,
+   font-size set inline from the player's measured width. */
+.cc-line {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.12em 0.5em;
+  border-radius: 0.3em;
+  background: rgba(8, 8, 8, 0.72);
+  color: #fff;
+  font-weight: 500;
+  line-height: 1.35;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  overflow-wrap: break-word;
+}
+
+/* Fallback styling for the surfaces the overlay can't reach — iOS native video
+   fullscreen and the PiP window — where the player flips the selected track to
+   `showing` and the browser renders cues itself. ::cue is the only hook there. */
 video::cue {
   background: rgba(0, 0, 0, 0.75);
   color: #fff;

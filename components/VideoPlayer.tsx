@@ -47,6 +47,101 @@ function writeCcPref(pref: CcPref) {
   try { localStorage.setItem(CC_PREF_KEY, JSON.stringify(pref)); } catch {}
 }
 
+/** One styled run of caption text; a rendered caption line is a list of these. */
+interface CcSeg { text: string; i: boolean; b: boolean; u: boolean }
+type CcLine = CcSeg[];
+
+/**
+ * Cue → display lines, keeping only the formatting we draw (italic/bold/
+ * underline — italics matter: subtitle files use them for off-screen voices).
+ * getCueAsHTML() is the reliable reader: the browser has already parsed the
+ * VTT markup, decoded entities, and (for CEA-608) assembled the row text, so
+ * walking its fragment beats regexing cue.text. Whitespace runs collapse to a
+ * single space — 608 rows arrive padded with alignment spaces from the
+ * broadcast 32-column grid, which only make sense in that grid's monospace
+ * layout, not in ours.
+ */
+function cueToLines(cue: TextTrackCue): CcLine[] {
+  const lines: CcLine[] = [[]];
+  const pushText = (raw: string, fmt: { i: boolean; b: boolean; u: boolean }) => {
+    raw.split("\n").forEach((part, idx) => {
+      if (idx > 0) lines.push([]);
+      const text = part.replace(/\s+/g, " ");
+      if (text) lines[lines.length - 1].push({ text, ...fmt });
+    });
+  };
+  const walk = (node: Node, fmt: { i: boolean; b: boolean; u: boolean }) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      pushText(node.nodeValue ?? "", fmt);
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const tag = node.nodeName.toLowerCase();
+    if (tag === "br") { lines.push([]); return; }
+    const next = {
+      i: fmt.i || tag === "i" || tag === "em",
+      b: fmt.b || tag === "b" || tag === "strong",
+      u: fmt.u || tag === "u",
+    };
+    node.childNodes.forEach((c) => walk(c, next));
+  };
+
+  const none = { i: false, b: false, u: false };
+  const c = cue as VTTCue & { getCueAsHTML?: () => DocumentFragment; text?: string };
+  let walked = false;
+  if (typeof c.getCueAsHTML === "function") {
+    try {
+      c.getCueAsHTML().childNodes.forEach((n) => walk(n, none));
+      walked = true;
+    } catch {}
+  }
+  if (!walked && typeof c.text === "string") {
+    pushText(c.text.replace(/<[^>]*>/g, ""), none);
+  }
+
+  // Trim line edges (interior spacing between runs stays), drop blank lines.
+  const out: CcLine[] = [];
+  for (const line of lines) {
+    const segs = line.map((s) => ({ ...s }));
+    while (segs.length) {
+      segs[0].text = segs[0].text.replace(/^\s+/, "");
+      if (segs[0].text) break;
+      segs.shift();
+    }
+    while (segs.length) {
+      const last = segs[segs.length - 1];
+      last.text = last.text.replace(/\s+$/, "");
+      if (last.text) break;
+      segs.pop();
+    }
+    if (segs.length) out.push(segs);
+  }
+  return out;
+}
+
+/**
+ * Flatten a track's active cues into the lines to draw. CEA-608 roll-up
+ * re-emits lines it has already shown as the window scrolls (hls.js cuts a new
+ * cue per scroll step, and both are briefly active), so consecutive duplicate
+ * lines collapse. The cap matches the 4-row 608 roll-up window and keeps a
+ * pathological cue pile-up from filling the screen — newest lines win.
+ */
+function linesFromActiveCues(track: TextTrack): CcLine[] {
+  const cues = track.activeCues;
+  if (!cues) return [];
+  const out: CcLine[] = [];
+  let prev = "";
+  for (let i = 0; i < cues.length; i++) {
+    for (const line of cueToLines(cues[i])) {
+      const key = line.map((s) => s.text).join(" ");
+      if (key === prev) continue;
+      prev = key;
+      out.push(line);
+    }
+  }
+  return out.slice(-4);
+}
+
 /**
  * Does this URL serve an HLS manifest?
  *
@@ -198,6 +293,20 @@ export default function VideoPlayer({
   /** Key of the chosen CcOption, or null for off. */
   const [ccSel, setCcSel] = useState<string | null>(null);
   const [ccMenuOpen, setCcMenuOpen] = useState(false);
+  // Captions are drawn by US, not the browser: the selected track runs in
+  // `hidden` mode (cues parse and fire cuechange, nothing renders natively) and
+  // these are the lines currently on screen. Native ::cue rendering placed
+  // CEA-608 cues at the broadcast grid's coordinates — left-cornered, tiny on a
+  // phone, jumping between roll-up rows — and sat them behind our control bar,
+  // which the browser doesn't know exists.
+  const [ccLines, setCcLines] = useState<CcLine[]>([]);
+  // Caption font size tracks the player's rendered width (same ~4% ratio the
+  // big streaming players use), so text is readable inline on a phone and
+  // scales up in fullscreen instead of staying at one CSS size.
+  const [ccFontPx, setCcFontPx] = useState(16);
+  // iOS native <video> fullscreen: the video composites outside our DOM there,
+  // so the overlay can't follow — tracked to hand rendering back to the browser.
+  const [nativeFs, setNativeFs] = useState(false);
   const extTrackRef = useRef<HTMLTrackElement>(null);
   // Preference is applied once per source; after that the user's in-player
   // choice wins and must not be re-overridden by a late-arriving track.
@@ -791,12 +900,24 @@ export default function VideoPlayer({
     return out;
   }, [ccTracks, subtitles]);
 
-  const ccSelected = ccOptions.find((o) => o.key === ccSel) ?? null;
+  // Memoized: the cuechange effect below keys on this, and a fresh object per
+  // render would detach/re-attach the listener (and blank the on-screen lines)
+  // every render.
+  const ccSelected = useMemo(
+    () => ccOptions.find((o) => o.key === ccSel) ?? null,
+    [ccOptions, ccSel],
+  );
   const ccExt = ccSelected?.kind === "ext" ? ccSelected : null;
+  // Surfaces composited outside our DOM (iOS native video fullscreen, the PiP
+  // window) can't show the overlay — hand rendering back to the browser there.
+  const ccNativeSurface = pipActive || nativeFs;
 
   // Turn every native caption track off. `disabled` rather than `hidden` is
   // deliberate: hls.js skips parsing cues into a disabled track, so live
-  // captions cost nothing while switched off.
+  // captions cost nothing while switched off. The SELECTED track gets `hidden`,
+  // not `showing` — cues still parse and fire cuechange, but the browser draws
+  // nothing; the overlay below is the renderer. (The mode-owner effect flips it
+  // to `showing` on native surfaces.)
   const disableNative = useCallback((except = -1) => {
     const video = videoRef.current;
     if (!video) return;
@@ -805,7 +926,7 @@ export default function VideoPlayer({
       const t = tracks[i];
       if (t.kind !== "captions" && t.kind !== "subtitles") continue;
       if (t === extTrackRef.current?.track) continue; // ours; driven by mount
-      t.mode = i === except ? "showing" : "disabled";
+      t.mode = i === except ? "hidden" : "disabled";
     }
   }, []);
 
@@ -876,20 +997,72 @@ export default function VideoPlayer({
     };
   }, [src]);
 
-  // Our mounted <track> starts life `disabled`; flip it on once the element
-  // exists. Setting mode BEFORE the browser has the element does nothing, which
-  // is why this is an effect keyed on the selection rather than part of
-  // selectCc.
+  // Single owner of the SELECTED track's mode. Normally `hidden` (cues parse,
+  // cuechange fires, the overlay draws); on a native surface (iOS video
+  // fullscreen, PiP window) `showing`, because those composite outside our DOM
+  // and the browser's own renderer — styled via ::cue — is the only one that
+  // can follow the video there. An effect rather than part of selectCc because
+  // setting mode before the browser has the element does nothing, and Safari
+  // can attach an ext <track>'s TextTrack a tick after the element mounts —
+  // hence the load listener + short retry.
   useEffect(() => {
-    const el = extTrackRef.current;
-    if (!el) return;
-    const show = () => { try { el.track.mode = "showing"; } catch {} };
-    show();
-    // Safari can attach the TextTrack a tick after the element mounts.
-    el.addEventListener("load", show);
-    const t = setTimeout(show, 300);
-    return () => { el.removeEventListener("load", show); clearTimeout(t); };
-  }, [ccSel]);
+    const video = videoRef.current;
+    if (!video || !ccSelected) return;
+    const mode: TextTrackMode = ccNativeSurface ? "showing" : "hidden";
+    const apply = () => {
+      try {
+        const t =
+          ccSelected.kind === "native"
+            ? video.textTracks[ccSelected.index]
+            : extTrackRef.current?.track;
+        if (t && t.mode !== mode) t.mode = mode;
+      } catch {}
+    };
+    apply();
+    const el = ccSelected.kind === "ext" ? extTrackRef.current : null;
+    el?.addEventListener("load", apply);
+    const t = setTimeout(apply, 300);
+    return () => { el?.removeEventListener("load", apply); clearTimeout(t); };
+  }, [ccSelected, ccNativeSurface, ccTracks, src]);
+
+  // The renderer's input: mirror the selected track's active cues into state.
+  // cuechange fires on hidden tracks, so this works identically for hls.js
+  // CEA-608, iOS-native caption tracks, and our ext WebVTT <track>.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !ccSelected) {
+      setCcLines([]);
+      return;
+    }
+    const track =
+      ccSelected.kind === "native"
+        ? video.textTracks[ccSelected.index]
+        : extTrackRef.current?.track;
+    if (!track) {
+      setCcLines([]);
+      return;
+    }
+    const update = () => setCcLines(linesFromActiveCues(track));
+    update();
+    track.addEventListener("cuechange", update);
+    return () => {
+      track.removeEventListener("cuechange", update);
+      setCcLines([]);
+    };
+  }, [ccSelected, ccTracks, src]);
+
+  // Scale the caption font with the player's on-screen width (~4%, clamped) —
+  // one size did not fit both a 375px inline phone player and fullscreen.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width || el.clientWidth;
+      if (w > 0) setCcFontPx(Math.round(Math.min(30, Math.max(14, w * 0.04))));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [src]);
 
   // Auto-apply the remembered preference once per source, as soon as there's
   // something to apply it to. Prefers a real embedded caption track (live
@@ -990,22 +1163,31 @@ export default function VideoPlayer({
   }, []);
 
   // Keep the fullscreen flag in sync when the user exits via the system UI
-  // (Esc, swipe-down, or the native iOS video fullscreen controls).
+  // (Esc, swipe-down, or the native iOS video fullscreen controls). Keyed on
+  // `src` so the webkit listeners bind to the CURRENT video element — the
+  // <video> only exists once a src is set, so a mount-only effect ran against
+  // a null ref and iOS's begin/endfullscreen events were never observed.
+  // Those events also drive `nativeFs`: iOS video fullscreen is the one
+  // fullscreen where our DOM (caption overlay included) can't follow.
   useEffect(() => {
     const onFsChange = () => {
       const doc = document as any;
       setFullscreen(Boolean(document.fullscreenElement || doc.webkitFullscreenElement));
     };
+    const onBegin = () => { setFullscreen(true); setNativeFs(true); };
+    const onEnd = () => { setFullscreen(false); setNativeFs(false); };
     const video = videoRef.current as any;
     document.addEventListener("fullscreenchange", onFsChange);
     document.addEventListener("webkitfullscreenchange", onFsChange);
-    video?.addEventListener?.("webkitbeginfullscreen", () => setFullscreen(true));
-    video?.addEventListener?.("webkitendfullscreen", () => setFullscreen(false));
+    video?.addEventListener?.("webkitbeginfullscreen", onBegin);
+    video?.addEventListener?.("webkitendfullscreen", onEnd);
     return () => {
       document.removeEventListener("fullscreenchange", onFsChange);
       document.removeEventListener("webkitfullscreenchange", onFsChange);
+      video?.removeEventListener?.("webkitbeginfullscreen", onBegin);
+      video?.removeEventListener?.("webkitendfullscreen", onEnd);
     };
-  }, []);
+  }, [src]);
 
   const showControls = useCallback(() => {
     setControlsVisible(true);
@@ -1133,6 +1315,38 @@ export default function VideoPlayer({
       {buffering && playing && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div className="w-14 h-14 rounded-full border-[3px] border-white/15 border-t-cyan-400 border-r-brand animate-spin" />
+        </div>
+      )}
+
+      {/* Caption overlay — OUR renderer for the hidden selected track. Bottom-
+          centered stacked lines (broadcast-grid positioning is deliberately
+          discarded), font scaled to player width, lifted clear of the control
+          bar while it's up. Hidden on native surfaces (iOS fullscreen / PiP),
+          where the track flips to `showing` and ::cue takes over, and while
+          casting (local playback is stopped). pointer-events-none: taps pass
+          through to play/pause exactly as before. */}
+      {ccLines.length > 0 && !casting && !ccNativeSurface && (
+        <div
+          className="absolute inset-x-3 z-10 flex flex-col items-center gap-[0.18em] pointer-events-none transition-[bottom] duration-200 text-center"
+          style={{
+            fontSize: `${ccFontPx}px`,
+            bottom: controlsVisible
+              ? "5.25rem"
+              : "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+          }}
+        >
+          {ccLines.map((line, i) => (
+            <span key={i} className="cc-line">
+              {line.map((seg, j) => (
+                <span
+                  key={j}
+                  className={`${seg.i ? "italic" : ""} ${seg.b ? "font-bold" : ""} ${seg.u ? "underline" : ""}`}
+                >
+                  {seg.text}
+                </span>
+              ))}
+            </span>
+          ))}
         </div>
       )}
 
