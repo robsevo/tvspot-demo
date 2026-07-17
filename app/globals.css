@@ -371,18 +371,23 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
 
 /* Closed captions.
    Primary renderer is the player's own overlay (VideoPlayer draws active cues
-   from a `hidden` track): one .cc-line per caption line, bottom-centered,
-   font-size set inline from the player's measured width. */
-.cc-line {
-  display: inline-block;
+   from a `hidden` track): one OPAQUE .cc-box per caption block with .cc-line
+   rows inside, anchored inside the video frame, font-size set inline from the
+   player's measured width. The box is solid black on purpose — it has to MASK
+   burned-in foreign-language subs that some movie encodes carry at the same
+   screen position, not blend with them. */
+.cc-box {
   max-width: 100%;
-  padding: 0.12em 0.5em;
-  border-radius: 0.3em;
-  background: rgba(8, 8, 8, 0.72);
+  padding: 0.28em 0.6em;
+  border-radius: 0.25em;
+  background: #000;
+  text-align: center;
+}
+.cc-line {
+  display: block;
   color: #fff;
   font-weight: 500;
-  line-height: 1.35;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  line-height: 1.4;
   overflow-wrap: break-word;
 }
 

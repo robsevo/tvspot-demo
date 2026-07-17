@@ -304,6 +304,13 @@ export default function VideoPlayer({
   // big streaming players use), so text is readable inline on a phone and
   // scales up in fullscreen instead of staying at one CSS size.
   const [ccFontPx, setCcFontPx] = useState(16);
+  // Bottom anchor (px from container bottom) placing captions just inside the
+  // actual VIDEO FRAME. object-contain letterboxes non-16:9 content, and a
+  // container-anchored caption landed in the black bar BELOW a widescreen
+  // movie's picture — right where many encodes burn in foreign-language subs,
+  // so both caption layers showed at once. Anchoring ~5.5% up into the picture
+  // puts our (opaque) box on top of the burned-in line instead of beside it.
+  const [ccBottomPx, setCcBottomPx] = useState<number | null>(null);
   // iOS native <video> fullscreen: the video composites outside our DOM there,
   // so the overlay can't follow — tracked to hand rendering back to the browser.
   const [nativeFs, setNativeFs] = useState(false);
@@ -1051,17 +1058,38 @@ export default function VideoPlayer({
     };
   }, [ccSelected, ccTracks, src]);
 
-  // Scale the caption font with the player's on-screen width (~4%, clamped) —
-  // one size did not fit both a 375px inline phone player and fullscreen.
+  // Caption geometry: font scales with the player's on-screen width (~4%,
+  // clamped — one size did not fit both a 375px inline player and fullscreen),
+  // and the bottom anchor is computed from the letterboxed video frame (see
+  // ccBottomPx). Recomputed on container resize AND loadedmetadata, since the
+  // frame rect needs videoWidth/videoHeight.
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect?.width || el.clientWidth;
+    const video = videoRef.current;
+    if (!el || !video || typeof ResizeObserver === "undefined") return;
+    const compute = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
       if (w > 0) setCcFontPx(Math.round(Math.min(30, Math.max(14, w * 0.04))));
-    });
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (vw > 0 && vh > 0 && w > 0 && h > 0) {
+        const scale = Math.min(w / vw, h / vh);
+        const contentH = vh * scale;
+        const letterbox = (h - contentH) / 2;
+        setCcBottomPx(Math.round(letterbox + contentH * 0.055));
+      } else {
+        setCcBottomPx(null);
+      }
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
     ro.observe(el);
-    return () => ro.disconnect();
+    video.addEventListener("loadedmetadata", compute);
+    return () => {
+      ro.disconnect();
+      video.removeEventListener("loadedmetadata", compute);
+    };
   }, [src]);
 
   // Auto-apply the remembered preference once per source, as soon as there's
@@ -1327,26 +1355,36 @@ export default function VideoPlayer({
           through to play/pause exactly as before. */}
       {ccLines.length > 0 && !casting && !ccNativeSurface && (
         <div
-          className="absolute inset-x-3 z-10 flex flex-col items-center gap-[0.18em] pointer-events-none transition-[bottom] duration-200 text-center"
+          className="absolute inset-x-3 z-10 flex flex-col items-center pointer-events-none transition-[bottom] duration-200"
           style={{
             fontSize: `${ccFontPx}px`,
+            // Inside the picture (ccBottomPx accounts for letterboxing), but
+            // never behind the control bar while it's up.
             bottom: controlsVisible
-              ? "5.25rem"
-              : "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+              ? `${Math.max(84, ccBottomPx ?? 0)}px`
+              : ccBottomPx != null
+                ? `${ccBottomPx}px`
+                : "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
           }}
         >
-          {ccLines.map((line, i) => (
-            <span key={i} className="cc-line">
-              {line.map((seg, j) => (
-                <span
-                  key={j}
-                  className={`${seg.i ? "italic" : ""} ${seg.b ? "font-bold" : ""} ${seg.u ? "underline" : ""}`}
-                >
-                  {seg.text}
-                </span>
-              ))}
-            </span>
-          ))}
+          {/* One OPAQUE box around all lines: some movie/series encodes carry
+              burned-in foreign-language subs in the picture at this exact
+              spot — a translucent per-line pill let them bleed through and
+              read as two caption layers. Solid black masks them. */}
+          <div className="cc-box">
+            {ccLines.map((line, i) => (
+              <span key={i} className="cc-line">
+                {line.map((seg, j) => (
+                  <span
+                    key={j}
+                    className={`${seg.i ? "italic" : ""} ${seg.b ? "font-bold" : ""} ${seg.u ? "underline" : ""}`}
+                  >
+                    {seg.text}
+                  </span>
+                ))}
+              </span>
+            ))}
+          </div>
         </div>
       )}
 
