@@ -1405,11 +1405,16 @@ export default function VideoPlayer({
 
         {/* Control buttons */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          {/* gap-0.5 + 40px-wide buttons below 640px: with captions the row is
+              8 buttons, and at the old 44px + gap-3/gap-2 spacing it measured
+              412px — on a 375px phone that pushed Cast half off-screen and
+              Fullscreen fully off (the CC button popping in mid-watch is what
+              tipped it over). 40×44 tap targets, everything fits at 360px. */}
+          <div className="flex items-center gap-0.5 sm:gap-3">
             {channelDown && (
               <button
                 onClick={channelDown}
-                className="text-white/80 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center"
+                className="text-white/80 hover:text-white min-w-[40px] min-h-[44px] sm:min-w-[44px] flex items-center justify-center"
                 aria-label="Previous channel"
               >
                 <SkipBack className="w-5 h-5" />
@@ -1417,7 +1422,7 @@ export default function VideoPlayer({
             )}
             <button
               onClick={togglePlay}
-              className="text-white min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="text-white min-w-[40px] min-h-[44px] sm:min-w-[44px] flex items-center justify-center"
               aria-label={playing ? "Pause" : "Play"}
             >
               {playing ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
@@ -1425,7 +1430,7 @@ export default function VideoPlayer({
             {channelUp && (
               <button
                 onClick={channelUp}
-                className="text-white/80 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center"
+                className="text-white/80 hover:text-white min-w-[40px] min-h-[44px] sm:min-w-[44px] flex items-center justify-center"
                 aria-label="Next channel"
               >
                 <SkipForward className="w-5 h-5" />
@@ -1437,7 +1442,7 @@ export default function VideoPlayer({
             <div className="flex items-center gap-1.5">
               <button
                 onClick={toggleMute}
-                className="text-white/80 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center"
+                className="text-white/80 hover:text-white min-w-[40px] min-h-[44px] sm:min-w-[44px] flex items-center justify-center"
                 aria-label={muted || volume === 0 ? "Unmute" : "Mute"}
               >
                 {muted || volume === 0 ? (
@@ -1461,11 +1466,16 @@ export default function VideoPlayer({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Closed captions. Rendered only when the stream actually offers a
-                track — live channels without captions never create one, and a
-                CC button that opens an empty menu is worse than no button. */}
-            {ccOptions.length > 0 && (
+          <div className="flex items-center gap-0.5 sm:gap-2">
+            {/* Closed captions. On LIVE the button is ALWAYS there: caption
+                tracks only materialize once the first cue parses, which can be
+                seconds-to-never depending on what's airing — and a button that
+                appears only then is invisible at the exact moment a user goes
+                looking for it ("don't see the option to turn on captions").
+                With no track yet, the menu explains instead of doing nothing.
+                VOD keeps the offer-gated button: its subtitle list arrives
+                up-front from the API, so absence genuinely means none exist. */}
+            {(ccOptions.length > 0 || isLive) && (
               <div className="relative">
                 {ccMenuOpen && (
                   <>
@@ -1481,29 +1491,41 @@ export default function VideoPlayer({
                       aria-label="Closed captions"
                       className="absolute bottom-full right-0 mb-2 z-50 min-w-[10rem] max-h-56 overflow-y-auto rounded-xl bg-black/95 backdrop-blur-sm border border-white/10 py-1 shadow-xl"
                     >
-                      <button
-                        role="menuitemradio"
-                        aria-checked={ccSel === null}
-                        onClick={() => { selectCc(null); setCcMenuOpen(false); }}
-                        className={`w-full text-left px-4 py-2 min-h-[44px] text-sm transition-colors ${
-                          ccSel === null ? "text-brand font-medium" : "text-white/80 hover:bg-white/10"
-                        }`}
-                      >
-                        Off
-                      </button>
-                      {ccOptions.map((o) => (
-                        <button
-                          key={o.key}
-                          role="menuitemradio"
-                          aria-checked={ccSel === o.key}
-                          onClick={() => { selectCc(o); setCcMenuOpen(false); }}
-                          className={`w-full text-left px-4 py-2 min-h-[44px] text-sm transition-colors ${
-                            ccSel === o.key ? "text-brand font-medium" : "text-white/80 hover:bg-white/10"
-                          }`}
-                        >
-                          {o.label}
-                        </button>
-                      ))}
+                      {ccOptions.length === 0 ? (
+                        // Live, no caption track yet. Left open, this swaps to
+                        // real rows the moment the first cue parses.
+                        <p className="px-4 py-3 text-xs leading-relaxed text-white/60 w-56">
+                          No captions in this stream yet. On channels that
+                          broadcast them, captions appear a few seconds after
+                          a captioned show starts.
+                        </p>
+                      ) : (
+                        <>
+                          <button
+                            role="menuitemradio"
+                            aria-checked={ccSel === null}
+                            onClick={() => { selectCc(null); setCcMenuOpen(false); }}
+                            className={`w-full text-left px-4 py-2 min-h-[44px] text-sm transition-colors ${
+                              ccSel === null ? "text-brand font-medium" : "text-white/80 hover:bg-white/10"
+                            }`}
+                          >
+                            Off
+                          </button>
+                          {ccOptions.map((o) => (
+                            <button
+                              key={o.key}
+                              role="menuitemradio"
+                              aria-checked={ccSel === o.key}
+                              onClick={() => { selectCc(o); setCcMenuOpen(false); }}
+                              className={`w-full text-left px-4 py-2 min-h-[44px] text-sm transition-colors ${
+                                ccSel === o.key ? "text-brand font-medium" : "text-white/80 hover:bg-white/10"
+                              }`}
+                            >
+                              {o.label}
+                            </button>
+                          ))}
+                        </>
+                      )}
                     </div>
                   </>
                 )}
@@ -1511,15 +1533,17 @@ export default function VideoPlayer({
                   onClick={() => {
                     // One option (the common case: a single CEA-608 feed) → the
                     // menu would be a two-item formality. Toggle it directly.
+                    // Zero options (live, no track yet) → the menu, which
+                    // explains where captions are.
                     if (ccOptions.length === 1) selectCc(ccSel ? null : ccOptions[0]);
                     else setCcMenuOpen((o) => !o);
                   }}
-                  className={`min-w-[44px] min-h-[44px] flex items-center justify-center ${
+                  className={`min-w-[40px] min-h-[44px] sm:min-w-[44px] flex items-center justify-center ${
                     ccSel ? "text-brand" : "text-white/80 hover:text-white"
                   }`}
                   aria-label={ccSel ? "Closed captions on" : "Closed captions off"}
-                  aria-haspopup={ccOptions.length > 1 ? "menu" : undefined}
-                  aria-expanded={ccOptions.length > 1 ? ccMenuOpen : undefined}
+                  aria-haspopup={ccOptions.length !== 1 ? "menu" : undefined}
+                  aria-expanded={ccOptions.length !== 1 ? ccMenuOpen : undefined}
                 >
                   <Captions className="w-4 h-4" />
                 </button>
@@ -1530,7 +1554,7 @@ export default function VideoPlayer({
             {isLive && pipSupported && (
               <button
                 onClick={togglePip}
-                className={`min-w-[44px] min-h-[44px] flex items-center justify-center ${
+                className={`min-w-[40px] min-h-[44px] sm:min-w-[44px] flex items-center justify-center ${
                   pipActive ? "text-brand" : "text-white/80 hover:text-white"
                 }`}
                 aria-label={pipActive ? "Exit picture-in-picture" : "Picture-in-picture"}
@@ -1542,7 +1566,7 @@ export default function VideoPlayer({
             {castAvailable && src && (
               <button
                 onClick={startCast}
-                className={`min-w-[44px] min-h-[44px] flex items-center justify-center ${
+                className={`min-w-[40px] min-h-[44px] sm:min-w-[44px] flex items-center justify-center ${
                   casting ? "text-brand" : "text-white/80 hover:text-white"
                 }`}
                 aria-label="Cast"
@@ -1559,7 +1583,7 @@ export default function VideoPlayer({
                   (video as any).webkitShowPlaybackTargetPicker();
                 }
               }}
-              className="text-white/80 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="text-white/80 hover:text-white min-w-[40px] min-h-[44px] sm:min-w-[44px] flex items-center justify-center"
               aria-label="AirPlay"
             >
               <Monitor className="w-4 h-4" />
@@ -1567,7 +1591,7 @@ export default function VideoPlayer({
             )}
             <button
               onClick={toggleFullscreen}
-              className="text-white/80 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="text-white/80 hover:text-white min-w-[40px] min-h-[44px] sm:min-w-[44px] flex items-center justify-center"
               aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
             >
               {fullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
