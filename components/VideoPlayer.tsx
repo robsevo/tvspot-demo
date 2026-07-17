@@ -1049,10 +1049,27 @@ export default function VideoPlayer({
       setCcLines([]);
       return;
     }
-    const update = () => setCcLines(linesFromActiveCues(track));
+    // Hold a caption through the GAP to the next one rather than blinking to
+    // blank the instant its own cue's endTime passes. Cues (especially CEA-608
+    // roll-up and tightly-timed subtitle files) often end a beat before the
+    // next begins, so the raw activeCues signal flickers off-and-on and reads
+    // as captions "switching too fast". New cue content still swaps in
+    // immediately — only the TRAILING edge lingers, and only up to LINGER_MS,
+    // so genuine silence still clears the screen. No latency or desync is
+    // added to captions themselves; this only extends how long the last one
+    // stays up during a pause, matching how streaming players present them.
+    const LINGER_MS = 1200;
+    let lingerTimer: ReturnType<typeof setTimeout> | null = null;
+    const update = () => {
+      if (lingerTimer) { clearTimeout(lingerTimer); lingerTimer = null; }
+      const lines = linesFromActiveCues(track);
+      if (lines.length) setCcLines(lines);
+      else lingerTimer = setTimeout(() => setCcLines([]), LINGER_MS);
+    };
     update();
     track.addEventListener("cuechange", update);
     return () => {
+      if (lingerTimer) clearTimeout(lingerTimer);
       track.removeEventListener("cuechange", update);
       setCcLines([]);
     };
