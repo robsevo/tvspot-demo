@@ -368,3 +368,21 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
   .animate-hero-zoom { animation: none !important; }
 }
 
+
+/* Closed captions. The browser renders cues natively (hls.js decodes CEA-608 for
+   live; VOD gets WebVTT <track>s), so ::cue is the only styling hook available.
+   The default UA style is a hard black box with a small system font — legible,
+   but it reads like a browser artifact rather than part of the player. */
+video::cue {
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1.35;
+  /* CEA-608 broadcast cues carry their own positioning; keep the text itself
+     readable against bright scenes without fighting that layout. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+@media (min-width: 640px) {
+  video::cue { font-size: 1.15rem; }
+}

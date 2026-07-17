@@ -1,10 +1,84 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import type Hls from "hls.js"; // type only — the library is imported lazily below
-import { Play, Pause, Maximize, Minimize, SkipBack, SkipForward, Monitor, Cast, Volume2, VolumeX, Volume1, PictureInPicture2 } from "lucide-react";
+import { Play, Pause, Maximize, Minimize, SkipBack, SkipForward, Monitor, Cast, Volume2, VolumeX, Volume1, PictureInPicture2, Captions } from "lucide-react";
 import { castMedia, loadCastSDK, endCastSession } from "@/lib/cast";
 import { setPlaybackActive } from "@/lib/playbackState";
+import type { SubtitleTrack } from "@/lib/subtitles";
+
+/** A caption/subtitle track the <video> element is already carrying — hls.js's
+ *  decoded CEA-608, or a track iOS's native HLS engine built itself. */
+interface CcTrack {
+  /** Index into video.textTracks — the handle we set `mode` on. */
+  index: number;
+  label: string;
+  lang: string;
+}
+
+/** One row in the CC menu. Native tracks already exist on the element; external
+ *  ones are subtitle FILES that aren't downloaded until picked. */
+type CcOption =
+  | { key: string; label: string; lang: string; kind: "native"; index: number }
+  | { key: string; label: string; lang: string; kind: "ext"; url: string };
+
+/** Remembered CC choice, so turning captions on survives channel/title changes. */
+const CC_PREF_KEY = "tvspot_cc_pref";
+
+interface CcPref {
+  enabled: boolean;
+  /** Preferred language code; we re-match by language on the next stream. */
+  lang: string;
+}
+
+function readCcPref(): CcPref {
+  if (typeof window === "undefined") return { enabled: false, lang: "en" };
+  try {
+    const raw = localStorage.getItem(CC_PREF_KEY);
+    if (!raw) return { enabled: false, lang: "en" };
+    const p = JSON.parse(raw);
+    return { enabled: Boolean(p?.enabled), lang: typeof p?.lang === "string" ? p.lang : "en" };
+  } catch {
+    return { enabled: false, lang: "en" };
+  }
+}
+
+function writeCcPref(pref: CcPref) {
+  try { localStorage.setItem(CC_PREF_KEY, JSON.stringify(pref)); } catch {}
+}
+
+/**
+ * Does this URL serve an HLS manifest?
+ *
+ * A plain `.m3u8` substring test covers direct manifests AND the proxy URLs that
+ * carry the real manifest in a query param (api.example.com/stream-proxy?url=…m3u8,
+ * relay /m3u8?u=…m3u8, VOD /remux.m3u8) — so it stays as the first check.
+ *
+ * But the relay also serves manifests from EXTENSIONLESS endpoints: /hls (the
+ * live ffmpeg remux, whose upstream ends in /ts) and /m3u8 fronting a /ts
+ * upstream. Those contain no ".m3u8" anywhere, so the substring test missed them
+ * and they fell through to `video.src = src` — silently skipping hls.js on ~21
+ * channels (CBC, CityTV, FXX, ESPN2…). That cost them every buffer/stall setting
+ * tuned for the relay below, and — because hls.js is what decodes CEA-608 out of
+ * the H.264 SEI — it's why those channels had no captions at all.
+ *
+ * Safari/iOS is unaffected either way: it played these natively via the fallback
+ * before and still does via the native branch, since Chrome-family MSE is the
+ * only engine that routes into hls.js here.
+ */
+function isHlsSource(src: string | undefined): boolean {
+  if (!src) return false;
+  if (src.includes(".m3u8")) return true;
+  try {
+    const { pathname } = new URL(
+      src,
+      typeof window !== "undefined" ? window.location.href : "https://placeholder.invalid",
+    );
+    return /^\/(hls|m3u8)$/i.test(pathname);
+  } catch {
+    return false;
+  }
+}
 
 interface Props {
   src?: string;
@@ -40,6 +114,12 @@ interface Props {
    *  files legitimately rebuffer for 10-20s and a false failover restarts the
    *  movie, which is worse than waiting. */
   stallMs?: number;
+  /** External WebVTT subtitle tracks, rendered as <track> children (VOD).
+   *  Live passes nothing: those streams carry CEA-608 caption data in the video
+   *  SEI, which hls.js (and iOS's native HLS engine) decode into text tracks on
+   *  their own — both land in video.textTracks alongside these, so the CC menu
+   *  is built from one list either way. */
+  subtitles?: SubtitleTrack[];
 }
 
 export default function VideoPlayer({
@@ -61,6 +141,7 @@ export default function VideoPlayer({
   isLive = false,
   initialTime,
   stallMs = 10000,
+  subtitles,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -104,6 +185,23 @@ export default function VideoPlayer({
   const [pipActive, setPipActive] = useState(false);
   const pipActiveRef = useRef(false);
   useEffect(() => { pipActiveRef.current = pipActive; }, [pipActive]);
+  // Closed captions. `ccTracks` mirrors the caption tracks the <video> element
+  // already carries (hls.js CEA-608 / iOS native HLS) — derived from the element
+  // rather than stored, since those producers create tracks on their own
+  // schedule. External subtitle FILES are kept separate in `subtitles` and only
+  // mounted as a <track> once chosen: attaching hls.js to a <video> makes it
+  // walk every text track and briefly flip it out of `disabled` to read cues,
+  // which makes the browser download the file. Mounting all of them cost ~690KB
+  // of subtitles per movie that nobody asked for (measured), so the selected one
+  // is mounted on demand and the rest stay as menu rows.
+  const [ccTracks, setCcTracks] = useState<CcTrack[]>([]);
+  /** Key of the chosen CcOption, or null for off. */
+  const [ccSel, setCcSel] = useState<string | null>(null);
+  const [ccMenuOpen, setCcMenuOpen] = useState(false);
+  const extTrackRef = useRef<HTMLTrackElement>(null);
+  // Preference is applied once per source; after that the user's in-player
+  // choice wins and must not be re-overridden by a late-arriving track.
+  const ccAutoAppliedRef = useRef(false);
   const controlsTimer = useRef<NodeJS.Timeout | null>(null);
   const hlsRef = useRef<Hls | null>(null);
 
@@ -247,8 +345,9 @@ export default function VideoPlayer({
     // could mis-seek the NEXT source's metadata load.
     let restoreSeek: (() => void) | null = null;
 
-    // Check if it's an HLS URL
-    const isHlsUrl = typeof src === 'string' && src.includes(".m3u8");
+    // Check if it's an HLS URL (see isHlsSource — relay manifests don't all
+    // carry a .m3u8 in the URL).
+    const isHlsUrl = isHlsSource(src);
 
     // hls.js is ~150KB gzip: load it LAZILY, only when actually attaching an HLS
     // stream on an MSE browser — never on Home/search/etc, and never on iOS (which
@@ -671,6 +770,145 @@ export default function VideoPlayer({
     return () => video.removeEventListener("loadedmetadata", seek);
   }, [initialTime, src]);
 
+  // The CC menu: tracks already on the element, then subtitle files we could
+  // fetch. Labels genuinely collide (hls.js calls its CEA-608 track "English"
+  // and an English subtitle file is also "English"), and two identical rows are
+  // unpickable — so repeats get numbered.
+  const ccOptions = useMemo<CcOption[]>(() => {
+    const out: CcOption[] = [];
+    const seen = new Map<string, number>();
+    const push = (o: CcOption) => {
+      const n = (seen.get(o.label) ?? 0) + 1;
+      seen.set(o.label, n);
+      out.push(n > 1 ? { ...o, label: `${o.label} ${n}` } : o);
+    };
+    for (const t of ccTracks) {
+      push({ key: `n${t.index}`, label: t.label, lang: t.lang, kind: "native", index: t.index });
+    }
+    for (const s of subtitles ?? []) {
+      push({ key: `e${s.id}`, label: s.label, lang: s.lang, kind: "ext", url: s.url });
+    }
+    return out;
+  }, [ccTracks, subtitles]);
+
+  const ccSelected = ccOptions.find((o) => o.key === ccSel) ?? null;
+  const ccExt = ccSelected?.kind === "ext" ? ccSelected : null;
+
+  // Turn every native caption track off. `disabled` rather than `hidden` is
+  // deliberate: hls.js skips parsing cues into a disabled track, so live
+  // captions cost nothing while switched off.
+  const disableNative = useCallback((except = -1) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const tracks = video.textTracks;
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      if (t.kind !== "captions" && t.kind !== "subtitles") continue;
+      if (t === extTrackRef.current?.track) continue; // ours; driven by mount
+      t.mode = i === except ? "showing" : "disabled";
+    }
+  }, []);
+
+  // Pick a menu option (or null for off).
+  const selectCc = useCallback(
+    (opt: CcOption | null) => {
+      ccAutoAppliedRef.current = true;
+      setCcSel(opt ? opt.key : null);
+      // An external pick mounts its <track> (below); natives all go off.
+      disableNative(opt && opt.kind === "native" ? opt.index : -1);
+      writeCcPref({ enabled: Boolean(opt), lang: opt?.lang || readCcPref().lang || "en" });
+    },
+    [disableNative],
+  );
+
+  // New source → the remembered preference gets one fresh chance to apply
+  // (e.g. captions stay on when the user changes channel).
+  //
+  // Declared BEFORE the track-sync effect on purpose: effects run in declaration
+  // order, so this clears the flag before sync() reads it. Reversed, sync() sees
+  // the previous source's `true`, skips the auto-apply, and captions only come
+  // back on the next poll tick.
+  useEffect(() => {
+    ccAutoAppliedRef.current = false;
+    setCcMenuOpen(false);
+  }, [src]);
+
+  // Mirror the element's NATIVE text tracks into state.
+  //
+  // Live captions arrive LATE and unpredictably: hls.js only creates the CEA-608
+  // track when it parses the first caption cue, which may be many seconds into
+  // playback (or never, on a channel with no captions). So this can't be a
+  // one-shot read on mount — it has to keep listening, which is also what makes
+  // the CC button appear only on channels that genuinely have captions.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const tracks = video.textTracks;
+
+    const sync = () => {
+      const list: CcTrack[] = [];
+      for (let i = 0; i < tracks.length; i++) {
+        const t = tracks[i];
+        if (t.kind !== "captions" && t.kind !== "subtitles") continue;
+        if (t === extTrackRef.current?.track) continue; // our <track>, listed separately
+        list.push({ index: i, label: t.label || t.language || `Track ${i + 1}`, lang: t.language });
+      }
+      setCcTracks((prev) =>
+        prev.length === list.length &&
+        prev.every((p, i) => p.index === list[i].index && p.label === list[i].label)
+          ? prev // identical → keep the reference so dependents don't re-run
+          : list,
+      );
+    };
+
+    sync();
+    tracks.addEventListener("addtrack", sync);
+    tracks.addEventListener("removetrack", sync);
+    tracks.addEventListener("change", sync);
+    // Native iOS HLS can populate tracks without firing addtrack reliably; a
+    // couple of cheap re-reads around startup cover it.
+    const poll = setInterval(sync, 2000);
+    return () => {
+      tracks.removeEventListener("addtrack", sync);
+      tracks.removeEventListener("removetrack", sync);
+      tracks.removeEventListener("change", sync);
+      clearInterval(poll);
+    };
+  }, [src]);
+
+  // Our mounted <track> starts life `disabled`; flip it on once the element
+  // exists. Setting mode BEFORE the browser has the element does nothing, which
+  // is why this is an effect keyed on the selection rather than part of
+  // selectCc.
+  useEffect(() => {
+    const el = extTrackRef.current;
+    if (!el) return;
+    const show = () => { try { el.track.mode = "showing"; } catch {} };
+    show();
+    // Safari can attach the TextTrack a tick after the element mounts.
+    el.addEventListener("load", show);
+    const t = setTimeout(show, 300);
+    return () => { el.removeEventListener("load", show); clearTimeout(t); };
+  }, [ccSel]);
+
+  // Auto-apply the remembered preference once per source, as soon as there's
+  // something to apply it to. Prefers a real embedded caption track (live
+  // CEA-608) over an external subtitle file, then falls back to language match.
+  useEffect(() => {
+    if (ccAutoAppliedRef.current) return;
+    const pref = readCcPref();
+    if (!pref.enabled) return;
+    const opts = ccOptions;
+    if (!opts.length) return;
+    const byLang = (o: CcOption) =>
+      o.lang && o.lang.toLowerCase().startsWith(pref.lang.toLowerCase());
+    const match =
+      opts.find((o) => o.kind === "native" && byLang(o)) ??
+      opts.find(byLang) ??
+      opts[0];
+    selectCc(match);
+  }, [ccOptions, selectCc]);
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -772,20 +1010,24 @@ export default function VideoPlayer({
   const showControls = useCallback(() => {
     setControlsVisible(true);
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
+    // The CC menu lives inside the controls overlay — auto-hiding while the user
+    // is picking a track would snatch it away mid-read.
+    if (ccMenuOpen) return;
     controlsTimer.current = setTimeout(() => setControlsVisible(false), 4000);
-  }, []);
+  }, [ccMenuOpen]);
 
   // Auto-hide the controls a few seconds after playback starts/resumes (they used
   // to stay up forever until the first tap). While paused, keep them visible.
   useEffect(() => {
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
-    if (playing) {
+    if (playing && !ccMenuOpen) {
       controlsTimer.current = setTimeout(() => setControlsVisible(false), 4000);
     } else {
+      // Paused, or the CC menu is open and needs its container to stay put.
       setControlsVisible(true);
     }
     return () => { if (controlsTimer.current) clearTimeout(controlsTimer.current); };
-  }, [playing]);
+  }, [playing, ccMenuOpen]);
 
   const seek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const video = videoRef.current;
@@ -832,7 +1074,24 @@ export default function VideoPlayer({
         poster={poster}
         onClick={togglePlay}
         x-webkit-airplay="allow"
-      />
+      >
+        {/* Only the CHOSEN subtitle file is mounted — see the ccSel state note:
+            hls.js touching a text track is enough to make the browser fetch it,
+            so unmounted options cost nothing until picked. Same-origin WebVTT
+            (/api/subtitles/vtt), hence no crossOrigin: setting it would force a
+            CORS mode the auth cookie wouldn't ride along with. Keyed by url so
+            switching subtitle picks remounts a clean element. */}
+        {ccExt && (
+          <track
+            key={ccExt.url}
+            ref={extTrackRef}
+            kind="subtitles"
+            src={ccExt.url}
+            srcLang={ccExt.lang}
+            label={ccExt.label}
+          />
+        )}
+      </video>
 
       {/* Casting: the stream plays on the TV; local playback is stopped. z-40
           sits above the center play button so a paused local player can't
@@ -989,6 +1248,69 @@ export default function VideoPlayer({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Closed captions. Rendered only when the stream actually offers a
+                track — live channels without captions never create one, and a
+                CC button that opens an empty menu is worse than no button. */}
+            {ccOptions.length > 0 && (
+              <div className="relative">
+                {ccMenuOpen && (
+                  <>
+                    {/* Tap-away closer sized to the player, so the menu doesn't
+                        get stuck open behind the auto-hiding controls. */}
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setCcMenuOpen(false)}
+                      aria-hidden="true"
+                    />
+                    <div
+                      role="menu"
+                      aria-label="Closed captions"
+                      className="absolute bottom-full right-0 mb-2 z-50 min-w-[10rem] max-h-56 overflow-y-auto rounded-xl bg-black/95 backdrop-blur-sm border border-white/10 py-1 shadow-xl"
+                    >
+                      <button
+                        role="menuitemradio"
+                        aria-checked={ccSel === null}
+                        onClick={() => { selectCc(null); setCcMenuOpen(false); }}
+                        className={`w-full text-left px-4 py-2 min-h-[44px] text-sm transition-colors ${
+                          ccSel === null ? "text-brand font-medium" : "text-white/80 hover:bg-white/10"
+                        }`}
+                      >
+                        Off
+                      </button>
+                      {ccOptions.map((o) => (
+                        <button
+                          key={o.key}
+                          role="menuitemradio"
+                          aria-checked={ccSel === o.key}
+                          onClick={() => { selectCc(o); setCcMenuOpen(false); }}
+                          className={`w-full text-left px-4 py-2 min-h-[44px] text-sm transition-colors ${
+                            ccSel === o.key ? "text-brand font-medium" : "text-white/80 hover:bg-white/10"
+                          }`}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <button
+                  onClick={() => {
+                    // One option (the common case: a single CEA-608 feed) → the
+                    // menu would be a two-item formality. Toggle it directly.
+                    if (ccOptions.length === 1) selectCc(ccSel ? null : ccOptions[0]);
+                    else setCcMenuOpen((o) => !o);
+                  }}
+                  className={`min-w-[44px] min-h-[44px] flex items-center justify-center ${
+                    ccSel ? "text-brand" : "text-white/80 hover:text-white"
+                  }`}
+                  aria-label={ccSel ? "Closed captions on" : "Closed captions off"}
+                  aria-haspopup={ccOptions.length > 1 ? "menu" : undefined}
+                  aria-expanded={ccOptions.length > 1 ? ccMenuOpen : undefined}
+                >
+                  <Captions className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             {/* Picture-in-picture (live TV) — the stream keeps playing in the
                 floating window; the inline area shows the placeholder overlay. */}
             {isLive && pipSupported && (

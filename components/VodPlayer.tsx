@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import VideoPlayer from "@/components/VideoPlayer";
+import type { SubtitleTrack } from "@/lib/subtitles";
 
 /**
  * VideoPlayer wrapped with VOD source-failure detection. Live TV has its own
@@ -29,6 +30,9 @@ interface Props {
   onSourceFail?: (lastTime: number) => void;
   /** Fired when playback actually starts (first frame ready). */
   onPlay?: () => void;
+  /** External WebVTT caption tracks (see useSubtitles). They're keyed to the
+   *  TITLE, not the source URL, so they survive a source failover unchanged. */
+  subtitles?: SubtitleTrack[];
 }
 
 // Remux sources get a longer runway: a cold relay ffmpeg spawn takes ~20-24s
@@ -64,6 +68,7 @@ export default function VodPlayer({
   onProgress,
   onSourceFail,
   onPlay: onPlayProp,
+  subtitles,
 }: Props) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Separate from `timer`: arm()/clear() manage the never-started watchdog and
@@ -135,6 +140,7 @@ export default function VodPlayer({
       initialTime={isRemux ? undefined : initialTime}
       autoPlay={autoPlay}
       stallMs={STALL_MS}
+      subtitles={subtitles}
       onProgress={
         onProgress &&
         ((t, d) => {

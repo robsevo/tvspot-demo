@@ -9,6 +9,7 @@ import { mergeSources, type PlayableSource } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import VodPlayer from "@/components/VodPlayer";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
+import { useSubtitles } from "@/hooks/useSubtitles";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import type { VodDetail } from "@/lib/types";
@@ -52,6 +53,9 @@ export default function VodMoviePage() {
 
   // Continue Watching integration
   const cwId = useMemo(() => (tmdbId ? Number(tmdbId) : 0), [tmdbId]);
+  // Caption tracks for this title. Keyed to the movie, not the source, so a
+  // failover to another URL keeps the same subtitles.
+  const subtitles = useSubtitles("movie", tmdbId);
   const { items, updateProgress, remove } = useContinueWatching();
   // Resume position is snapshotted ONCE per title. Deriving it live from the
   // continue-watching entry (which playback rewrites every few seconds) fed an
@@ -307,6 +311,7 @@ export default function VodMoviePage() {
               onProgress={handleProgress}
               onSourceFail={handleSourceFailure}
               onPlay={handlePlay}
+              subtitles={subtitles}
             />
 
             {/* Open in new tab escape hatch */}

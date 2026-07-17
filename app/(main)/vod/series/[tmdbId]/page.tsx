@@ -9,6 +9,7 @@ import { mergeSources, type PlayableSource } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import VodPlayer from "@/components/VodPlayer";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
+import { useSubtitles } from "@/hooks/useSubtitles";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import type { SeriesDetail, Episode } from "@/lib/types";
@@ -61,6 +62,16 @@ export default function VodSeriesPage() {
 
   const { items, updateProgress, remove } = useContinueWatching();
   const seriesId = useMemo(() => (tmdbId ? Number(tmdbId) : 0), [tmdbId]);
+
+  // Caption tracks for the episode on screen. Subtitles are per-episode, and
+  // only one episode plays at a time, so this is looked up for `playingEpisode`
+  // rather than per row (a hook can't run inside the episode map anyway).
+  const [playSeason, playEpisode] = useMemo(() => {
+    if (!playingEpisode) return [undefined, undefined] as const;
+    const [s, e] = playingEpisode.split("-").map(Number);
+    return [Number.isFinite(s) ? s : undefined, Number.isFinite(e) ? e : undefined] as const;
+  }, [playingEpisode]);
+  const subtitles = useSubtitles("series", tmdbId, playSeason, playEpisode);
 
   // Expand seasons that have an in-progress episode
   useEffect(() => {
@@ -425,6 +436,7 @@ export default function VodSeriesPage() {
                             onProgress={handleProgress(season.season_number, ep.episode_number)}
                             onSourceFail={handleSourceFailure(epKey)}
                             onPlay={() => setConfirmedUrl(currentSource.url)}
+                            subtitles={subtitles}
                           />
 
                           {/* Open in new tab escape hatch */}
