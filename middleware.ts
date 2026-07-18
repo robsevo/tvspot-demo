@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
+import { TV_UA_RE } from "@/lib/tv";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // TV browsers/webviews land on the 10-foot UI, not the touch one. Only the
+  // two entry routes reroute — deep links (and the Tizen wrapper, which points
+  // straight at /tv) are left alone.
+  if (TV_UA_RE.test(request.headers.get("user-agent") || "")) {
+    if (pathname === "/") return NextResponse.redirect(new URL("/tv", request.url));
+    if (pathname === "/login") return NextResponse.redirect(new URL("/tv/login", request.url));
+  }
+
   if (
     pathname === "/login" ||
+    pathname === "/tv/login" ||
     pathname.startsWith("/api/auth/") ||
     pathname.startsWith("/api/images") ||
     pathname.startsWith("/_next/") ||
@@ -36,7 +46,11 @@ export async function middleware(request: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    return NextResponse.redirect(new URL("/login", request.url));
+    // TV pages bounce to the TV login (which can silently re-login with the
+    // remembered-on-this-TV credentials), not the touch one.
+    return NextResponse.redirect(
+      new URL(pathname.startsWith("/tv") ? "/tv/login" : "/login", request.url),
+    );
   }
 
   return NextResponse.next();

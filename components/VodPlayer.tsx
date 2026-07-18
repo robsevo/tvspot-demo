@@ -33,6 +33,9 @@ interface Props {
   /** External WebVTT caption tracks (see useSubtitles). They're keyed to the
    *  TITLE, not the source URL, so they survive a source failover unchanged. */
   subtitles?: SubtitleTrack[];
+  /** Passed through to VideoPlayer — the /tv pages drive pause/seek via the
+   *  raw <video> element instead of the touch overlay. */
+  videoElRef?: React.MutableRefObject<HTMLVideoElement | null>;
 }
 
 // Remux sources get a longer runway: a cold relay ffmpeg spawn takes ~20-24s
@@ -69,6 +72,7 @@ export default function VodPlayer({
   onSourceFail,
   onPlay: onPlayProp,
   subtitles,
+  videoElRef,
 }: Props) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Separate from `timer`: arm()/clear() manage the never-started watchdog and
@@ -141,6 +145,7 @@ export default function VodPlayer({
       autoPlay={autoPlay}
       stallMs={STALL_MS}
       subtitles={subtitles}
+      videoElRef={videoElRef}
       onProgress={
         onProgress &&
         ((t, d) => {

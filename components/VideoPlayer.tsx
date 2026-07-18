@@ -215,6 +215,10 @@ interface Props {
    *  their own — both land in video.textTracks alongside these, so the CC menu
    *  is built from one list either way. */
   subtitles?: SubtitleTrack[];
+  /** Exposes the internal <video> element to a parent that drives playback
+   *  from OUTSIDE the touch overlay — the /tv pages, where remote keys (not
+   *  taps) do pause/seek and this ref is the only control surface needed. */
+  videoElRef?: React.MutableRefObject<HTMLVideoElement | null>;
 }
 
 export default function VideoPlayer({
@@ -237,9 +241,19 @@ export default function VideoPlayer({
   initialTime,
   stallMs = 10000,
   subtitles,
+  videoElRef,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Mirror the video element out to a TV parent (see Props.videoElRef).
+  useEffect(() => {
+    if (!videoElRef) return;
+    videoElRef.current = videoRef.current;
+    return () => {
+      videoElRef.current = null;
+    };
+  }, [videoElRef]);
   // Was the video playing when the tab was backgrounded? (drives auto-resume).
   const wasPlayingRef = useRef(false);
   // Throttle continue-watching writes so timeupdate (~4Hz) doesn't spam storage.

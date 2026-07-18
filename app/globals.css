@@ -407,3 +407,22 @@ video::cue {
 @media (min-width: 640px) {
   video::cue { font-size: 1.15rem; }
 }
+
+/* ── TV (10-foot / D-pad) mode — everything under /tv ─────────────────────
+   Focus IS the cursor on a TV: the ring must be unmissable from the couch,
+   and the mouse cursor/scrollbars have no business on screen. Uses :focus
+   (not :focus-visible) because focus moves programmatically from TvNav. */
+.tv-root {
+  cursor: none;
+  scrollbar-width: none;
+}
+.tv-root ::-webkit-scrollbar {
+  display: none;
+}
+.tv-root [data-tv]:focus {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 0.5rem;
+  z-index: 1;
+}
+
