@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TVSpot</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #0a0a0a;
+      color: #b3b3b3;
+      font-family: sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 24px;
+    }
+    p { font-size: 28px; margin: 0; }
+    .err { color: #f87171; display: none; }
+  </style>
+</head>
+<body>
+  <p id="status">Starting TVSpot…</p>
+  <p class="err" id="error">Can&#39;t reach TVSpot — check the TV&#39;s network, then press Enter to retry.</p>
+  <script>
+    // ── Set this to your deployed origin (no trailing slash) ──────────────
+    var APP_URL = "https://YOUR-TVSPOT-DOMAIN.vercel.app";
+    // ──────────────────────────────────────────────────────────────────────
+
+    // Probe the origin first so a network failure shows a retryable message
+    // instead of the webview's opaque error page (which eats the Back key).
+    function start() {
+      document.getElementById("status").style.display = "";
+      document.getElementById("error").style.display = "none";
+      var probe = new XMLHttpRequest();
+      probe.open("GET", APP_URL + "/api/version", true);
+      probe.timeout = 10000;
+      probe.onload = function () { window.location.replace(APP_URL + "/tv"); };
+      probe.onerror = probe.ontimeout = function () {
+        document.getElementById("status").style.display = "none";
+        document.getElementById("error").style.display = "block";
+      };
+      probe.send();
+    }
+
+    document.addEventListener("keydown", function (e) {
+      if (e.keyCode === 13) start();           // Enter → retry
+      if (e.keyCode === 10009) {               // Back → exit the app
+        try { tizen.application.getCurrentApplication().exit(); } catch (err) {}
+      }
+    });
+
+    start();
+  </script>
+</body>
+</html>
