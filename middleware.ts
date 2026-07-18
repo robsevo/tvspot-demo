@@ -29,6 +29,9 @@ export async function middleware(request: NextRequest) {
     // where there's no auth cookie — otherwise the <img> request gets redirected to
     // /login (HTML) and renders as a broken image.
     pathname.endsWith(".svg") ||
+    // Legacy-webview runtime shims — loaded by EVERY page including /login and
+    // /tv/login, before any auth exists.
+    pathname === "/tv-polyfills.js" ||
     // Build-id endpoint (deploy detection) is public: it only returns the commit
     // sha, and DeployRefresh polls it from EVERY open page — including /login and
     // apps whose session died at the 4 AM rollover. Gating it turned each of

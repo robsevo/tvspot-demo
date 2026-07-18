@@ -426,3 +426,64 @@ video::cue {
   z-index: 1;
 }
 
+/* ── Legacy-engine fallbacks (Samsung RU7100: Tizen 5.0 ≈ Chromium 63) ─────
+   postcss-preset-env (postcss.config.mjs) handles what a transform CAN
+   express — cascade layers, oklch, color-mix. These blocks cover what it
+   can't. Each activates only on engines missing the feature, so modern
+   browsers are untouched. */
+
+/* `inset` shorthand landed in Chromium 87 — without this, every fixed
+   overlay (players, traps) loses its 0-offsets and collapses in-flow. */
+@supports not (inset: 0) {
+  .inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+  .inset-x-0 { left: 0; right: 0; }
+  .inset-y-0 { top: 0; bottom: 0; }
+}
+
+/* `aspect-ratio` landed in Chromium 88. Padding-hack the two ratios the app
+   uses. Replaced elements (img) paint only in the content box, so they get a
+   fixed height instead of the padding trick. */
+@supports not (aspect-ratio: 16 / 9) {
+  div.aspect-video { position: relative; height: 0; padding-bottom: 56.25%; }
+  div.aspect-video > * { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  img.aspect-video { height: auto; }
+  div.aspect-\[2\/3\] { position: relative; height: 0; padding-bottom: 150%; }
+  div.aspect-\[2\/3\] > * { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  /* series page episode thumbs: w-40 (10rem) at 16:9 */
+  img.w-40.aspect-video { height: 5.625rem; }
+}
+
+/* Tailwind v4 writes gradient positions WITH an interpolation hint
+   ("to top in oklab") into --tw-gradient-position, unguarded — engines that
+   can't parse the hint drop the whole gradient. Strip it where color-mix
+   (same era) is unsupported; modern browsers never match this block. */
+@supports not (color: color-mix(in lab, red, red)) {
+  .bg-gradient-to-t { --tw-gradient-position: to top; }
+  .bg-gradient-to-b { --tw-gradient-position: to bottom; }
+  .bg-gradient-to-r { --tw-gradient-position: to right; }
+  .bg-gradient-to-br { --tw-gradient-position: to bottom right; }
+}
+
+/* Flex `gap` landed in Chromium 84; before that the property doesn't parse
+   at all (grid gap arrived in 66), which is exactly what this @supports
+   detects. Approximate with child margins — scoped to .tv-root because only
+   the TV webview needs it. Row gaps by default; flex-col variants override. */
+@supports not (gap: 1rem) {
+  .tv-root .flex.gap-2 > * + * { margin-left: 0.5rem; }
+  .tv-root .flex.gap-2\.5 > * + * { margin-left: 0.625rem; }
+  .tv-root .flex.gap-3 > * + * { margin-left: 0.75rem; }
+  .tv-root .flex.gap-4 > * + * { margin-left: 1rem; }
+  .tv-root .flex.gap-5 > * + * { margin-left: 1.25rem; }
+  .tv-root .flex.gap-6 > * + * { margin-left: 1.5rem; }
+  .tv-root .flex.gap-8 > * + * { margin-left: 2rem; }
+  .tv-root .flex.gap-10 > * + * { margin-left: 2.5rem; }
+  .tv-root .flex.flex-col.gap-2 > * + * { margin-left: 0; margin-top: 0.5rem; }
+  .tv-root .flex.flex-col.gap-3 > * + * { margin-left: 0; margin-top: 0.75rem; }
+  .tv-root .flex.flex-col.gap-4 > * + * { margin-left: 0; margin-top: 1rem; }
+  .tv-root .flex.flex-col.gap-6 > * + * { margin-left: 0; margin-top: 1.5rem; }
+  /* wrapping rows (source chips, season buttons): uniform margins so wrapped
+     lines keep vertical spacing too */
+  .tv-root .flex.flex-wrap.gap-4 > * { margin: 0.5rem 1rem 0.5rem 0; }
+  .tv-root .flex.flex-wrap.gap-4 > * + * { margin-left: 0; }
+}
+

@@ -4,6 +4,10 @@ const commitSha =
   process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA || "dev";
 
 const nextConfig: NextConfig = {
+  // Run these through SWC so browserslist's chrome 63 floor (the 2019 Samsung
+  // TV webview) applies to them too — their published ESM builds carry syntax
+  // (?. / ??) that engine can't parse, and hls.js loads ON the TV player.
+  transpilePackages: ["hls.js", "framer-motion"],
   env: {
     // Baked into BOTH the client bundle and the /api/version function at build
     // time, so a loaded page can compare its own build against the deployment

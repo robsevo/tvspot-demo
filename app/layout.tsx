@@ -22,6 +22,11 @@ export default async function RootLayout({
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <meta name="theme-color" content="#0a0a0a" />
+        {/* MUST precede the app bundles: shims runtime APIs the 2019 Samsung
+            TV webview (Chromium 63) lacks. Feature-detected — a no-op on
+            phones. Plain <script src> (not next/script) so it loads and runs
+            synchronously before any chunk. */}
+        <script src="/tv-polyfills.js" />
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
         <link rel="shortcut icon" href="/favicon-48.png" type="image/png" />
