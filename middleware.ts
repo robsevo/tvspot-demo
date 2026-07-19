@@ -32,6 +32,11 @@ export async function middleware(request: NextRequest) {
     // Legacy-webview runtime shims — loaded by EVERY page including /login and
     // /tv/login, before any auth exists.
     pathname === "/tv-polyfills.js" ||
+    // The service worker script must be fetchable WITHOUT a cookie: the browser's
+    // SW update check is the only recovery path for a client wedged on cached
+    // broken chunks after its session expired — a 307-to-login here would leave
+    // that client broken forever. The file is public code, nothing to protect.
+    pathname === "/sw.js" ||
     // Build-id endpoint (deploy detection) is public: it only returns the commit
     // sha, and DeployRefresh polls it from EVERY open page — including /login and
     // apps whose session died at the 4 AM rollover. Gating it turned each of
