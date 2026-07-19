@@ -11,7 +11,9 @@
  *
  * Bump VERSION to force-evict all caches on the next deploy.
  */
-const VERSION = "v3"; // v3: evict shells/assets cached before the legacy-engine (TV) pass
+const VERSION = "v4"; // v4: evict shells cached before the inline-polyfill fix — a
+// stale shell references new chunks without the polyfill guarantee, and a page
+// whose JS crashed can never revalidate itself (see 375dd77)
 const SHELL_CACHE = `tvspot-shell-${VERSION}`;
 const ASSET_CACHE = `tvspot-assets-${VERSION}`;
 
