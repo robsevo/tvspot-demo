@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import VideoPlayer from "@/components/VideoPlayer";
+import VideoPlayer, { type TvCcHandle } from "@/components/VideoPlayer";
 import type { SubtitleTrack } from "@/lib/subtitles";
 
 /**
@@ -38,6 +38,8 @@ interface Props {
   videoElRef?: React.MutableRefObject<HTMLVideoElement | null>;
   /** Passed through to VideoPlayer — TV mode, no touch chrome. */
   hideControls?: boolean;
+  /** Passed through to VideoPlayer — TV OSD caption toggle. */
+  ccRef?: React.MutableRefObject<TvCcHandle | null>;
 }
 
 // Remux sources get a longer runway: a cold relay ffmpeg spawn takes ~20-24s
@@ -76,6 +78,7 @@ export default function VodPlayer({
   subtitles,
   videoElRef,
   hideControls,
+  ccRef,
 }: Props) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Separate from `timer`: arm()/clear() manage the never-started watchdog and
@@ -150,6 +153,7 @@ export default function VodPlayer({
       subtitles={subtitles}
       videoElRef={videoElRef}
       hideControls={hideControls}
+      ccRef={ccRef}
       onProgress={
         onProgress &&
         ((t, d) => {

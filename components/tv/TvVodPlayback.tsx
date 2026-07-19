@@ -3,9 +3,11 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Pause } from "lucide-react";
 import VodPlayer from "@/components/VodPlayer";
+import type { TvCcHandle } from "@/components/VideoPlayer";
 import { useTvBack } from "@/components/tv/TvNav";
 import { TVKEY } from "@/lib/tv";
 import type { PlayableSource } from "@/lib/sources";
+import type { SubtitleTrack } from "@/lib/subtitles";
 
 const SEEK_STEP_S = 15;
 const OSD_MS = 3500;
@@ -18,6 +20,9 @@ interface Props {
   poster?: string;
   /** Resume position (continue watching). */
   initialTime?: number;
+  /** External caption tracks (useSubtitles) — keyed to the title, so they
+   *  survive source failover unchanged. Down on the remote toggles them. */
+  subtitles?: SubtitleTrack[];
   onClose: () => void;
   /** Throttled absolute progress, for continue-watching persistence. */
   onProgress?: (currentTime: number, duration: number) => void;
@@ -41,6 +46,7 @@ function fmtClock(s: number): string {
  *
  *   Enter / Play-Pause   pause / resume
  *   Left / Right         seek ∓/± 15s (no-op on unseekable remux streams)
+ *   Down                 captions on/off (remembered across titles)
  *   Back                 stop and return to the detail page
  */
 export default function TvVodPlayback({
@@ -48,6 +54,7 @@ export default function TvVodPlayback({
   title,
   poster,
   initialTime,
+  subtitles,
   onClose,
   onProgress,
 }: Props) {
@@ -61,6 +68,10 @@ export default function TvVodPlayback({
   const [notice, setNotice] = useState<string | null>(null);
   const [clock, setClock] = useState({ t: 0, d: 0 });
   const osdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ccRef = useRef<TvCcHandle | null>(null);
+  // Chip state mirrors the player's caption state on the OSD tick, so the CC
+  // badge also reflects an auto-restored "remembered on" without a keypress.
+  const [cc, setCc] = useState({ on: false, available: false });
 
   const raiseOsd = useCallback((holdOpen?: boolean) => {
     setOsdVisible(true);
@@ -78,6 +89,7 @@ export default function TvVodPlayback({
     const tick = () => {
       const v = videoElRef.current;
       if (v) setClock({ t: v.currentTime, d: v.duration });
+      if (ccRef.current) setCc(ccRef.current.state());
     };
     tick();
     const id = setInterval(tick, 500);
@@ -138,7 +150,19 @@ export default function TvVodPlayback({
           raiseOsd(v.paused);
           return;
         }
-        case TVKEY.down:
+        case TVKEY.down: {
+          // Captions toggle. Announce the result — on a TV there's no cursor
+          // hover to discover state, the OSD notice IS the feedback.
+          e.preventDefault();
+          const h = ccRef.current;
+          if (!h) return;
+          const r = h.toggle();
+          setCc(r);
+          setNotice(!r.available ? "No captions available" : r.on ? "Captions on" : "Captions off");
+          setTimeout(() => setNotice(null), 2500);
+          raiseOsd(paused);
+          return;
+        }
         case TVKEY.up:
           e.preventDefault();
           raiseOsd(paused);
@@ -164,6 +188,8 @@ export default function TvVodPlayback({
             autoPlay
             hideControls
             initialTime={resumeAt > 5 ? resumeAt : undefined}
+            subtitles={subtitles}
+            ccRef={ccRef}
             videoElRef={videoElRef}
             onSourceFail={fail}
             onPlay={() => setPaused(false)}
@@ -202,9 +228,20 @@ export default function TvVodPlayback({
           </div>
           <div className="flex items-center justify-between mt-2">
             <span className="text-base text-[#aebbc5]">{fmtClock(clock.t)}</span>
-            <span className="text-base text-[#8197a4]">
-              {isFinite(clock.d) && clock.d > 0 ? fmtClock(clock.d) : "Live"}
-            </span>
+            <div className="flex items-center gap-4">
+              {cc.available && (
+                <span
+                  className={`text-sm font-bold px-2 py-0.5 rounded ${
+                    cc.on ? "bg-[#1399ff] text-black" : "bg-white/15 text-[#aebbc5]"
+                  }`}
+                >
+                  CC
+                </span>
+              )}
+              <span className="text-base text-[#8197a4]">
+                {isFinite(clock.d) && clock.d > 0 ? fmtClock(clock.d) : "Live"}
+              </span>
+            </div>
           </div>
         </div>
       )}

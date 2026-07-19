@@ -8,6 +8,7 @@ import { mergeSources } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
 import { useCatalogItem } from "@/hooks/useCatalogItem";
+import { useSubtitles } from "@/hooks/useSubtitles";
 import TvVodPlayback from "@/components/tv/TvVodPlayback";
 import type { VodDetail } from "@/lib/types";
 
@@ -32,6 +33,7 @@ export default function TvMoviePage() {
   }, []);
 
   const { items, updateProgress, remove } = useContinueWatching();
+  const subtitles = useSubtitles("movie", tmdbId);
 
   // Catalog fallback: the backend's details record is EMPTY for many trending
   // titles — the catalog row (which the user just came from) fills the header
@@ -192,6 +194,7 @@ export default function TvMoviePage() {
           title={display.title}
           poster={display.backdrop}
           initialTime={fromStart ? 0 : resumeTime}
+          subtitles={subtitles}
           onClose={closePlayback}
           onProgress={handleProgress}
         />

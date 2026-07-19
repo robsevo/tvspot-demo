@@ -8,6 +8,7 @@ import { mergeSources } from "@/lib/sources";
 import { resolveVod, prewarmVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
 import { useCatalogItem } from "@/hooks/useCatalogItem";
+import { useSubtitles } from "@/hooks/useSubtitles";
 import TvVodPlayback from "@/components/tv/TvVodPlayback";
 import { useTvBack } from "@/components/tv/TvNav";
 import type { SeriesDetail, Episode } from "@/lib/types";
@@ -30,6 +31,8 @@ export default function TvSeriesPage() {
   // Catalog fallback for the header — see useCatalogItem: the backend's
   // details/series record can carry empty metadata for current titles.
   const catItem = useCatalogItem("series", tmdbId);
+  // Tracks are per-episode; the hook returns [] until an episode is playing.
+  const subtitles = useSubtitles("series", tmdbId, playing?.season, playing?.episode);
   const display = {
     title: detail?.title || catItem?.title || "",
     poster: detail?.poster || catItem?.poster,
@@ -260,6 +263,7 @@ export default function TvSeriesPage() {
           title={`${display.title} — S${playing.season} E${playing.episode}`}
           poster={playingEpisode.still_url || display.poster}
           initialTime={resumeTime}
+          subtitles={subtitles}
           onClose={closePlayback}
           onProgress={handleProgress}
         />
