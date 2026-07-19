@@ -11,9 +11,11 @@
  *
  * Bump VERSION to force-evict all caches on the next deploy.
  */
-const VERSION = "v4"; // v4: evict shells cached before the inline-polyfill fix — a
-// stale shell references new chunks without the polyfill guarantee, and a page
-// whose JS crashed can never revalidate itself (see 375dd77)
+const VERSION = "v5"; // v5: evict chunks cached before the chunk-guard fix — cached
+// unguarded chunks can evaluate ahead of the layout's inline polyfill on the TV
+// (globalThis ReferenceError, page dead at eval), and a crashed page can never
+// revalidate itself. The browser still updates sw.js on navigation, so this is
+// the recovery path for a wedged TV. (see scripts/chunk-guard.mjs)
 const SHELL_CACHE = `tvspot-shell-${VERSION}`;
 const ASSET_CACHE = `tvspot-assets-${VERSION}`;
 
