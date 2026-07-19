@@ -16,6 +16,8 @@ interface Props {
   progress?: number;
   /** Small line under the title, e.g. "S2 E4" for continue-watching. */
   sublabel?: string;
+  /** Fill the parent's column (grids) instead of the fixed rail width. */
+  fluid?: boolean;
 }
 
 /** Prime-style landscape card: 16:9 art, title etched into a bottom gradient,
@@ -28,6 +30,7 @@ export default function TvLandscapeCard({
   kind,
   progress,
   sublabel,
+  fluid,
 }: Props) {
   const [imgError, setImgError] = useState(false);
   const href = kind === "series" ? `/tv/vod/series/${tmdbId}` : `/tv/vod/movie/${tmdbId}`;
@@ -38,7 +41,7 @@ export default function TvLandscapeCard({
       href={href}
       data-tv
       onFocus={() => prewarmVod(kind, tmdbId)}
-      className="block w-80 shrink-0 focus:outline-none"
+      className={`block focus:outline-none ${fluid ? "w-full" : "w-80 shrink-0"}`}
     >
       <div className="relative aspect-video rounded-lg overflow-hidden bg-[#1a242f] ring-1 ring-white/10">
         {art && !imgError ? (
