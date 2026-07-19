@@ -40,7 +40,7 @@ import { fetchGithubM3u } from "./sources/github-m3u";
 import { fetchReddit } from "./reddit";
 import { fetchChannels } from "./Origin";
 import { matchChannels } from "./matcher";
-import { verifyCandidateMap } from "./verifier";
+import { bufferScore, verifyCandidateMap } from "./verifier";
 import { writeAtomic, readExisting } from "./store";
 import { scrapeVod } from "./vod";
 import { toPlayableUrl, slugify } from "./playable";
@@ -277,8 +277,10 @@ async function main(): Promise<void> {
         for (const s of sources) {
           if (prevLiveUrls.has(s.url)) { s.live = true; restored++; }
         }
-        // Re-rank live-first: the verifier sorted on the broken flags.
-        sources.sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0));
+        // Re-rank: the verifier scored these with the broken liveness flags, so
+        // recompute now that the flags are restored.
+        for (const s of sources) s.score = bufferScore(s);
+        sources.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.latencyMs - b.latencyMs);
       }
       log(`  LIVENESS COLLAPSE: 0/${totalVerified} loadable passed liveness — broken verify window; restored ${restored} live flags from the previous run`);
     }
@@ -296,13 +298,33 @@ async function main(): Promise<void> {
   for (const [slug, loadable] of verified) {
     if (!loadable.length) continue;
 
-    // URLs that were active in the previous run (preserve their order).
+    // URLs that were active in the previous run.
     const prevActiveUrls = (existing?.channels?.[slug]?.sources || []).map((s) => s.url);
+    const prevActive = new Set(prevActiveUrls);
     const byUrl = new Map(loadable.map((s) => [s.url, s]));
+
+    // Membership vs ORDER are now two separate decisions.
+    //
+    // Membership stays sticky: a previously-active link that is still live keeps
+    // its place in the set, so a working channel is never torn out on a flaky run.
+    //
+    // ORDER is pure quality. It used to be "everything that was active last night,
+    // in last night's order, THEN anything new" — which meant a freshly discovered
+    // source could be measurably the best link we have and still be tried 12th,
+    // i.e. never, because the player stops at the first one that works. New links
+    // now sort straight to the front on merit.
+    //
+    // Hysteresis (INCUMBENT_BONUS): a currently-active source has proven itself in
+    // real playback, and reshuffling the head of the list every night for a 1-2
+    // point scoring wobble is churn, not improvement. An incumbent holds its slot
+    // unless a challenger beats it by a clear margin.
+    const INCUMBENT_BONUS = 6;
+    const rank = (s: (typeof loadable)[number]) =>
+      (s.score ?? 0) + (prevActive.has(s.url) ? INCUMBENT_BONUS : 0);
 
     const active: typeof loadable = [];
     const taken = new Set<string>();
-    // 1) Keep previously-active links that are still loadable AND live (sticky — no replace).
+    // 1) Previously-active links that are still loadable AND live keep membership.
     //    Non-live previously-active sources lose their sticky slot so live scraped
     //    sources can fill it instead of being stuck on the waiting bench.
     for (const url of prevActiveUrls) {
@@ -310,11 +332,15 @@ async function main(): Promise<void> {
       const s = byUrl.get(url);
       if (s && s.live && !taken.has(url)) { active.push(s); taken.add(url); }
     }
-    // 2) Fill remaining slots from the rest (already ranked live-first).
+    // 2) Fill remaining slots from the rest (already ranked best-connection-first).
     for (const s of loadable) {
       if (active.length >= ACTIVE_CAP) break;
       if (!taken.has(s.url)) { active.push(s); taken.add(s.url); }
     }
+    // 3) Re-order the whole active set by score. This is what actually puts a
+    //    better new source in front of a mediocre incumbent — step 1 only decided
+    //    WHO is in the set, not who the player reaches for first.
+    active.sort((a, b) => rank(b) - rank(a) || a.latencyMs - b.latencyMs);
     // 3) Everything else loadable → waiting bench (keep all).
     const waiting = loadable.filter((s) => !taken.has(s.url));
 

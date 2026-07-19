@@ -37,6 +37,35 @@ export interface VerifiedSource {
    *  RANK (live-first) — NOT to delete: a flaky 9s snapshot must not drop a
    *  loadable link, or we'd remove currently-working channels. */
   live?: boolean;
+  /** Playlist shape measured during tier 2, used by bufferScore(). Optional —
+   *  entries written by older pipeline versions won't have it. */
+  metrics?: PlaylistMetrics;
+  /** 0-100 predicted resistance to buffering UNDER OUR PLAYER CONFIG (see
+   *  bufferScore). This is what orders the active set. */
+  score?: number;
+}
+
+/**
+ * Objective shape of a live HLS playlist. Every field is read out of the
+ * manifest text tier 2 already downloads, so collecting these is free.
+ */
+export interface PlaylistMetrics {
+  /** Total duration of all segments in the media playlist (seconds). This is the
+   *  sliding window the player has to work inside — THE dominant buffering
+   *  predictor for us, because our hls.js sits liveSyncDuration=36s behind the
+   *  edge. A 12s window physically cannot support that; the player is pinned to
+   *  the edge with no cushion and stalls on the first upstream hiccup. */
+  windowSec: number;
+  /** #EXT-X-TARGETDURATION (or the max EXTINF) — nominal segment length. */
+  segSec: number;
+  /** Number of segments listed. */
+  segCount: number;
+  /** Peak BANDWIDTH across variants (bps), 0 if unknown. */
+  bandwidth: number;
+  /** Number of variants in the master playlist; 1 = single rendition (no ABR). */
+  variants: number;
+  /** Lowercased CODECS attribute, if the master playlist declared one. */
+  codecs?: string;
 }
 
 /** A candidate link to test: verify one URL, store another (raw vs wrapped). */
@@ -52,8 +81,9 @@ export interface Candidate {
 
 export interface VerifiedChannel {
   name: string;
-  /** Active set shown on the site — up to 5, sticky (working ones not replaced),
-   *  live-verified first. */
+  /** Active set shown on the site — up to ACTIVE_CAP, membership sticky (a live
+   *  working link is not replaced), ordered best-connection-first by bufferScore
+   *  so the player's first pick is the least likely to buffer. */
   sources: VerifiedSource[];
   /** Reserve bench — all other loadable links (unbounded), promoted into the
    *  active set when an active one dies on a later run. */

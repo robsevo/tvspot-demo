@@ -39,10 +39,15 @@ const SOURCE_OVERRIDES: Record<string, string[]> = {
 
 /**
  * Verified stream URLs for a channel from the freshness pipeline output.
- * Curated overrides first, then the active set (≤5, live-verified, what the site
- * relies on), then the waiting bench as lower-priority failover — the player
- * de-dupes, live-checks, and auto-picks a working one, so surfacing more just
- * gives it more to try.
+ * Curated overrides first, then the active set, then the waiting bench as
+ * lower-priority failover — the player de-dupes, live-checks, and auto-picks a
+ * working one, so surfacing more just gives it more to try.
+ *
+ * Order is meaningful: the pipeline ranks the active set best-connection-first
+ * (scripts/link-freshness/verifier.ts bufferScore — playlist window vs our 36s
+ * liveSync, bitrate vs the TV's buffer cap, segment length, tier, latency), so
+ * sources[0] is the link least likely to buffer under our player config. Do not
+ * re-sort here.
  */
 export function getChannelSources(channelName: string): string[] {
   try {

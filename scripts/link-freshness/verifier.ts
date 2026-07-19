@@ -1,4 +1,4 @@
-import type { Candidate, VerifiedSource } from "./types";
+import type { Candidate, PlaylistMetrics, VerifiedSource } from "./types";
 import { withTimeout } from "./util";
 
 // Verification is I/O-bound, but the liveness check hammers relay.example.com with
@@ -90,6 +90,139 @@ interface TierResult {
   tier: number;
   latencyMs: number;
   error?: string;
+  metrics?: PlaylistMetrics;
+}
+
+/**
+ * Read the playlist's shape out of manifest text we already have in hand.
+ * Handles both a media playlist (EXTINF segments) and a master playlist
+ * (EXT-X-STREAM-INF variants) — for a master we can only learn bandwidth/codecs
+ * /variant count, so windowSec stays 0 and bufferScore treats it as unknown
+ * rather than bad.
+ */
+function parseMetrics(text: string): PlaylistMetrics {
+  const lines = text.split(/\r?\n/);
+  let windowSec = 0;
+  let segCount = 0;
+  let maxExtinf = 0;
+  let target = 0;
+  let bandwidth = 0;
+  let variants = 0;
+  let codecs: string | undefined;
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    if (t.startsWith("#EXTINF:")) {
+      const d = parseFloat(t.slice(8).split(",")[0]);
+      if (Number.isFinite(d) && d > 0) {
+        windowSec += d;
+        segCount++;
+        if (d > maxExtinf) maxExtinf = d;
+      }
+    } else if (t.startsWith("#EXT-X-TARGETDURATION:")) {
+      const d = parseFloat(t.slice(22));
+      if (Number.isFinite(d) && d > 0) target = d;
+    } else if (t.startsWith("#EXT-X-STREAM-INF:")) {
+      variants++;
+      const bw = /[:,]BANDWIDTH=(\d+)/i.exec(t);
+      if (bw) bandwidth = Math.max(bandwidth, parseInt(bw[1], 10));
+      const cd = /CODECS="([^"]+)"/i.exec(t);
+      if (cd && !codecs) codecs = cd[1].toLowerCase();
+    }
+  }
+
+  return {
+    windowSec: Math.round(windowSec),
+    segSec: target || Math.round(maxExtinf * 10) / 10,
+    segCount,
+    bandwidth,
+    variants,
+    codecs,
+  };
+}
+
+/**
+ * Predicted resistance to buffering, 0-100, calibrated against OUR player
+ * config (components/VideoPlayer.tsx) rather than generic stream quality.
+ * Higher = safer. The weights follow directly from settings that already work
+ * ~98% of the time, so this ranks streams by how well they fit that envelope:
+ *
+ *  - liveSyncDuration=36s / liveMaxLatencyDuration=50s: we deliberately play 36s
+ *    behind the live edge. A stream whose sliding window is smaller than that
+ *    CANNOT be played that way — hls.js clamps to the edge, has no cushion, and
+ *    stalls on the first upstream blip. Window is therefore the heaviest term.
+ *    The relay's own window is 36x3s=108s, which is the shape we're tuned for.
+ *  - maxBufferHole=1.5 + nudge: sub-second gaps are already survivable, so we
+ *    don't punish moderate segment lengths — but 10s+ segments make failover and
+ *    seeking coarse, and one lost segment is a 10s hole.
+ *  - TV memory diet (maxBufferSize=25MB, maxBufferLength=30): seconds-of-cushion
+ *    per byte matters more than picture quality. A 12Mbps stream fills the TV's
+ *    25MB cap in ~17s, well under the 30s we ask for, so it buffers where a
+ *    4Mbps stream coasts. High bitrate is a real penalty on the Samsung target.
+ *  - hls.js/MSE on the TV's Chromium 63: HEVC and AC-3/E-AC-3 do not decode.
+ *    Those are unplayable, not merely risky.
+ *  - An ABR ladder lets the player shed bitrate under congestion instead of
+ *    stalling, so multi-variant earns a bonus.
+ */
+export function bufferScore(s: {
+  live?: boolean;
+  tier: number;
+  latencyMs: number;
+  origin?: string;
+  metrics?: PlaylistMetrics;
+}): number {
+  let score = 0;
+
+  // 1. Liveness — an edge that actually advances (0-30).
+  if (s.live) score += 30;
+
+  // 2. Window vs our 36s look-back (0-30). The single best predictor.
+  const w = s.metrics?.windowSec ?? 0;
+  if (w === 0) score += 12; // unknown (master playlist) — neutral, don't punish
+  else if (w >= 90) score += 30; // relay-class: full cushion + look-back
+  else if (w >= 60) score += 25;
+  else if (w >= 40) score += 17; // just covers liveSync, little slack
+  else if (w >= 25) score += 8; // will ride the edge
+  else score += 0; // < 25s: cannot support our config at all
+
+  // 3. Proven segment delivery (0-15). Tier 3 = we actually pulled a TS segment
+  //    with a valid sync byte, not just a playlist that parses.
+  score += s.tier >= 3 ? 15 : s.tier >= 2 ? 8 : 0;
+
+  // 4. Bitrate vs the TV's 25MB buffer cap (0-10).
+  const bw = s.metrics?.bandwidth ?? 0;
+  if (bw === 0) score += 6; // unknown — neutral
+  else if (bw <= 4_000_000) score += 10; // ~50s of cushion inside 25MB
+  else if (bw <= 6_000_000) score += 8;
+  else if (bw <= 9_000_000) score += 4;
+  else score += 0; // >9Mbps: TV evicts buffer faster than we fill it
+
+  // 5. Segment granularity (0-5). 2-6s is the sweet spot for our maxBufferHole
+  //    and for fast failover; 10s+ segments make every loss a 10s hole.
+  const seg = s.metrics?.segSec ?? 0;
+  if (seg === 0) score += 3;
+  else if (seg >= 2 && seg <= 6) score += 5;
+  else if (seg <= 9) score += 3;
+  else score += 1;
+
+  // 6. Handshake latency (0-5) — a proxy for path quality to the origin.
+  const lat = s.latencyMs || 0;
+  if (lat > 0 && lat < 300) score += 5;
+  else if (lat < 800) score += 3;
+  else if (lat < 2000) score += 1;
+
+  // 7. ABR ladder (0-5) — room to downshift instead of stalling.
+  if ((s.metrics?.variants ?? 0) > 1) score += 5;
+
+  // Hard penalties: codecs the TV's Chromium 63 cannot decode at all. These
+  // sources may verify perfectly from a Node runner and still play nothing on
+  // the actual Samsung target, so push them below everything playable.
+  const codecs = s.metrics?.codecs || "";
+  if (/hvc1|hev1|av01|vp9/.test(codecs)) score -= 45;
+  if (/ac-3|ec-3|mp4a\.a[56]/.test(codecs)) score -= 25;
+
+  return Math.max(0, Math.min(100, score));
 }
 
 async function fetchHead(url: string, timeoutMs: number): Promise<{ status: number; ct: string | null; latencyMs: number }> {
@@ -194,7 +327,7 @@ async function tier2_parse(url: string): Promise<TierResult> {
       return { tier: 2, latencyMs, error: "no segments found" };
     }
 
-    return { tier: 2, latencyMs };
+    return { tier: 2, latencyMs, metrics: parseMetrics(text) };
   } catch (err) {
     return { tier: 2, latencyMs: 0, error: String(err) };
   }
@@ -473,7 +606,7 @@ async function verifyCandidate(c: Candidate, nowIso: string, doLiveness: boolean
   // Only probed for the first few per channel (the 9s cost is bounded by caller).
   const live = doLiveness ? await checkLiveness(c.verifyUrl) : false;
 
-  return {
+  const out: VerifiedSource = {
     url: c.storeUrl,
     tier: t3.tier,
     latencyMs: t3.latencyMs,
@@ -481,7 +614,10 @@ async function verifyCandidate(c: Candidate, nowIso: string, doLiveness: boolean
     firstSeenUtc: c.firstSeenUtc || nowIso,
     origin: c.origin,
     live,
+    metrics: t2.metrics,
   };
+  out.score = bufferScore(out);
+  return out;
 }
 
 /** Verify a channel's candidate pool, keeping up to MAX_KEEP_PER_CHANNEL working. */
@@ -516,7 +652,12 @@ async function verifyChannelCandidates(
     if (result) {
       if (doLiveness) liveProbes++;
       verified.push(result);
-      console.error("  %s %s [%s] (tier=%d, latency=%dms)", result.live ? "✓live" : "·load", channelSlug, result.origin, result.tier, result.latencyMs);
+      console.error(
+        "  %s %s [%s] score=%d (tier=%d, window=%ds, seg=%ss, bw=%dk, latency=%dms)",
+        result.live ? "✓live" : "·load", channelSlug, result.origin, result.score ?? 0,
+        result.tier, result.metrics?.windowSec ?? 0, result.metrics?.segSec ?? 0,
+        Math.round((result.metrics?.bandwidth ?? 0) / 1000), result.latencyMs,
+      );
     }
   }
 
@@ -563,10 +704,11 @@ export async function verifyCandidateMap(
     for (let j = 0; j < batch.length; j++) {
       const r = batchResults[j];
       if (r) {
-        r.sort((a, b) =>
-          (b.live ? 1 : 0) - (a.live ? 1 : 0) ||
-          (b.tier * 100 - b.latencyMs) - (a.tier * 100 - a.latencyMs),
-        );
+        // Best-connection-first. bufferScore already folds in liveness, window
+        // size, tier, bitrate, segment length and latency weighted for OUR
+        // player config, so it replaces the old (live, tier, latency) ordering
+        // wholesale. Latency stays as the tiebreak between equal scores.
+        r.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.latencyMs - b.latencyMs);
         results.set(batch[j][0], r);
       }
     }
