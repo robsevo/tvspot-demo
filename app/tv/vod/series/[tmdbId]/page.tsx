@@ -7,6 +7,7 @@ import { proxyFetch } from "@/lib/api";
 import { mergeSources } from "@/lib/sources";
 import { resolveVod, prewarmVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
+import { useCatalogItem } from "@/hooks/useCatalogItem";
 import TvVodPlayback from "@/components/tv/TvVodPlayback";
 import { useTvBack } from "@/components/tv/TvNav";
 import type { SeriesDetail, Episode } from "@/lib/types";
@@ -25,6 +26,18 @@ export default function TvSeriesPage() {
 
   const { items, updateProgress, remove } = useContinueWatching();
   const seriesId = Number(tmdbId);
+
+  // Catalog fallback for the header — see useCatalogItem: the backend's
+  // details/series record can carry empty metadata for current titles.
+  const catItem = useCatalogItem("series", tmdbId);
+  const display = {
+    title: detail?.title || catItem?.title || "",
+    poster: detail?.poster || catItem?.poster,
+    overview: detail?.overview || catItem?.overview,
+    year: detail?.year || catItem?.year,
+    rating: detail?.rating || catItem?.rating,
+    service: detail?.service || catItem?.service,
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -91,15 +104,15 @@ export default function TvSeriesPage() {
 
   const handleProgress = useCallback(
     (t: number, d: number) => {
-      if (!playing || !detail || !isFinite(d) || d <= 0) return;
+      if (!playing || !display.title || !isFinite(d) || d <= 0) return;
       const pct = (t / d) * 100;
       if (pct > 95) {
         remove(seriesId, "series", playing.season, playing.episode);
       } else {
         updateProgress({
           tmdbId: seriesId,
-          title: detail.title,
-          poster: detail.poster,
+          title: display.title,
+          poster: display.poster,
           kind: "series",
           season: playing.season,
           episode: playing.episode,
@@ -109,7 +122,8 @@ export default function TvSeriesPage() {
         });
       }
     },
-    [playing, detail, seriesId, updateProgress, remove],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playing, display.title, display.poster, seriesId, updateProgress, remove],
   );
 
   const closePlayback = useCallback(() => setPlaying(null), []);
@@ -120,52 +134,62 @@ export default function TvSeriesPage() {
   const waiting = playing !== null && playingSources.length === 0;
   useTvBack(waiting ? closePlayback : null);
 
-  if (failed) {
+  if (failed && !catItem) {
     return (
       <div className="px-16 py-20">
-        <p className="text-2xl text-text-secondary">This series isn&apos;t available right now.</p>
-        <p className="text-xl text-text-muted mt-2">Press Back to return.</p>
+        <p className="text-2xl text-[#aebbc5]">This series isn&apos;t available right now.</p>
+        <p className="text-xl text-[#8197a4] mt-2">Press Back to return.</p>
       </div>
     );
   }
 
-  if (!detail) {
-    return <p className="px-16 py-20 text-xl text-text-muted">Loading…</p>;
+  if (!detail && !catItem) {
+    return <p className="px-16 py-20 text-xl text-[#8197a4]">Loading…</p>;
   }
 
   return (
     <div className="px-16 pb-16">
       <div className="flex items-start gap-8 mb-8">
-        {detail.poster && (
+        {display.poster && (
           <img
-            src={detail.poster}
-            alt={detail.title}
+            src={display.poster}
+            alt={display.title}
             referrerPolicy="no-referrer"
-            className="w-44 rounded-lg shrink-0"
+            className="w-44 rounded-lg shrink-0 ring-1 ring-white/10"
           />
         )}
         <div className="min-w-0 pt-2">
-          <h1 className="text-4xl font-bold text-white mb-3">{detail.title}</h1>
-          <p className="text-xl text-text-secondary mb-4">
-            {[detail.year, detail.rating, detail.service].filter(Boolean).join(" · ")}
-          </p>
-          {detail.overview && (
-            <p className="text-lg text-text-secondary leading-relaxed line-clamp-3 max-w-3xl">
-              {detail.overview}
+          <h1 className="text-4xl font-bold text-white mb-3">{display.title}</h1>
+          <div className="flex items-center gap-4 mb-4 text-lg text-[#aebbc5]">
+            {display.year && <span>{display.year}</span>}
+            {display.rating && (
+              <span className="border border-[#8197a4]/60 rounded px-2 py-0.5 text-base">
+                {display.rating}
+              </span>
+            )}
+            {display.service && <span>{display.service}</span>}
+          </div>
+          {display.overview && (
+            <p className="text-lg text-[#aebbc5] leading-relaxed line-clamp-3 max-w-3xl">
+              {display.overview}
             </p>
           )}
         </div>
       </div>
 
-      {detail.seasons.length > 1 && (
+      {!detail && (
+        <p className="text-xl text-[#8197a4] mb-6">Loading episodes…</p>
+      )}
+
+      {detail && detail.seasons.length > 1 && (
         <div className="flex items-center gap-4 mb-8 flex-wrap">
           {detail.seasons.map((s, i) => (
             <button
               key={s.season_number}
               data-tv
               onClick={() => setSeasonIdx(i)}
-              className={`px-6 py-3 rounded-xl text-xl font-semibold ${
-                i === seasonIdx ? "bg-brand text-white" : "bg-card text-text-secondary"
+              className={`px-6 py-3 rounded-lg text-xl font-semibold ${
+                i === seasonIdx ? "bg-white text-black" : "bg-[#1a242f] text-[#aebbc5]"
               }`}
             >
               Season {s.season_number}
@@ -189,9 +213,9 @@ export default function TvSeriesPage() {
                 resolveEpisode(season.season_number, ep.episode_number);
                 setPlaying({ season: season.season_number, episode: ep.episode_number });
               }}
-              className="flex items-center gap-6 rounded-xl bg-card ring-1 ring-white/5 px-6 py-4 text-left"
+              className="flex items-center gap-6 rounded-lg bg-[#1a242f] ring-1 ring-white/10 px-6 py-4 text-left"
             >
-              <span className="text-2xl font-bold text-text-muted w-10 shrink-0 text-center">
+              <span className="text-2xl font-bold text-[#5a6b78] w-10 shrink-0 text-center">
                 {ep.episode_number}
               </span>
               {ep.still_url && (
@@ -206,18 +230,18 @@ export default function TvSeriesPage() {
               <div className="min-w-0 flex-1">
                 <p className="text-xl font-semibold text-white truncate">{ep.title}</p>
                 {ep.overview && (
-                  <p className="text-base text-text-muted line-clamp-2 mt-1">{ep.overview}</p>
+                  <p className="text-base text-[#8197a4] line-clamp-2 mt-1">{ep.overview}</p>
                 )}
                 {cw && cw.progress > 2 && cw.progress < 95 && (
-                  <div className="mt-2 h-1.5 w-56 rounded-full bg-white/10 overflow-hidden">
+                  <div className="mt-2 h-1.5 w-56 rounded-full bg-white/15 overflow-hidden">
                     <div
-                      className="h-full bg-brand"
+                      className="h-full bg-[#1399ff]"
                       style={{ width: `${Math.round(cw.progress)}%` }}
                     />
                   </div>
                 )}
               </div>
-              <Play className="w-6 h-6 text-text-secondary shrink-0" />
+              <Play className="w-6 h-6 text-[#8197a4] shrink-0" />
             </button>
           );
         })}
@@ -233,8 +257,8 @@ export default function TvSeriesPage() {
       {playing && playingSources.length > 0 && playingEpisode && (
         <TvVodPlayback
           sources={playingSources}
-          title={`${detail.title} — S${playing.season} E${playing.episode}`}
-          poster={playingEpisode.still_url || detail.poster}
+          title={`${display.title} — S${playing.season} E${playing.episode}`}
+          poster={playingEpisode.still_url || display.poster}
           initialTime={resumeTime}
           onClose={closePlayback}
           onProgress={handleProgress}

@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useTrendingCatalog } from "@/hooks/useTrendingCatalog";
 import { trendingNow } from "@/lib/discovery";
 import TvRail from "@/components/tv/TvRail";
-import TvPosterCard from "@/components/tv/TvPosterCard";
+import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
 import type { CatalogItem } from "@/lib/types";
 
 const PER_RAIL = 18;
@@ -47,16 +47,17 @@ export default function TvVodPage() {
       <h1 className="px-16 text-3xl font-bold text-white mb-2">Movies &amp; Shows</h1>
 
       {loading && all.length === 0 && (
-        <p className="px-16 py-10 text-xl text-text-muted">Loading catalog…</p>
+        <p className="px-16 py-10 text-xl text-[#8197a4]">Loading catalog…</p>
       )}
 
       {rails.map((rail) => (
         <TvRail key={rail.service} title={rail.service}>
           {rail.items.map((item) => (
-            <TvPosterCard
+            <TvLandscapeCard
               key={`${item.kind}-${item.tmdb_id}`}
               tmdbId={item.tmdb_id}
               title={item.title}
+              backdrop={item.backdrop}
               poster={item.poster}
               kind={item.kind}
             />

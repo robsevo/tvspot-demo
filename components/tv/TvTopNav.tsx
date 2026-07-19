@@ -9,8 +9,8 @@ const TABS = [
   { href: "/tv/vod", label: "Movies & Shows" },
 ] as const;
 
-/** Top tab bar for the TV shell. Plain focusable links — pressing Up from any
- *  page content reaches it, Enter activates (native link behavior). */
+/** Prime-style top bar: quiet gray tabs, the active one carries a white pill.
+ *  Plain focusable links — Up from page content reaches them, Enter activates. */
 export default function TvTopNav() {
   const pathname = usePathname();
 
@@ -18,18 +18,21 @@ export default function TvTopNav() {
     href === "/tv" ? pathname === "/tv" : pathname.startsWith(href);
 
   return (
-    <nav className="flex items-center gap-10 px-16 py-6">
-      <img src="/tvspot-logo.svg" alt="TVSpot" className="w-12 h-12" />
-      <div className="flex items-center gap-4">
+    <nav className="flex items-center gap-12 px-16 py-5">
+      <div className="flex items-center gap-3">
+        <img src="/tvspot-logo.svg" alt="" className="w-10 h-10" />
+        <span className="text-xl font-bold text-white tracking-tight">TVSpot</span>
+      </div>
+      <div className="flex items-center gap-3">
         {TABS.map((tab) => (
           <Link
             key={tab.href}
             href={tab.href}
             data-tv
-            className={`px-6 py-3 rounded-xl text-xl font-semibold transition-colors ${
+            className={`px-6 py-2.5 rounded-full text-lg font-semibold transition-colors ${
               isActive(tab.href)
-                ? "bg-white/10 text-white"
-                : "text-text-secondary hover:text-white"
+                ? "bg-white text-black"
+                : "text-[#8197a4] hover:text-white"
             }`}
           >
             {tab.label}

@@ -38,14 +38,14 @@ export default function TvLayout({ children }: { children: React.ReactNode }) {
 
   if (!isLogin && (loading || !username)) {
     return (
-      <div className="tv-root min-h-screen bg-surface flex items-center justify-center">
+      <div className="tv-root min-h-screen flex items-center justify-center">
         <img src="/tvspot-logo.svg" alt="TVSpot" className="w-24 h-24 animate-pulse" />
       </div>
     );
   }
 
   return (
-    <div className="tv-root min-h-screen bg-surface text-white overflow-x-hidden">
+    <div className="tv-root min-h-screen text-white overflow-x-hidden">
       <TvNavProvider>
         {showNav && <TvTopNav />}
         <main>{children}</main>

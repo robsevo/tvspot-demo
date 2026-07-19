@@ -12,6 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated deploy output (vercel build) — thousands of bundled-code hits.
+    ".vercel/**",
+    // Intentionally ES5, run on the 2019 TV webview — modern-JS rules don't apply.
+    "tizen/**",
+    "public/tv-polyfills.js",
+    "public/sw.js",
   ]),
 ]);
 

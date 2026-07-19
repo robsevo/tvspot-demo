@@ -411,19 +411,29 @@ video::cue {
 /* ── TV (10-foot / D-pad) mode — everything under /tv ─────────────────────
    Focus IS the cursor on a TV: the ring must be unmissable from the couch,
    and the mouse cursor/scrollbars have no business on screen. Uses :focus
-   (not :focus-visible) because focus moves programmatically from TvNav. */
+   (not :focus-visible) because focus moves programmatically from TvNav.
+   Look: Prime-Video-inspired — deep navy surface, white focus ring with a
+   subtle grow, sky-blue progress/badge accents. */
 .tv-root {
   cursor: none;
   scrollbar-width: none;
+  --tv-bg: #0f171e;
+  --tv-card: #1a242f;
+  --tv-accent: #1399ff;
+  background-color: var(--tv-bg);
 }
 .tv-root ::-webkit-scrollbar {
   display: none;
 }
+.tv-root [data-tv] {
+  transition: transform 0.15s ease;
+}
 .tv-root [data-tv]:focus {
-  outline: 3px solid var(--color-accent);
-  outline-offset: 3px;
+  outline: 3px solid #ffffff;
+  outline-offset: 2px;
   border-radius: 0.5rem;
   z-index: 1;
+  transform: scale(1.04);
 }
 
 /* ── Legacy-engine fallbacks (Samsung RU7100: Tizen 5.0 ≈ Chromium 63) ─────
@@ -477,6 +487,7 @@ video::cue {
   .tv-root .flex.gap-6 > * + * { margin-left: 1.5rem; }
   .tv-root .flex.gap-8 > * + * { margin-left: 2rem; }
   .tv-root .flex.gap-10 > * + * { margin-left: 2.5rem; }
+  .tv-root .flex.gap-12 > * + * { margin-left: 3rem; }
   .tv-root .flex.flex-col.gap-2 > * + * { margin-left: 0; margin-top: 0.5rem; }
   .tv-root .flex.flex-col.gap-3 > * + * { margin-left: 0; margin-top: 0.75rem; }
   .tv-root .flex.flex-col.gap-4 > * + * { margin-left: 0; margin-top: 1rem; }

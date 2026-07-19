@@ -3,11 +3,13 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useChannels } from "@/hooks/useChannels";
+import { useEpg } from "@/hooks/useEpg";
 import { getChannelSources, channelSlug } from "@/lib/sources";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
 import VideoPlayer from "@/components/VideoPlayer";
 import { LogoImage } from "@/components/LogoImage";
 import { useTvBack } from "@/components/tv/TvNav";
+import { nowAndNext, fmtTime } from "@/lib/tvEpg";
 import { TVKEY } from "@/lib/tv";
 import { Check, X, Loader2, RefreshCw } from "lucide-react";
 
@@ -42,6 +44,13 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   const router = useRouter();
 
   const channel = channels.find((c) => channelSlug(c.name) === channelName);
+
+  // EPG for the banner/overlay — one channel; sports game-guide fills gaps.
+  const epgNames = useMemo(() => (channel ? [channel.name] : []), [channel?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { epg } = useEpg(epgNames);
+  const guide = nowAndNext(
+    channel && epg[channel.name]?.length ? epg[channel.name] : channel?.programs,
+  );
 
   // ── source pipeline (ported from ChannelPlayer) ─────────────────────────
   const probedUrls = useMemo(() => {
@@ -288,13 +297,16 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   return (
     <div className="fixed inset-0 bg-black">
       {/* VideoPlayer renders a w-full aspect-video box — on a 16:9 panel that
-          IS the screen; just strip its mobile rounding. */}
+          IS the screen; strip its mobile rounding and its touch chrome (the
+          TV draws its own OSD; the webview synthesizes mouse events from
+          D-pad input, which used to pop the phone controls over the video). */}
       <div className="w-full h-full flex items-center justify-center [&>div]:rounded-none">
         <VideoPlayer
           src={src}
           channelName={channel.name}
           title={channel.name}
           isLive
+          hideControls
           videoElRef={videoElRef}
           onPlay={() => setConfirmedUrl(src)}
           onStall={handleSourceFailure}
@@ -302,10 +314,10 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
         />
       </div>
 
-      {/* Channel/source banner (top-left, transient) */}
+      {/* Zap banner (bottom-left, transient): channel + what's on now. */}
       {bannerText && !overlayOpen && (
-        <div className="absolute top-10 left-12 flex items-center gap-4 bg-black/70 rounded-2xl px-6 py-4 animate-fade-in">
-          <div className="w-16 h-10">
+        <div className="absolute bottom-12 left-12 flex items-center gap-5 bg-[#0f171e]/90 rounded-xl px-7 py-5 ring-1 ring-white/10 animate-fade-in max-w-2xl">
+          <div className="w-20 h-12 shrink-0">
             <LogoImage
               name={channel.name}
               logoUrl={channel.logo_url || channel.logo}
@@ -313,19 +325,39 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
               fallbackClassName="text-lg font-bold text-white/80"
             />
           </div>
-          <p className="text-2xl font-semibold text-white">{bannerText}</p>
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <p className="text-2xl font-bold text-white truncate">{bannerText}</p>
+              {channel.online && (
+                <span className="text-[11px] font-bold tracking-wider text-white bg-[#cc0000] rounded px-1.5 py-0.5 shrink-0">
+                  LIVE
+                </span>
+              )}
+            </div>
+            {guide.now && (
+              <>
+                <p className="text-lg text-[#aebbc5] truncate mt-0.5">{guide.now.title}</p>
+                <div className="mt-2 h-1 rounded-full bg-white/15 overflow-hidden">
+                  <div
+                    className="h-full bg-[#1399ff]"
+                    style={{ width: `${Math.round(guide.progress)}%` }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Info overlay: sources + status + recheck. data-tv-trap hands the
+      {/* Info overlay: now/next + sources + recheck. data-tv-trap hands the
           arrows to spatial focus among the chips while it's open. */}
       {overlayOpen && (
         <div
           data-tv-trap
-          className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/85 to-transparent px-12 pt-24 pb-10 animate-fade-in"
+          className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0f171e] via-[#0f171e]/90 to-transparent px-14 pt-28 pb-10 animate-fade-in"
         >
-          <div className="flex items-center gap-5 mb-6">
-            <div className="w-20 h-12">
+          <div className="flex items-center gap-6 mb-5">
+            <div className="w-24 h-14 shrink-0">
               <LogoImage
                 name={channel.name}
                 logoUrl={channel.logo_url || channel.logo}
@@ -333,18 +365,36 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
                 fallbackClassName="text-xl font-bold text-white/80"
               />
             </div>
-            <div>
-              <p className="text-3xl font-bold text-white">{channel.name}</p>
-              <p className="text-lg text-text-secondary">
-                {loading
-                  ? "Checking sources…"
-                  : shownWorking > 0
-                    ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}`
-                    : busyCount > 0
-                      ? `${busyCount} busy — will connect when free`
-                      : `0 of ${allUrls.length} sources online`}
-              </p>
+            <div className="min-w-0 flex-1">
+              <p className="text-3xl font-bold text-white truncate">{channel.name}</p>
+              {guide.now ? (
+                <p className="text-lg text-[#aebbc5] truncate">
+                  Now · {guide.now.title}
+                  {guide.next && (
+                    <span className="text-[#8197a4]">
+                      {"   ·   "}Next {fmtTime(guide.next.start_utc)} · {guide.next.title}
+                    </span>
+                  )}
+                </p>
+              ) : (
+                <p className="text-lg text-[#8197a4]">
+                  {loading
+                    ? "Checking sources…"
+                    : shownWorking > 0
+                      ? `${shownWorking} of ${allUrls.length} sources online`
+                      : "Searching for a working source…"}
+                </p>
+              )}
             </div>
+            <p className="text-base text-[#8197a4] shrink-0">
+              {loading
+                ? "Checking sources…"
+                : shownWorking > 0
+                  ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}`
+                  : busyCount > 0
+                    ? `${busyCount} busy — will connect when free`
+                    : `0 of ${allUrls.length} online`}
+            </p>
           </div>
 
           <div className="flex items-center gap-4 flex-wrap">
@@ -360,12 +410,12 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
                     setPickedUrl(url);
                     setOverlayOpen(false);
                   }}
-                  className={`flex items-center gap-2.5 px-6 py-3.5 rounded-xl text-xl font-medium ${
+                  className={`flex items-center gap-2.5 px-6 py-3.5 rounded-lg text-xl font-medium ${
                     isCurrent
-                      ? "bg-brand text-white"
+                      ? "bg-white text-black"
                       : status === "dead"
-                        ? "bg-card text-text-muted"
-                        : "bg-card text-text-secondary"
+                        ? "bg-[#1a242f] text-[#5a6b78]"
+                        : "bg-[#1a242f] text-[#aebbc5]"
                   }`}
                 >
                   <StatusDot status={status} />
@@ -377,14 +427,14 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
               data-tv
               onClick={recheckAll}
               disabled={loading}
-              className="flex items-center gap-2.5 px-6 py-3.5 rounded-xl text-xl font-medium bg-card text-text-secondary disabled:opacity-50"
+              className="flex items-center gap-2.5 px-6 py-3.5 rounded-lg text-xl font-medium bg-[#1a242f] text-[#aebbc5] disabled:opacity-50"
             >
               <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
               Recheck
             </button>
           </div>
 
-          <p className="mt-6 text-base text-text-muted">
+          <p className="mt-6 text-base text-[#5a6b78]">
             Up/Down: channel · Left/Right: source · Back: close
           </p>
         </div>
