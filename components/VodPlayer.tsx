@@ -30,6 +30,8 @@ interface Props {
   onSourceFail?: (lastTime: number) => void;
   /** Fired when playback actually starts (first frame ready). */
   onPlay?: () => void;
+  /** Fired when the media reaches its natural end (drives episode auto-advance). */
+  onEnded?: () => void;
   /** External WebVTT caption tracks (see useSubtitles). They're keyed to the
    *  TITLE, not the source URL, so they survive a source failover unchanged. */
   subtitles?: SubtitleTrack[];
@@ -75,6 +77,7 @@ export default function VodPlayer({
   onProgress,
   onSourceFail,
   onPlay: onPlayProp,
+  onEnded,
   subtitles,
   videoElRef,
   hideControls,
@@ -174,6 +177,7 @@ export default function VodPlayer({
         clear();
         onPlayProp?.();
       }}
+      onEnded={onEnded}
       onError={fail}
       onStall={fail}
     />
