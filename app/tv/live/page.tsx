@@ -16,14 +16,17 @@ export default function TvLivePage() {
   const { epg } = useEpg(names);
 
   return (
-    <div className="px-16 pb-16">
+    // One centered column: the guide is a 72rem list, and pinning it to the
+    // left of a 1920px screen left a third of the panel empty ("everything is
+    // to the left"). Title rides the same column so they align.
+    <div className="px-16 pb-16 max-w-6xl mx-auto">
       <h1 className="text-3xl font-bold text-white mb-6">Live TV</h1>
 
       {loading && channels.length === 0 && (
         <p className="text-xl text-[#8197a4]">Loading channels…</p>
       )}
 
-      <div className="flex flex-col gap-3 max-w-6xl">
+      <div className="flex flex-col gap-3">
         {channels.map((c) => {
           // Backend sports game-guide entries fill in when the EPG has nothing.
           const guide = nowAndNext(epg[c.name]?.length ? epg[c.name] : c.programs);

@@ -496,5 +496,8 @@ video::cue {
      lines keep vertical spacing too */
   .tv-root .flex.flex-wrap.gap-4 > * { margin: 0.5rem 1rem 0.5rem 0; }
   .tv-root .flex.flex-wrap.gap-4 > * + * { margin-left: 0; }
+  /* GRID gap: the unified `gap` name reached grid in 66 — 63 only parses the
+     old grid-gap. (The VOD provider picker + browse grids.) */
+  .tv-root .grid.gap-6 { grid-gap: 1.5rem; }
 }
 

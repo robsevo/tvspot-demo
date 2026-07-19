@@ -19,6 +19,12 @@ const config = {
         "oklab-function": true,
         "color-mix": true,
         "gradients-interpolation-method": true,
+        // Tailwind v4 emits margin-inline/padding-inline/inset-inline for
+        // mx-*/px-*/inset-x-* — Chromium 87+ only. On the TV that meant NO
+        // horizontal centering (mx-auto dead → everything hugged the left) and
+        // NO horizontal button padding. Lower to physical left/right (app is
+        // LTR-only).
+        "logical-properties-and-values": true,
       },
       autoprefixer: false,
       stage: false,
