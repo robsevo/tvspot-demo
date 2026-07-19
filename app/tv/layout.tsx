@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { prewarmCatalog } from "@/hooks/useCatalog";
 import { TvNavProvider } from "@/components/tv/TvNav";
 import TvTopNav from "@/components/tv/TvTopNav";
 import { registerTvKeys } from "@/lib/tv";
@@ -23,6 +24,13 @@ export default function TvLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     registerTvKeys();
   }, []);
+
+  // Warm the VOD provider index the moment the shell is signed in — the
+  // backend builds it in ~60-70s cold, and the picker must never eat that on
+  // a foreground paint.
+  useEffect(() => {
+    if (!loading && username) prewarmCatalog();
+  }, [loading, username]);
 
   useEffect(() => {
     if (!isLogin && !loading && !username) {

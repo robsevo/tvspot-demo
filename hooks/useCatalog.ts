@@ -15,6 +15,30 @@ const SERVICE_CACHE_PREFIX = "tvspot_service_v2_";
 /** Virtual services that aren't real backend providers */
 const VIRTUAL_SERVICES = ["Classics", "Theater"] as const;
 
+/** Fold the backend response into the picker's shape: real services plus the
+ *  virtual ones, with their summary rows. Shared by the hook and the TV
+ *  prewarm so both write an identical cache entry. */
+function assembleCatalog(data: CatalogResponse): {
+  realServices: string[];
+  allServices: string[];
+  allSummary: Record<string, CatalogSummaryEntry>;
+} {
+  // Guard against a malformed/empty backend response so a bad payload can't
+  // throw and blank the whole picker.
+  const realServices = Array.isArray(data.services) ? data.services : [];
+  const allServices = [...realServices, ...VIRTUAL_SERVICES];
+  const allSummary = {
+    ...(data.summary || {}),
+    "Classics": { movies_count: 30, series_count: 30, preview: "Classic movies and series before 2010" },
+    "Theater": { movies_count: 30, series_count: 0, preview: "Now playing and upcoming in theaters" },
+    // "Other" returns nothing from the backend (count 0) but useServiceCatalog
+    // populates it from the trending corpus (~40 movies + 40 series). Override
+    // the summary so the card's count matches what actually opens.
+    ...(realServices.includes("Other") ? { "Other": { movies_count: 40, series_count: 40, preview: "Popular right now" } } : {}),
+  };
+  return { realServices, allServices, allSummary };
+}
+
 export function useCatalog() {
   const [services, setServices] = useState<string[]>([]);
   const [summary, setSummary] = useState<Record<string, CatalogSummaryEntry>>({});
@@ -27,19 +51,7 @@ export function useCatalog() {
       setError(null);
 
       const data = await proxyFetch<CatalogResponse>("/api/lounge/vod/catalog");
-      // Inject virtual services (guard against a malformed/empty backend response
-      // so a bad payload can't throw and blank the whole picker).
-      const realServices = Array.isArray(data.services) ? data.services : [];
-      const allServices = [...realServices, ...VIRTUAL_SERVICES];
-      const allSummary = {
-        ...(data.summary || {}),
-        "Classics": { movies_count: 30, series_count: 30, preview: "Classic movies and series before 2010" },
-        "Theater": { movies_count: 30, series_count: 0, preview: "Now playing and upcoming in theaters" },
-        // "Other" returns nothing from the backend (count 0) but useServiceCatalog
-        // populates it from the trending corpus (~40 movies + 40 series). Override
-        // the summary so the card's count matches what actually opens.
-        ...(realServices.includes("Other") ? { "Other": { movies_count: 40, series_count: 40, preview: "Popular right now" } } : {}),
-      };
+      const { realServices, allServices, allSummary } = assembleCatalog(data);
       // A transient empty backend response must not blank the provider list the
       // user is looking at during a background revalidation.
       if (!background || realServices.length > 0) {
@@ -183,6 +195,51 @@ export function useServiceCatalog(service: string | null) {
   }, [service, fetchService]);
 
   return { movies, series, loading, error, label, refetch: () => fetchService(false) };
+}
+
+/* ---------------- TV prewarm helpers ----------------
+ * The provider index takes the backend ~60-70s to build COLD (measured
+ * 2026-07-19), and a per-service catalog 7-14s. The TV must never eat that on
+ * a foreground paint, so the 10-foot shell warms the caches ahead of the
+ * user: the index at app launch, a provider when its tile takes focus. Both
+ * write the exact cache entries the hooks read, then the hooks' own
+ * stale-while-revalidate keeps them fresh. Fire-and-forget by design —
+ * failures just mean the picker pays the fetch itself like before. */
+
+const inflightPrewarm = new Set<string>();
+
+/** Prime the provider index into localCache (no-op if cached or in flight). */
+export function prewarmCatalog(): void {
+  if (inflightPrewarm.has("catalog") || readCache(CATALOG_CACHE_KEY)) return;
+  inflightPrewarm.add("catalog");
+  proxyFetch<CatalogResponse>("/api/lounge/vod/catalog")
+    .then((data) => {
+      const { realServices, allServices, allSummary } = assembleCatalog(data);
+      if (realServices.length > 0) {
+        writeCache(CATALOG_CACHE_KEY, { services: allServices, summary: allSummary });
+      }
+    })
+    .catch(() => {})
+    .finally(() => inflightPrewarm.delete("catalog"));
+}
+
+/** Prime one provider's catalog (no-op for virtual services — those endpoints
+ *  are cheap and the hook handles their branching). */
+export function prewarmService(service: string): void {
+  if ((VIRTUAL_SERVICES as readonly string[]).includes(service) || service === "Other") return;
+  const key = SERVICE_CACHE_PREFIX + service;
+  if (inflightPrewarm.has(key) || readCache(key)) return;
+  inflightPrewarm.add(key);
+  proxyFetch<ServiceCatalogResponse>(`/api/lounge/catalog?service=${encodeURIComponent(service)}`)
+    .then((data) => {
+      const movies = curate(data.movies || []);
+      const series = curate(data.series || []);
+      if (movies.length + series.length > 0) {
+        writeCache(key, { movies, series, label: service });
+      }
+    })
+    .catch(() => {})
+    .finally(() => inflightPrewarm.delete(key));
 }
 
 function normalizeItem(item: any): CatalogItem {

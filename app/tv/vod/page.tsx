@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect, useRef } from "react";
 import { Film, Tv, Search } from "lucide-react";
-import { useCatalog, useServiceCatalog } from "@/hooks/useCatalog";
+import { useCatalog, useServiceCatalog, prewarmService } from "@/hooks/useCatalog";
 import { useTvBack } from "@/components/tv/TvNav";
 import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
 import type { CatalogItem } from "@/lib/types";
@@ -27,7 +27,7 @@ function rememberView(v: { service: string; tab: Tab } | null) {
 /** Service-first VOD browse — the mobile /vod flow at 10-foot scale: pick a
  *  provider, then browse its movies / series or search within it. */
 export default function TvVodPage() {
-  const { services, summary, loading: servicesLoading } = useCatalog();
+  const { services, summary, loading: servicesLoading, error: servicesError, refetch } = useCatalog();
   const [service, setService] = useState<string | null>(remembered?.service ?? null);
   const [tab, setTab] = useState<Tab>(remembered?.tab ?? "movies");
   const [query, setQuery] = useState("");
@@ -80,7 +80,25 @@ export default function TvVodPage() {
       <div className="px-16 pb-16">
         <h1 className="text-3xl font-bold text-white mb-8">Movies &amp; Shows</h1>
         {servicesLoading && services.length === 0 ? (
-          <p className="py-10 text-xl text-[#8197a4]">Loading providers…</p>
+          <p className="py-10 text-xl text-[#8197a4]">
+            Loading providers… the first load after a quiet day can take a minute.
+          </p>
+        ) : services.length === 0 ? (
+          // Never a silent blank on a TV: the fetch failed (or returned
+          // nothing) and there's no cursor to "just reload" with.
+          <div className="py-10">
+            <p className="text-xl text-[#aebbc5] mb-6">
+              {servicesError ? "Couldn't load the providers." : "No providers available."}
+            </p>
+            <button
+              data-tv
+              data-tv-autofocus
+              onClick={() => refetch()}
+              className="px-8 py-3 rounded-full bg-white text-black text-lg font-semibold focus:outline-none"
+            >
+              Try again
+            </button>
+          </div>
         ) : (
           <div className="grid grid-cols-3 gap-6">
             {services.map((svc, i) => {
@@ -97,6 +115,7 @@ export default function TvVodPage() {
                   data-tv
                   {...(i === 0 ? { "data-tv-autofocus": true } : {})}
                   onClick={() => openService(svc)}
+                  onFocus={() => prewarmService(svc)}
                   className="text-left rounded-xl bg-[#1a242f] ring-1 ring-white/10 px-8 py-7 focus:outline-none"
                 >
                   <p className="text-2xl font-bold text-white">{svc}</p>
