@@ -225,6 +225,19 @@ interface Props {
    *  which made this overlay pop up over live TV uninvited. Buffering ring,
    *  captions, and notices still render. */
   hideControls?: boolean;
+  /** TV mode's control surface for captions: with the touch CC menu hidden,
+   *  the remote-driven OSD toggles captions through this handle instead. Same
+   *  selection + persistence path as the touch menu (selectCc), so the choice
+   *  survives title changes on the TV exactly like it does on the phone. */
+  ccRef?: React.MutableRefObject<TvCcHandle | null>;
+}
+
+/** Imperative caption control for the TV OSD (see Props.ccRef). */
+export interface TvCcHandle {
+  /** Cycle captions off→on (remembered language, else first track) or on→off.
+   *  Returns the resulting state so the OSD can announce it. */
+  toggle(): { on: boolean; available: boolean };
+  state(): { on: boolean; available: boolean };
 }
 
 export default function VideoPlayer({
@@ -249,6 +262,7 @@ export default function VideoPlayer({
   subtitles,
   videoElRef,
   hideControls = false,
+  ccRef,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -566,6 +580,19 @@ export default function VideoPlayer({
         fragLoadPolicy: resilient(dc.fragLoadPolicy),
         playlistLoadPolicy: resilient(dc.playlistLoadPolicy),
         manifestLoadPolicy: resilient(dc.manifestLoadPolicy),
+        // TV memory diet (hideControls = the 10-foot shell). The 2019 RU7100's
+        // webview hard-wedged its renderer mid-movie under the buffer sizing
+        // above (60-90s forward + the 60MB default byte cap is more media than
+        // that 1GB device survives). Half the runway and a hard byte cap: still
+        // rides ~30s upstream blips, but stays inside the TV's memory envelope.
+        // Mobile/desktop keep the full cushion.
+        ...(hideControls
+          ? {
+              maxBufferLength: 30,
+              maxMaxBufferLength: 45,
+              maxBufferSize: 25 * 1000 * 1000,
+            }
+          : {}),
       });
       hlsRef.current = hls;
 
@@ -669,7 +696,7 @@ export default function VideoPlayer({
         hlsRef.current = null;
       }
     };
-  }, [src, autoPlay, isLive]);
+  }, [src, autoPlay, isLive, hideControls]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -1147,6 +1174,35 @@ export default function VideoPlayer({
       opts[0];
     selectCc(match);
   }, [ccOptions, selectCc]);
+
+  // TV caption handle (see Props.ccRef): kept fresh with the current options/
+  // selection so the remote OSD's toggle always acts on live state.
+  useEffect(() => {
+    if (!ccRef) return;
+    const snapshot = () => ({ on: ccSel !== null, available: ccOptions.length > 0 });
+    ccRef.current = {
+      state: snapshot,
+      toggle: () => {
+        if (ccSel !== null) {
+          selectCc(null);
+          return { on: false, available: ccOptions.length > 0 };
+        }
+        const lang = readCcPref().lang;
+        const byLang = (o: CcOption) =>
+          o.lang && o.lang.toLowerCase().startsWith(lang.toLowerCase());
+        const match =
+          ccOptions.find((o) => o.kind === "native" && byLang(o)) ??
+          ccOptions.find(byLang) ??
+          ccOptions[0] ??
+          null;
+        if (match) selectCc(match);
+        return { on: match !== null, available: ccOptions.length > 0 };
+      },
+    };
+    return () => {
+      ccRef.current = null;
+    };
+  }, [ccRef, ccSel, ccOptions, selectCc]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
