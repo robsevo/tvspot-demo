@@ -219,6 +219,12 @@ interface Props {
    *  from OUTSIDE the touch overlay — the /tv pages, where remote keys (not
    *  taps) do pause/seek and this ref is the only control surface needed. */
   videoElRef?: React.MutableRefObject<HTMLVideoElement | null>;
+  /** TV mode: suppress the touch control chrome entirely (bottom bar, volume,
+   *  center play button, channel pill). The TV pages draw their own remote-
+   *  driven OSD; the webview also synthesizes mouse events from D-pad input,
+   *  which made this overlay pop up over live TV uninvited. Buffering ring,
+   *  captions, and notices still render. */
+  hideControls?: boolean;
 }
 
 export default function VideoPlayer({
@@ -242,6 +248,7 @@ export default function VideoPlayer({
   stallMs = 10000,
   subtitles,
   videoElRef,
+  hideControls = false,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1305,15 +1312,15 @@ export default function VideoPlayer({
     <div
       ref={containerRef}
       className="relative w-full aspect-video bg-black rounded-lg overflow-hidden group"
-      onMouseMove={showControls}
-      onTouchStart={showControls}
+      onMouseMove={hideControls ? undefined : showControls}
+      onTouchStart={hideControls ? undefined : showControls}
     >
       <video
         ref={videoRef}
         className="w-full h-full object-contain cursor-pointer"
         playsInline
         poster={poster}
-        onClick={togglePlay}
+        onClick={hideControls ? undefined : togglePlay}
         x-webkit-airplay="allow"
       >
         {/* Only the CHOSEN subtitle file is mounted — see the ccSel state note:
@@ -1428,7 +1435,7 @@ export default function VideoPlayer({
       )}
 
       {/* Channel name overlay */}
-      {channelName && controlsVisible && (
+      {channelName && controlsVisible && !hideControls && (
         <div className="absolute top-4 left-4 bg-black/70 text-white text-sm font-medium px-3 py-1.5 rounded-full animate-fade-in">
           {channelName}
         </div>
@@ -1439,7 +1446,7 @@ export default function VideoPlayer({
           otherwise reached the center and swallowed the tap. After a tap, the
           icon becomes a spinner until playback actually starts (or errors) —
           a slow source must never look like a dead button. */}
-      {!playing && !casting && (
+      {!playing && !casting && !hideControls && (
         <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
           <button
             onClick={togglePlay}
@@ -1456,6 +1463,7 @@ export default function VideoPlayer({
       )}
 
       {/* Bottom controls overlay */}
+      {!hideControls && (
       <div
         className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-4 pt-12 transition-opacity duration-300 ${
           controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
@@ -1673,6 +1681,7 @@ export default function VideoPlayer({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -36,6 +36,8 @@ interface Props {
   /** Passed through to VideoPlayer — the /tv pages drive pause/seek via the
    *  raw <video> element instead of the touch overlay. */
   videoElRef?: React.MutableRefObject<HTMLVideoElement | null>;
+  /** Passed through to VideoPlayer — TV mode, no touch chrome. */
+  hideControls?: boolean;
 }
 
 // Remux sources get a longer runway: a cold relay ffmpeg spawn takes ~20-24s
@@ -73,6 +75,7 @@ export default function VodPlayer({
   onPlay: onPlayProp,
   subtitles,
   videoElRef,
+  hideControls,
 }: Props) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Separate from `timer`: arm()/clear() manage the never-started watchdog and
@@ -146,6 +149,7 @@ export default function VodPlayer({
       stallMs={STALL_MS}
       subtitles={subtitles}
       videoElRef={videoElRef}
+      hideControls={hideControls}
       onProgress={
         onProgress &&
         ((t, d) => {

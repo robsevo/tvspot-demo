@@ -1,9 +1,21 @@
 import { cookies } from "next/headers";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { verifyToken } from "@/lib/auth";
 import Providers from "@/components/Providers";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import DeployRefresh from "@/components/DeployRefresh";
 import "./globals.css";
+
+// Read once per server process. INLINED (not <script src>) on purpose: React 19
+// hoists src-scripts into <head> as ASYNC resources, so the polyfill raced
+// Next's chunks and lost on chunk-heavy full loads — on the 2019 TV that meant
+// "globalThis is not defined" at chunk line 1 and dead VOD pages/EPG. Inline
+// scripts are never deferred, so this is guaranteed to run first.
+const tvPolyfills = readFileSync(
+  join(process.cwd(), "public", "tv-polyfills.js"),
+  "utf8",
+);
 
 export default async function RootLayout({
   children,
@@ -24,9 +36,9 @@ export default async function RootLayout({
         <meta name="theme-color" content="#0a0a0a" />
         {/* MUST precede the app bundles: shims runtime APIs the 2019 Samsung
             TV webview (Chromium 63) lacks. Feature-detected — a no-op on
-            phones. Plain <script src> (not next/script) so it loads and runs
-            synchronously before any chunk. */}
-        <script src="/tv-polyfills.js" />
+            phones. Inlined because React hoists src-scripts as async and they
+            can lose the race against Next's chunks (see tvPolyfills above). */}
+        <script dangerouslySetInnerHTML={{ __html: tvPolyfills }} />
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
         <link rel="shortcut icon" href="/favicon-48.png" type="image/png" />
