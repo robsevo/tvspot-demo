@@ -2,14 +2,24 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid } from "lucide-react";
+import { LayoutGrid, Search, Bookmark, Settings } from "lucide-react";
 import { useCatalog, prewarmService } from "@/hooks/useCatalog";
 
 const TABS = [
   { href: "/tv", label: "Home" },
+  { href: "/tv/live", label: "Live TV" },
   { href: "/tv/movies", label: "Movies" },
   { href: "/tv/shows", label: "TV Shows" },
-  { href: "/tv/live", label: "Live TV" },
+] as const;
+
+/** Right-aligned utility destinations. These used to live ONLY in the side
+ *  menu; that overlay is gone (it hijacked every Left press from the leftmost
+ *  content), so they ride in the header — otherwise /tv/search, /tv/my-stuff
+ *  and /tv/settings would have no D-pad route at all. */
+const UTILITY = [
+  { href: "/tv/search", label: "Search", Icon: Search },
+  { href: "/tv/my-stuff", label: "My Stuff", Icon: Bookmark },
+  { href: "/tv/settings", label: "Settings", Icon: Settings },
 ] as const;
 
 /** How many provider quick links ride in the header. Prime shows ~4 brand
@@ -67,6 +77,23 @@ export default function TvTopNav() {
         <LayoutGrid className="w-5 h-5" />
         All providers
       </Link>
+
+      {/* Pushed to the far right so the browse tabs keep the natural left edge. */}
+      <span className="ml-auto" />
+      {UTILITY.map(({ href, label, Icon }) => (
+        <Link
+          key={href}
+          href={href}
+          data-tv
+          aria-label={label}
+          className={`tv-pill flex items-center gap-2.5 px-4 py-2 rounded-lg text-lg whitespace-nowrap focus:outline-none focus:bg-white focus:text-black ${
+            isActive(href) ? "bg-white text-black font-bold" : "text-[#c7d5e0] font-semibold"
+          }`}
+        >
+          <Icon className="w-5 h-5" />
+          {label}
+        </Link>
+      ))}
     </nav>
   );
 }

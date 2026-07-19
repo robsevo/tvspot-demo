@@ -31,6 +31,24 @@ interface Props {
   tvAutoFocus?: boolean;
 }
 
+/**
+ * Downsize TMDB art for rail cards. The catalog hands out w1280 backdrops /
+ * w500 posters (right for the hero pane); painting 70+ of those into 320×180
+ * tiles decodes ~265MB of bitmaps and blows past the 2019 TV's raster budget —
+ * the compositor then paints the tiles WHITE even though every <img> reports
+ * loaded (verified on-device via DevTools: naturalWidth 1280, canvas readback
+ * shows real art, screen shows white). Rewrites the size segment inside the
+ * proxied URL (both encoded and plain forms); ladders differ per TMDB type:
+ * backdrops have w300, posters' nearest is w342.
+ */
+function cardArt(url: string): string {
+  return url
+    .replace(/%2Fw1280%2F/, "%2Fw300%2F")
+    .replace(/\/w1280\//, "/w300/")
+    .replace(/%2Fw500%2F/, "%2Fw342%2F")
+    .replace(/\/w500\//, "/w342/");
+}
+
 /** Prime-style landscape card: 16:9 art, corner badge, provider mark,
  *  resume bar. Focus is the TV's hover — it prewarms the resolve. */
 export default function TvLandscapeCard({
@@ -50,7 +68,8 @@ export default function TvLandscapeCard({
 }: Props) {
   const [imgError, setImgError] = useState(false);
   const href = kind === "series" ? `/tv/vod/series/${tmdbId}` : `/tv/vod/movie/${tmdbId}`;
-  const art = backdrop || poster;
+  const raw = backdrop || poster;
+  const art = raw ? cardArt(raw) : raw;
 
   return (
     <Link
@@ -63,14 +82,28 @@ export default function TvLandscapeCard({
       }}
       className={`block focus:outline-none ${fluid ? "w-full" : "w-80 shrink-0"}`}
     >
-      <div className="relative aspect-video rounded-lg overflow-hidden bg-[#1a242f] ring-1 ring-white/10">
+      {/* Rail cards use an EXPLICIT height and round the <img> itself instead of
+          aspect-video + overflow-hidden clipping: on the Tizen webview those two
+          were the only structural differences from the hero <img> (which paints),
+          and the cards composited as WHITE tiles even with the bitmaps decoded
+          (verified on-device). Fluid (search grid) keeps aspect-video for
+          responsive width. */}
+      <div
+        className={`tv-card-shadow relative rounded-lg bg-[#1a242f] ring-1 ring-white/10 ${
+          fluid ? "aspect-video overflow-hidden" : "h-[11.25rem]"
+        }`}
+      >
         {art && !imgError ? (
           <img
             src={art}
             alt={title}
-            loading="lazy"
+            // NB: no loading="lazy" — the Tizen webview never fires the
+            // intersection load for lazy <img> nested inside the page's
+            // vertical + the rail's horizontal scroll container, so every
+            // card stayed blank (and onError never fired for the fallback).
+            // The 10-foot UI renders a bounded card count; eager is correct.
             referrerPolicy="no-referrer"
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover rounded-lg"
             onError={() => setImgError(true)}
           />
         ) : (
@@ -85,7 +118,7 @@ export default function TvLandscapeCard({
           </span>
         )}
         {showTitle && art && !imgError && (
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pt-10 pb-3">
+          <div className="tv-fade-card-title absolute inset-x-0 bottom-0 rounded-b-lg px-4 pt-10 pb-3">
             <p className="text-lg font-semibold text-white truncate">{title}</p>
           </div>
         )}
@@ -98,7 +131,7 @@ export default function TvLandscapeCard({
           </span>
         )}
         {typeof progress === "number" && progress > 0 && (
-          <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20">
+          <div className="absolute inset-x-0 bottom-0 h-1 rounded-b-lg overflow-hidden bg-white/20">
             <div
               className="h-full bg-[#e50914]"
               style={{ width: `${Math.round(progress)}%` }}

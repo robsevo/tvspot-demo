@@ -1,32 +1,39 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { LogoImage } from "@/components/LogoImage";
+import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
+import { Tv } from "lucide-react";
 import { useChannels } from "@/hooks/useChannels";
 import { useEpg } from "@/hooks/useEpg";
 import { useEvents } from "@/hooks/useEvents";
 import { useChannelFavorites } from "@/hooks/useChannelFavorites";
 import { channelSlug } from "@/lib/sources";
 import { nowAndNext } from "@/lib/tvEpg";
-import { carrierForLeague } from "@/lib/leagues";
+import { carriersForLeague } from "@/lib/leagues";
 import { listRecentChannels } from "@/lib/recentChannels";
+import TvBrowseScreen, { type TvBrowseItem, type TvBrowseRail } from "@/components/tv/TvBrowseScreen";
 import TvChannelPanel from "@/components/tv/TvChannelPanel";
 import type { Channel, EpgProgram } from "@/lib/types";
-import type { GameEvent } from "@/lib/leagues";
 
-const ALL = "All";
-const FAVORITES = "Favorites";
+const PER_RAIL = 40;
+const EVENTS_TITLE = "Live and upcoming events";
 
-/** A selected event carries its headline + carrier channel into the panel. */
+/** A selected event carries its headline + every carrier channel into the
+ *  panel (primary first, the rest as "Also on"). */
 interface PickedEvent {
   channel: Channel;
   programs?: EpgProgram[];
   title?: string;
+  alternates?: Channel[];
 }
 
-/** Prime-style Live TV: category sidebar on the left, a "Live and upcoming
- *  events" rail up top, then Recently watched and station rows. Choosing any
- *  tile opens the right-side channel panel (Watch Live / favorite). */
+/**
+ * Live TV, rebuilt on the same browse chassis as Home / Movies / Shows: a
+ * follow-focus hero over category RAILS (no left sidebar — that's what clashed
+ * with the rest of the app). Live events lead, then Recently watched,
+ * Favorites, and one rail per channel category. Selecting a tile opens the
+ * right-side channel panel (Watch Live / favorite / now-next).
+ */
 export default function TvLivePage() {
   const { channels, loading } = useChannels();
   const names = useMemo(() => channels.map((c) => c.name), [channels]);
@@ -34,20 +41,30 @@ export default function TvLivePage() {
   const { data: events } = useEvents();
   const { names: favNames } = useChannelFavorites();
 
-  const [category, setCategory] = useState<string>(ALL);
   const [picked, setPicked] = useState<PickedEvent | null>(null);
 
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of channels) if (c.category) set.add(c.category);
-    return [ALL, FAVORITES, ...Array.from(set).sort()];
-  }, [channels]);
+  const programsFor = useCallback(
+    (c: Channel) => (epg[c.name]?.length ? epg[c.name] : c.programs),
+    [epg],
+  );
 
-  const shown = useMemo(() => {
-    if (category === ALL) return channels;
-    if (category === FAVORITES) return channels.filter((c) => favNames.includes(c.name));
-    return channels.filter((c) => c.category === category);
-  }, [channels, category, favNames]);
+  const channelItem = useCallback(
+    (c: Channel): TvBrowseItem => {
+      const guide = nowAndNext(programsFor(c) ?? []);
+      return {
+        key: `ch-${c.name}`,
+        title: guide.now?.title || c.name,
+        metaLine: guide.now
+          ? c.name
+          : c.online
+            ? `${c.name} · Live programming`
+            : `${c.name} · Offline`,
+        live: c.online,
+        channel: c,
+      };
+    },
+    [programsFor],
+  );
 
   const recent = useMemo(() => {
     const slugs = listRecentChannels();
@@ -56,189 +73,123 @@ export default function TvLivePage() {
       .filter((c): c is Channel => Boolean(c));
   }, [channels]);
 
-  // Live/upcoming events cross-referenced to a watchable carrier channel.
-  const liveEvents = useMemo(() => {
+  const favorites = useMemo(
+    () => channels.filter((c) => favNames.includes(c.name)),
+    [channels, favNames],
+  );
+
+  // Live/upcoming events cross-referenced to EVERY watchable carrier channel
+  // (primary first — the panel offers the rest as "Also on").
+  const eventItems = useMemo<TvBrowseItem[]>(() => {
     if (!events) return [];
-    const out: Array<{ key: string; game: GameEvent; leagueName: string; channel: Channel }> = [];
+    const out: TvBrowseItem[] = [];
+    const seen = new Set<string>();
     for (const lg of events.leagues) {
-      const carrier = carrierForLeague(lg.key, channels, channelSlug) as Channel | null;
-      if (!carrier) continue;
+      const carriers = carriersForLeague(lg.key, channels, channelSlug);
+      if (carriers.length === 0) continue;
       for (const game of lg.games) {
         if (game.state === "post") continue;
-        out.push({ key: `${lg.key}-${game.id}`, game, leagueName: lg.name, channel: carrier });
+        const key = `ev-${lg.key}-${game.id}`;
+        if (seen.has(key)) continue; // the feed can list a game twice → dup React key
+        seen.add(key);
+        out.push({
+          key,
+          title: game.shortName,
+          metaLine: [lg.name, game.detail].filter(Boolean).join(" · "),
+          overview: `Watch on ${carriers.slice(0, 4).map((c) => c.name).join(" · ")}`,
+          live: game.state === "in",
+          event: {
+            game,
+            leagueName: lg.name,
+            leagueLogo: lg.logo,
+            onOpen: () =>
+              setPicked({
+                channel: carriers[0],
+                programs: programsFor(carriers[0]),
+                title: game.shortName,
+                alternates: carriers.slice(1),
+              }),
+          },
+        });
       }
     }
     return out
-      .sort((a, b) => (a.game.state === "in" ? -1 : 1) - (b.game.state === "in" ? -1 : 1))
+      .sort((a, b) => Number(b.live ?? false) - Number(a.live ?? false))
       .slice(0, 12);
-  }, [events, channels]);
+  }, [events, channels, programsFor]);
 
-  const openChannel = (c: Channel) =>
-    setPicked({ channel: c, programs: epg[c.name]?.length ? epg[c.name] : c.programs });
+  // One rail per channel category (uncategorized falls into "More channels"),
+  // sorted alphabetically — browsable rails replace the old filter sidebar.
+  const categoryRails = useMemo<TvBrowseRail[]>(() => {
+    const byCat = new Map<string, Channel[]>();
+    for (const c of channels) {
+      const cat = c.category || "More channels";
+      const bucket = byCat.get(cat);
+      if (bucket) bucket.push(c);
+      else byCat.set(cat, [c]);
+    }
+    const cats = Array.from(byCat.keys()).sort((a, b) => {
+      if (a === "More channels") return 1;
+      if (b === "More channels") return -1;
+      return a.localeCompare(b);
+    });
+    // Backend categories are lowercase and often just "live" — title-case them,
+    // and give that generic bucket a real name so the rail isn't a bare "live".
+    const railTitle = (c: string) =>
+      c === "More channels"
+        ? c
+        : /^(live|tv|all)$/i.test(c)
+          ? "All channels"
+          : c.replace(/\b\w/g, (m) => m.toUpperCase());
+    return cats.map((cat) => ({
+      title: railTitle(cat),
+      items: byCat.get(cat)!.slice(0, PER_RAIL).map(channelItem),
+    }));
+  }, [channels, channelItem]);
+
+  const rails = useMemo<TvBrowseRail[]>(() => {
+    const fullGuideTile = (
+      <Link
+        href="/tv/live/guide"
+        data-tv
+        className="tv-card-shadow tv-channel-surface w-52 h-28 shrink-0 rounded-lg ring-1 ring-white/10 flex flex-col items-center justify-center gap-2 text-[#c7d5e0] focus:outline-none"
+      >
+        <Tv className="w-8 h-8" />
+        <span className="text-base font-semibold">Full guide</span>
+      </Link>
+    );
+
+    const list: TvBrowseRail[] = [];
+    if (eventItems.length > 0) list.push({ title: EVENTS_TITLE, items: eventItems });
+    if (recent.length > 0) list.push({ title: "Recently watched", items: recent.map(channelItem) });
+    if (favorites.length > 0) list.push({ title: "Favorites", items: favorites.map(channelItem) });
+    list.push(...categoryRails);
+
+    // Anchor the Full-guide entry on the first channel rail (skip the events
+    // rail, whose tiles are a different shape). Immutable — never touch the
+    // memoized category-rail objects in place.
+    const anchorIdx = list.findIndex((r) => r.title !== EVENTS_TITLE && r.items.length > 0);
+    const idx = anchorIdx === -1 ? 0 : anchorIdx;
+    return list.map((r, i) => (i === idx ? { ...r, trailing: fullGuideTile } : r));
+  }, [eventItems, recent, favorites, categoryRails, channelItem]);
 
   return (
-    <div className="flex h-[calc(100vh-76px)]">
-      {/* Category sidebar */}
-      <aside className="w-52 shrink-0 overflow-y-auto py-4 pl-8 pr-2">
-        {categories.map((cat, i) => (
-          <button
-            key={cat}
-            data-tv
-            {...(i === 0 ? { "data-tv-autofocus": true } : {})}
-            onFocus={() => setCategory(cat)}
-            className={`tv-pill block w-full text-left px-4 py-2.5 rounded-lg text-xl focus:outline-none focus:bg-white focus:text-black ${
-              category === cat ? "text-white font-bold" : "text-[#8197a4] font-medium"
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
-      </aside>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto pr-16 pb-16">
-        {loading && channels.length === 0 && (
-          <p className="pt-6 text-xl text-[#8197a4]">Loading channels…</p>
-        )}
-
-        {liveEvents.length > 0 && category === ALL && (
-          <section className="pt-4">
-            <h2 className="text-2xl font-bold text-white mb-4">Live and upcoming events</h2>
-            <div className="flex gap-5 overflow-x-auto py-2">
-              {liveEvents.map(({ key, game, leagueName, channel }) => (
-                <button
-                  key={key}
-                  data-tv
-                  onClick={() =>
-                    setPicked({
-                      channel,
-                      programs: epg[channel.name]?.length ? epg[channel.name] : channel.programs,
-                      title: game.shortName,
-                    })
-                  }
-                  className="w-96 shrink-0 text-left rounded-lg overflow-hidden bg-[#1a242f] ring-1 ring-white/10 focus:outline-none"
-                >
-                  <div className="relative h-44 flex items-center justify-center gap-8 bg-gradient-to-br from-[#16233a] to-[#0c1320] px-6">
-                    {game.state === "in" && (
-                      <span className="absolute top-3 right-3 text-xs font-bold tracking-wider text-white bg-[#c7040c] rounded px-2 py-0.5">
-                        LIVE
-                      </span>
-                    )}
-                    <TeamCrest logo={game.away.logo} name={game.away.name} />
-                    <span className="text-2xl font-bold text-white/60">vs</span>
-                    <TeamCrest logo={game.home.logo} name={game.home.name} />
-                  </div>
-                  <div className="px-5 py-3">
-                    <p className="text-lg font-semibold text-white truncate">{game.shortName}</p>
-                    <p className="text-base text-[#8197a4] truncate">
-                      {leagueName} · {game.detail}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {recent.length > 0 && category === ALL && (
-          <ChannelRow title="Recently watched" channels={recent} epg={epg} onOpen={openChannel} />
-        )}
-
-        <ChannelRow
-          title={category === ALL ? "Your stations" : category}
-          channels={shown}
-          epg={epg}
-          onOpen={openChannel}
-        />
-      </div>
-
+    <>
+      <TvBrowseScreen
+        rails={rails}
+        loading={loading && channels.length === 0}
+        loadingText="Loading channels…"
+        onChannelSelect={(c) => setPicked({ channel: c, programs: programsFor(c) })}
+      />
       {picked && (
         <TvChannelPanel
           channel={picked.channel}
           programs={picked.programs}
           titleOverride={picked.title}
+          alternates={picked.alternates}
           onClose={() => setPicked(null)}
         />
       )}
-    </div>
-  );
-}
-
-function TeamCrest({ logo, name }: { logo?: string; name: string }) {
-  return (
-    <div className="flex flex-col items-center gap-1 min-w-0">
-      {logo ? (
-        <img src={logo} alt="" referrerPolicy="no-referrer" className="w-14 h-14 object-contain" />
-      ) : (
-        <div className="w-14 h-14 rounded-full bg-white/10" />
-      )}
-      <span className="text-xs text-[#aebbc5] truncate max-w-24 text-center">{name}</span>
-    </div>
-  );
-}
-
-/** A horizontal row of live-channel list rows (logo + now/next), each opening
- *  the channel panel. Used for Recently watched and Your stations. */
-function ChannelRow({
-  title,
-  channels,
-  epg,
-  onOpen,
-}: {
-  title: string;
-  channels: Channel[];
-  epg: Record<string, EpgProgram[]>;
-  onOpen: (c: Channel) => void;
-}) {
-  if (channels.length === 0) return null;
-  return (
-    <section className="pt-8">
-      <h2 className="text-2xl font-bold text-white mb-4">{title}</h2>
-      <div className="grid grid-cols-2 gap-4">
-        {channels.map((c) => {
-          const guide = nowAndNext(epg[c.name]?.length ? epg[c.name] : c.programs);
-          return (
-            <button
-              key={c.name}
-              data-tv
-              onClick={() => onOpen(c)}
-              className={`flex items-center gap-5 rounded-lg bg-[#121a24] ring-1 ring-white/10 px-5 py-4 text-left focus:outline-none ${
-                c.online ? "" : "opacity-50"
-              }`}
-            >
-              <div className="w-24 h-14 shrink-0 flex items-center justify-center">
-                <LogoImage
-                  name={c.name}
-                  logoUrl={c.logo_url || c.logo}
-                  className="w-full h-full"
-                  fallbackClassName="text-lg font-bold text-white/80"
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-base font-semibold text-[#8197a4] truncate">{c.name}</p>
-                  {c.online && (
-                    <span className="text-[10px] font-bold tracking-wider text-white bg-[#c7040c] rounded px-1.5 py-0.5 shrink-0">
-                      LIVE
-                    </span>
-                  )}
-                </div>
-                <p className="text-lg font-semibold text-white truncate mt-0.5">
-                  {guide.now?.title || (c.online ? "Live programming" : "Offline")}
-                </p>
-                {guide.now && (
-                  <div className="mt-2 h-1 max-w-xs rounded-full bg-white/15 overflow-hidden">
-                    <div
-                      className="h-full bg-[#1399ff]"
-                      style={{ width: `${Math.round(guide.progress)}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </section>
+    </>
   );
 }

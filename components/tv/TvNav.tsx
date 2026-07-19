@@ -176,9 +176,24 @@ export function TvNavProvider({ children }: { children: ReactNode }) {
       e.preventDefault();
 
       const curEl = active && els.includes(active) ? active : null;
-      const next = curEl
+      let next = curEl
         ? pickNext(curEl, dir, els)
         : (els.find((el) => el.hasAttribute("data-tv-autofocus")) ?? els[0]);
+
+      // Vertical moves that land in a horizontal rail snap to that rail's FIRST
+      // tile, not the geometrically-nearest one. Channel/poster rows read as
+      // "scroll down = start of the next list from the left"; nearest-x picking
+      // otherwise drops you onto the 2nd/3rd tile depending on where you came
+      // from. Scoped to [data-tv-row] (TvRail) so grids keep cell-below nav.
+      if (next && (dir === "up" || dir === "down")) {
+        const row = next.closest<HTMLElement>("[data-tv-row]");
+        if (row && !row.contains(curEl)) {
+          const firstInRow = Array.from(
+            row.querySelectorAll<HTMLElement>("[data-tv]"),
+          ).find((el) => els.includes(el));
+          if (firstInRow) next = firstInRow;
+        }
+      }
       if (next) focusEl(next);
     };
 

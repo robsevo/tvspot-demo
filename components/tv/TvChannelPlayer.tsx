@@ -354,7 +354,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
       {overlayOpen && (
         <div
           data-tv-trap
-          className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0f171e] via-[#0f171e]/90 to-transparent px-14 pt-28 pb-10 animate-fade-in"
+          className="tv-fade-osd absolute inset-x-0 bottom-0 px-14 pt-28 pb-10 animate-fade-in"
         >
           <div className="flex items-center gap-6 mb-5">
             <div className="w-24 h-14 shrink-0">

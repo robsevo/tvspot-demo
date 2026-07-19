@@ -6,7 +6,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { prewarmCatalog } from "@/hooks/useCatalog";
 import { TvNavProvider } from "@/components/tv/TvNav";
 import TvTopNav from "@/components/tv/TvTopNav";
-import TvSideMenu from "@/components/tv/TvSideMenu";
 import { registerTvKeys } from "@/lib/tv";
 
 /**
@@ -42,12 +41,15 @@ export default function TvLayout({ children }: { children: React.ReactNode }) {
   }, [isLogin, username, loading, router]);
 
   // Full-screen player pages own the whole panel — no nav chrome over video.
-  const isPlayerPage = pathname.startsWith("/tv/live/") && pathname !== "/tv/live";
-  // Prime hides the top tabs on title detail pages — the side menu still works.
+  // (/tv/live/guide is the EPG grid, not a player.)
+  const isPlayerPage =
+    pathname.startsWith("/tv/live/") &&
+    pathname !== "/tv/live" &&
+    pathname !== "/tv/live/guide";
+  // Prime hides the top tabs on title detail pages — Back returns to the grid.
   const isDetailPage =
     pathname.startsWith("/tv/vod/movie/") || pathname.startsWith("/tv/vod/series/");
   const showNav = !isLogin && !isPlayerPage && !isDetailPage;
-  const showSideMenu = !isLogin && !isPlayerPage;
 
   if (!isLogin && (loading || !username)) {
     return (
@@ -61,7 +63,6 @@ export default function TvLayout({ children }: { children: React.ReactNode }) {
     <div className="tv-root min-h-screen text-white overflow-x-hidden">
       <TvNavProvider>
         {showNav && <TvTopNav />}
-        {showSideMenu && <TvSideMenu />}
         <main>{children}</main>
       </TvNavProvider>
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useReducer } from "react";
 import { useParams } from "next/navigation";
 import { Play, Plus, Check } from "lucide-react";
 import { proxyFetch } from "@/lib/api";
@@ -23,13 +23,35 @@ import type { SeriesDetail, Episode } from "@/lib/types";
  *  movie page; backend streams play immediately while the HD resolve lands. */
 export default function TvSeriesPage() {
   const { tmdbId } = useParams<{ tmdbId: string }>();
-  const [detail, setDetail] = useState<SeriesDetail | null>(null);
-  const [failed, setFailed] = useState(false);
   const [seasonIdx, setSeasonIdx] = useState(0);
   const [focusedEp, setFocusedEp] = useState<number | null>(null);
   const [playing, setPlaying] = useState<{ season: number; episode: number } | null>(null);
-  // Resolved HD streams per "s<season>e<episode>" key.
-  const [resolvedByEp, setResolvedByEp] = useState<Record<string, string[]>>({});
+
+  const [detailState, dispatch] = useReducer(
+    (
+      state: { detail: SeriesDetail | null; failed: boolean },
+      action: { type: "SUCCESS"; detail: SeriesDetail } | { type: "FAILURE" }
+    ) => {
+      switch (action.type) {
+        case "SUCCESS":
+          return { detail: action.detail, failed: false };
+        case "FAILURE":
+          return { detail: null, failed: true };
+        default:
+          return state;
+      }
+    },
+    { detail: null, failed: false }
+  );
+  const { detail, failed } = detailState;
+
+  const [resolvedByEp, dispatchResolved] = useReducer(
+    (prev: Record<string, string[]>, action: { key: string; urls: string[] }) => ({
+      ...prev,
+      [action.key]: action.urls,
+    }),
+    {}
+  );
 
   const { items, updateProgress, remove } = useContinueWatching();
   const { add: addToList, remove: removeFromList, isInList } = useMyList();
@@ -51,18 +73,17 @@ export default function TvSeriesPage() {
     service: detail?.service || catItem?.service,
   };
 
+  // Fetch series details
   useEffect(() => {
-    let cancelled = false;
+    let active = true;
     proxyFetch<SeriesDetail>(`/api/lounge/vod/series/${tmdbId}`)
       .then((d) => {
-        if (!cancelled) setDetail(d);
+        if (active) dispatch({ type: "SUCCESS", detail: d });
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        if (active) dispatch({ type: "FAILURE" });
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { active = false; };
   }, [tmdbId]);
 
   const season = detail?.seasons?.[seasonIdx];
@@ -78,11 +99,11 @@ export default function TvSeriesPage() {
       const key = epKey(s, e);
       const warm = getPrewarmed("series", tmdbId, s, e);
       if (warm) {
-        setResolvedByEp((prev) => (prev[key] ? prev : { ...prev, [key]: warm }));
+        dispatchResolved({ key, urls: warm });
         return;
       }
       resolveVod("series", tmdbId, s, e).then((urls) => {
-        if (urls.length > 0) setResolvedByEp((prev) => ({ ...prev, [key]: urls }));
+        if (urls.length > 0) dispatchResolved({ key, urls });
       });
     },
     [tmdbId],
@@ -149,6 +170,40 @@ export default function TvSeriesPage() {
 
   const closePlayback = useCallback(() => setPlaying(null), []);
 
+  /**
+   * The episode after the one playing: next in the season, else the first
+   * episode of the next season that has any. Null on the series finale, which
+   * is what suppresses the "Next up" card and its auto-advance.
+   */
+  const nextUp = useMemo(() => {
+    if (!playing || !detail) return null;
+    const sIdx = detail.seasons.findIndex((s) => s.season_number === playing.season);
+    if (sIdx < 0) return null;
+    const eps = detail.seasons[sIdx].episodes ?? [];
+    const eIdx = eps.findIndex((e) => e.episode_number === playing.episode);
+
+    let season = playing.season;
+    let ep = eIdx >= 0 ? eps[eIdx + 1] : undefined;
+    if (!ep) {
+      // Walk forward — a season with an empty episode list must not dead-end
+      // the binge (the backend does return those).
+      const nextSeason = detail.seasons.slice(sIdx + 1).find((s) => (s.episodes ?? []).length > 0);
+      if (!nextSeason) return null;
+      season = nextSeason.season_number;
+      ep = nextSeason.episodes[0];
+    }
+    if (!ep) return null;
+
+    const epNumber = ep.episode_number;
+    return {
+      label: `S${season} E${epNumber}${ep.title ? ` · ${ep.title}` : ""}`,
+      play: () => playEpisode(season, epNumber),
+    };
+    // playEpisode is stable enough here (it only closes over tmdbId/dispatch);
+    // including it would rebuild the card every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, detail]);
+
   // Episode picked but no playable source yet — hold a full-screen waiting state.
   const waiting = playing !== null && playingSources.length === 0;
   useTvBack(waiting ? closePlayback : null);
@@ -200,8 +255,8 @@ export default function TvSeriesPage() {
               referrerPolicy="no-referrer"
               className="absolute top-0 right-0 w-[70%] h-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-r from-[#00050d] via-[#00050d]/70 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#00050d] via-transparent to-transparent" />
+            <div className="tv-fade-hero-l absolute inset-0" />
+            <div className="tv-fade-hero-b absolute inset-0" />
           </>
         )}
 
@@ -307,14 +362,15 @@ export default function TvSeriesPage() {
                   onClick={() => playEpisode(season.season_number, ep.episode_number)}
                   className="w-72 shrink-0 text-left focus:outline-none"
                 >
-                  <div className="relative aspect-video rounded-lg overflow-hidden bg-[#1a242f] ring-1 ring-white/10">
+                  {/* Explicit height + img-level rounding — same Tizen white-tile
+                      workaround as TvLandscapeCard (w-72 → 162px at 16:9). */}
+                  <div className="relative h-[10.125rem] rounded-lg bg-[#1a242f] ring-1 ring-white/10">
                     {ep.still_url ? (
                       <img
                         src={ep.still_url}
                         alt=""
-                        loading="lazy"
                         referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover rounded-lg"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
@@ -322,7 +378,7 @@ export default function TvSeriesPage() {
                       </div>
                     )}
                     {cw && cw.progress > 2 && cw.progress < 95 && (
-                      <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20">
+                      <div className="absolute inset-x-0 bottom-0 h-1 rounded-b-lg overflow-hidden bg-white/20">
                         <div
                           className="h-full bg-[#e50914]"
                           style={{ width: `${Math.round(cw.progress)}%` }}
@@ -371,6 +427,12 @@ export default function TvSeriesPage() {
 
       {playing && playingSources.length > 0 && playingEpisode && (
         <TvVodPlayback
+          // Remount per episode. Auto-advance can swap episodes while the
+          // player stays mounted (the next one's sources are often already
+          // resolved/prewarmed), and without this it would inherit the previous
+          // episode's failover index and resume position — landing mid-episode
+          // on source #3 of a show it isn't playing any more.
+          key={`${playing.season}-${playing.episode}`}
           sources={playingSources}
           title={`${display.title} — S${playing.season} E${playing.episode}`}
           poster={playingEpisode.still_url || display.poster}
@@ -378,6 +440,7 @@ export default function TvSeriesPage() {
           subtitles={subtitles}
           onClose={closePlayback}
           onProgress={handleProgress}
+          nextUp={nextUp}
         />
       )}
     </div>

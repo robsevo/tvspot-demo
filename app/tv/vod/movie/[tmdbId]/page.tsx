@@ -158,8 +158,8 @@ export default function TvMoviePage() {
               referrerPolicy="no-referrer"
               className="absolute top-0 right-0 w-[70%] h-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-r from-[#00050d] via-[#00050d]/70 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#00050d] via-transparent to-transparent" />
+            <div className="tv-fade-hero-l absolute inset-0" />
+            <div className="tv-fade-hero-b absolute inset-0" />
           </>
         )}
 

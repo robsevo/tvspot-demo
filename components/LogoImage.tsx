@@ -16,6 +16,9 @@ interface Props {
   /** VOD service card: skip the curated live-channel logo override (which is
    *  colored) so the clean white brand mark is used. */
   serviceLogo?: boolean;
+  /** Load the logo eagerly. The Tizen TV webview never fires lazy loads for
+   *  <img> inside scroll containers, leaving logos blank — TV callers set this. */
+  eager?: boolean;
 }
 
 /**
@@ -25,7 +28,7 @@ interface Props {
  *   3. text initials
  * Each failed source advances to the next via the <img> onError handler.
  */
-export function LogoImage({ name, logoUrl, className = "", fallbackClassName = "text-white/80", imgClassName = "", serviceLogo = false }: Props) {
+export function LogoImage({ name, logoUrl, className = "", fallbackClassName = "text-white/80", imgClassName = "", serviceLogo = false, eager = false }: Props) {
   // Try reliable brand-favicon sources FIRST (Simple Icons / Google favicon by
   // domain), then the backend logo-proxy as a last resort. The backend's
   // /static/channel-logos path currently returns an HTML login page for many
@@ -51,7 +54,7 @@ export function LogoImage({ name, logoUrl, className = "", fallbackClassName = "
         <img
           src={src}
           alt={name}
-          loading="lazy"
+          {...(eager ? {} : { loading: "lazy" as const })}
           referrerPolicy="no-referrer"
           // rounded-md so square logo tiles (e.g. TSN) match the rounded container
           // instead of showing hard square corners inside it.

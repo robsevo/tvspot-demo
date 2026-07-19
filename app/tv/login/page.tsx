@@ -85,7 +85,9 @@ export default function TvLoginPage() {
         <p className="text-text-muted text-xl mt-2">Sign in on this TV</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="w-full max-w-xl space-y-6">
+      {/* flex+gap, not space-y: Tailwind v4 compiles space-* with :where(),
+          which the TV's Chromium 63 drops — gap has a legacy fallback. */}
+      <form onSubmit={handleSubmit} className="w-full max-w-xl flex flex-col gap-6">
         <div>
           <label className="text-lg text-text-muted font-medium mb-2 block">Username</label>
           <input

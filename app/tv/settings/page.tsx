@@ -32,24 +32,26 @@ export default function TvSettingsPage() {
         </div>
       </div>
 
+      {/* tv-menu-item: white-pill focus via plain CSS — group-focus compiles to
+          :is()/:where() and is dropped by the TV's Chromium 63. */}
       <div className="flex flex-col gap-4">
         <button
           data-tv
           data-tv-autofocus
           onClick={signOut}
-          className="tv-pill group flex items-center gap-4 bg-[#141d28] ring-1 ring-white/10 rounded-lg px-6 py-5 text-left focus:outline-none focus:bg-white"
+          className="tv-pill tv-menu-item flex items-center gap-4 bg-[#141d28] ring-1 ring-white/10 rounded-lg px-6 py-5 text-left focus:outline-none"
         >
-          <LogOut className="w-6 h-6 text-white group-focus:text-black" />
-          <span className="text-xl text-white group-focus:text-black">Sign out</span>
+          <LogOut className="w-6 h-6 text-white" />
+          <span className="text-xl text-white">Sign out</span>
         </button>
 
         <button
           data-tv
           onClick={() => exitTvApp()}
-          className="tv-pill group flex items-center gap-4 bg-[#141d28] ring-1 ring-white/10 rounded-lg px-6 py-5 text-left focus:outline-none focus:bg-white"
+          className="tv-pill tv-menu-item flex items-center gap-4 bg-[#141d28] ring-1 ring-white/10 rounded-lg px-6 py-5 text-left focus:outline-none"
         >
-          <Power className="w-6 h-6 text-white group-focus:text-black" />
-          <span className="text-xl text-white group-focus:text-black">Exit app</span>
+          <Power className="w-6 h-6 text-white" />
+          <span className="text-xl text-white">Exit app</span>
         </button>
       </div>
     </div>

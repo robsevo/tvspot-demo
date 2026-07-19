@@ -150,9 +150,10 @@ video::-webkit-media-controls { display: none !important; }
 .stagger-children > *:nth-child(9) { animation-delay: 0.18s; }
 .stagger-children > *:nth-child(10) { animation-delay: 0.20s; }
 
-/* Hero title text shadow */
+/* Hero title text shadow — strong enough to hold white text over a bright
+   backdrop (e.g. a near-white promo still), layered halo + drop. */
 .hero-text-shadow {
-  text-shadow: 0 2px 20px rgba(0,0,0,0.6), 0 1px 4px rgba(0,0,0,0.8);
+  text-shadow: 0 2px 24px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.7);
 }
 
 /* Pill active */
@@ -422,14 +423,26 @@ video::cue {
   --tv-accent: #1399ff;
   --tv-live: #c7040c;
   background-color: var(--tv-bg);
-  /* Prime home glow: a blue radial sweep out of the top-left fading into
-     near-black. Fixed, so content scrolls over it. */
-  background-image: radial-gradient(
-    140% 120% at 18% -10%,
-    rgba(37, 87, 165, 0.55) 0%,
-    rgba(23, 52, 102, 0.35) 38%,
-    rgba(0, 5, 13, 0) 68%
-  );
+  /* Signature blue ambience — deliberately SUBTLE (Google-TV-calm), not a
+     "blue header band". The old top-left radial was strong enough (0.62) that
+     on pages without a full-bleed hero (Live TV) it read as a weird blue bar
+     across the top vs. the near-black body. Pulled higher, smaller, and much
+     fainter so it's just a whisper of the app's blue identity over a near-black
+     base. Handwritten rgba layers — they must paint on Chromium 63. Fixed, so
+     content scrolls over them. */
+  background-image:
+    radial-gradient(
+      110% 85% at 12% -20%,
+      rgba(37, 84, 162, 0.30) 0%,
+      rgba(19, 46, 92, 0.16) 42%,
+      rgba(0, 5, 13, 0) 66%
+    ),
+    radial-gradient(
+      80% 60% at 100% 100%,
+      rgba(21, 94, 130, 0.16) 0%,
+      rgba(0, 5, 13, 0) 58%
+    ),
+    linear-gradient(to bottom, rgba(0, 5, 13, 0) 60%, rgba(0, 0, 0, 0.45) 100%);
   background-attachment: fixed;
 }
 .tv-root ::-webkit-scrollbar {
@@ -451,6 +464,84 @@ video::cue {
 .tv-root .tv-pill:focus {
   outline: none;
   transform: none;
+}
+
+/* Menu/action rows (side menu, settings, channel panel): the focused row IS
+   the white pill, children flip to black. Plain descendant selectors on
+   purpose — Tailwind v4's group-focus variant compiles to :is(:where(.group)
+   :focus *), and Chromium 63 drops the whole rule (no :is/:where), which left
+   the side menu with NO visible cursor on the TV. */
+.tv-root .tv-menu-item:focus {
+  background: #ffffff;
+}
+.tv-root .tv-menu-item:focus span,
+.tv-root .tv-menu-item:focus svg {
+  color: #000000;
+}
+
+/* ── TV gradients, handwritten ──────────────────────────────────────────────
+   Tailwind v4 gradient utilities route their color stops through --tw-*
+   custom properties, and opacity-modified stops (via-[#00050d]/40) compile
+   to color-mix() INSIDE those variables. postcss-preset-env can only lower
+   color-mix it sees in a plain property value — not one that appears after
+   var() substitution — so on the TV's Chromium 63 the substituted
+   linear-gradient() is invalid and the WHOLE background silently drops.
+   Observed live: hero fades + rail scrims absent on the TV (hero text on
+   raw bright art, rails clashing with the backdrop) while desktop painted
+   them fine. Every TV surface uses these rgba classes instead — same
+   technique as the .tv-root radial glow, which always painted. */
+.tv-fade-hero-l {
+  background: linear-gradient(to right, #00050d 0%, rgba(0, 5, 13, 0.72) 34%, rgba(0, 5, 13, 0) 72%);
+}
+.tv-fade-hero-b {
+  background: linear-gradient(to top, #00050d 0%, rgba(0, 5, 13, 0.82) 34%, rgba(0, 5, 13, 0) 72%);
+}
+.tv-fade-rails {
+  background: linear-gradient(to bottom, rgba(0, 5, 13, 0) 0%, rgba(0, 5, 13, 0.92) 20%, #00050d 52%);
+}
+.tv-fade-card-title {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
+}
+.tv-fade-osd {
+  background: linear-gradient(to top, rgba(8, 13, 18, 0.94) 0%, rgba(8, 13, 18, 0.72) 55%, rgba(8, 13, 18, 0) 100%);
+}
+.tv-event-art {
+  background: linear-gradient(135deg, #1b2a44 0%, #101a2b 55%, #0a1119 100%);
+}
+/* Channel-tile surface: an actual VISIBLE blue-steel fill so a logo sits on a
+   real card, not a near-black void that reads as "no background". Handwritten
+   gradient — Tailwind bg-gradient utilities never paint on the TV's Ch63. */
+.tv-channel-surface {
+  background: linear-gradient(150deg, #294763 0%, #1b3149 52%, #12212f 100%);
+}
+.tv-root [data-tv]:focus .tv-channel-surface {
+  background: linear-gradient(150deg, #33597c 0%, #223d59 52%, #17293b 100%);
+}
+
+/* Card depth: resting shadow lifts cards off the backdrop; the focused card
+   lifts further (plain descendant selector — the focusable is the <a>/<button>,
+   the shadowed surface its child). */
+.tv-card-shadow {
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5), 0 2px 5px rgba(0, 0, 0, 0.4);
+}
+.tv-root [data-tv]:focus .tv-card-shadow {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* Frosted "glass" panel for TV overlays. The rgba fill + hairline border +
+   inner top highlight carry the look on Chromium 63 (no backdrop-filter
+   there); modern engines add real blur via the @supports block. */
+.tv-glass {
+  background: rgba(13, 22, 34, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .tv-glass {
+    background: rgba(13, 22, 34, 0.55);
+    backdrop-filter: blur(18px) saturate(1.2);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  }
 }
 
 /* ── Legacy-engine fallbacks (Samsung RU7100: Tizen 5.0 ≈ Chromium 63) ─────

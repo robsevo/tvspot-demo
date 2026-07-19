@@ -8,7 +8,7 @@ export default function TvRail({ title, children }: { title: string; children: R
   return (
     <section className="py-4">
       <h2 className="px-16 text-2xl font-bold text-white mb-4">{title}</h2>
-      <div className="flex gap-5 overflow-x-auto px-16 py-2">{children}</div>
+      <div data-tv-row className="flex gap-5 overflow-x-auto px-16 py-2">{children}</div>
     </section>
   );
 }

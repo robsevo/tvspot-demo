@@ -76,7 +76,6 @@ function TvVodInner() {
                             key={p.tmdb_id ?? j}
                             src={p.poster}
                             alt=""
-                            loading="lazy"
                             referrerPolicy="no-referrer"
                             className="w-16 h-24 rounded object-cover ring-1 ring-white/10"
                           />
