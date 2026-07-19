@@ -1,0 +1,17 @@
+/* External on purpose: Tizen's default widget CSP (script-src/style-src
+   'self') silently ignores INLINE styles and scripts — everything must be a
+   packaged file. */
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #0a0a0a;
+  color: #b3b3b3;
+  font-family: sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 24px;
+}
+p { font-size: 28px; margin: 0; }
+.err { color: #f87171; display: none; }
