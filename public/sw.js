@@ -11,7 +11,7 @@
  *
  * Bump VERSION to force-evict all caches on the next deploy.
  */
-const VERSION = "v2";
+const VERSION = "v3"; // v3: evict shells/assets cached before the legacy-engine (TV) pass
 const SHELL_CACHE = `tvspot-shell-${VERSION}`;
 const ASSET_CACHE = `tvspot-assets-${VERSION}`;
 

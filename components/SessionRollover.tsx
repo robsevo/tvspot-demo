@@ -64,7 +64,7 @@ export default function SessionRollover() {
       checking = true;
       let loggedIn: boolean | null = null; // null = couldn't tell (network blip)
       try {
-        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        const res = await fetch("/api/auth/me", { cache: "no-store", credentials: "include" });
         if (res.ok) loggedIn = Boolean((await res.json())?.username);
       } catch {}
       checking = false;

@@ -16,6 +16,72 @@
     window.globalThis = window;
   }
 
+  // Chrome < 68 defaults fetch to credentials:"omit" — Set-Cookie on responses
+  // is discarded and cookies are never sent, which silently broke sign-in on
+  // the TV. Restore the modern default ("same-origin") for calls that don't
+  // specify credentials. Only string/URL inputs are touched; Request objects
+  // carry their own credentials and pass through untouched.
+  if (window.fetch) {
+    var origFetch = window.fetch;
+    window.fetch = function (input, init) {
+      if (typeof input === "string" || input instanceof URL) {
+        init = init || {};
+        if (!init.credentials) {
+          var patched = {};
+          for (var k in init) patched[k] = init[k];
+          patched.credentials = "same-origin";
+          return origFetch.call(this, input, patched);
+        }
+      }
+      return origFetch.call(this, input, init);
+    };
+  }
+
+  if (typeof Object.hasOwn !== "function") {
+    Object.hasOwn = function (obj, prop) {
+      return Object.prototype.hasOwnProperty.call(Object(obj), prop);
+    };
+  }
+
+  if (typeof Array.prototype.at !== "function") {
+    var at = function (n) {
+      n = Math.trunc(n) || 0;
+      if (n < 0) n += this.length;
+      if (n < 0 || n >= this.length) return undefined;
+      return this[n];
+    };
+    // defineProperty (not assignment) so the shim stays non-enumerable and
+    // never leaks into for...in loops over arrays/strings.
+    Object.defineProperty(Array.prototype, "at", { value: at, writable: true, configurable: true });
+    Object.defineProperty(String.prototype, "at", { value: at, writable: true, configurable: true });
+  }
+
+  if (typeof window.AggregateError === "undefined") {
+    var AggErr = function (errors, message) {
+      var e = new Error(message);
+      e.name = "AggregateError";
+      e.errors = Array.prototype.slice.call(errors);
+      return e;
+    };
+    window.AggregateError = AggErr;
+  }
+
+  if (window.crypto && typeof window.crypto.randomUUID !== "function") {
+    window.crypto.randomUUID = function () {
+      var bytes = new Uint8Array(16);
+      window.crypto.getRandomValues(bytes);
+      bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+      bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
+      var hex = [];
+      for (var i = 0; i < 16; i++) hex.push((bytes[i] + 256).toString(16).slice(1));
+      return (
+        hex.slice(0, 4).join("") + "-" + hex.slice(4, 6).join("") + "-" +
+        hex.slice(6, 8).join("") + "-" + hex.slice(8, 10).join("") + "-" +
+        hex.slice(10, 16).join("")
+      );
+    };
+  }
+
   if (typeof window.queueMicrotask !== "function") {
     window.queueMicrotask = function (cb) {
       Promise.resolve().then(cb);
@@ -40,7 +106,7 @@
   }
 
   if (typeof String.prototype.matchAll !== "function") {
-    String.prototype.matchAll = function (re) {
+    var matchAllShim = function (re) {
       if (re && !re.global) {
         throw new TypeError("matchAll requires a global RegExp");
       }
@@ -64,6 +130,11 @@
       };
       return iterator;
     };
+    Object.defineProperty(String.prototype, "matchAll", {
+      value: matchAllShim,
+      writable: true,
+      configurable: true,
+    });
   }
 
   // Minimal AbortController (Chromium 66+). fetch() won't truly cancel with

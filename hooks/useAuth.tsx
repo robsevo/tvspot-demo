@@ -43,7 +43,11 @@ export function AuthProvider({
 
   const checkAuth = useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/me");
+      // credentials is EXPLICIT on every auth fetch: browsers before Chrome 68
+      // (the 2019 TV webview) default fetch to credentials:"omit", which both
+      // drops the login response's Set-Cookie and stops the cookie being sent —
+      // "signing in" simply never stuck on the TV.
+      const res = await fetch("/api/auth/me", { credentials: "include" });
       const data = await res.json();
       const u = data.username ?? null;
       setUsername(u);
@@ -81,6 +85,7 @@ export function AuthProvider({
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ username, password, secret_word }),
       });
       const data = await res.json();
@@ -98,7 +103,7 @@ export function AuthProvider({
   };
 
   const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     setUsername(null);
     cacheUser(null);
   };
