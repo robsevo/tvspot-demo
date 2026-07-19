@@ -2,30 +2,38 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { Play } from "lucide-react";
+import { Play, Plus, Check } from "lucide-react";
 import { proxyFetch } from "@/lib/api";
 import { mergeSources } from "@/lib/sources";
 import { resolveVod, prewarmVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
 import { useCatalogItem } from "@/hooks/useCatalogItem";
+import { useTrendingCatalog } from "@/hooks/useTrendingCatalog";
+import { useMyList } from "@/hooks/useMyList";
 import { useSubtitles } from "@/hooks/useSubtitles";
 import TvVodPlayback from "@/components/tv/TvVodPlayback";
+import TvRail from "@/components/tv/TvRail";
+import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
 import { useTvBack } from "@/components/tv/TvNav";
 import type { SeriesDetail, Episode } from "@/lib/types";
 
-/** TV series page: season row on top, episode list below, Enter plays.
- *  Same no-embeds rule as the movie page; backend streams play immediately
- *  while the HD resolve lands in the background and joins the failover chain. */
+/** TV series page: Prime layout — hero + Play S1E1, a season selector, a
+ *  horizontal episode row whose focused episode drives a detail block above it,
+ *  and a More like this rail. Same no-embeds / background-resolve rules as the
+ *  movie page; backend streams play immediately while the HD resolve lands. */
 export default function TvSeriesPage() {
   const { tmdbId } = useParams<{ tmdbId: string }>();
   const [detail, setDetail] = useState<SeriesDetail | null>(null);
   const [failed, setFailed] = useState(false);
   const [seasonIdx, setSeasonIdx] = useState(0);
+  const [focusedEp, setFocusedEp] = useState<number | null>(null);
   const [playing, setPlaying] = useState<{ season: number; episode: number } | null>(null);
   // Resolved HD streams per "s<season>e<episode>" key.
   const [resolvedByEp, setResolvedByEp] = useState<Record<string, string[]>>({});
 
   const { items, updateProgress, remove } = useContinueWatching();
+  const { add: addToList, remove: removeFromList, isInList } = useMyList();
+  const { series: trending } = useTrendingCatalog();
   const seriesId = Number(tmdbId);
 
   // Catalog fallback for the header — see useCatalogItem: the backend's
@@ -36,6 +44,7 @@ export default function TvSeriesPage() {
   const display = {
     title: detail?.title || catItem?.title || "",
     poster: detail?.poster || catItem?.poster,
+    backdrop: catItem?.backdrop || detail?.poster || catItem?.poster,
     overview: detail?.overview || catItem?.overview,
     year: detail?.year || catItem?.year,
     rating: detail?.rating || catItem?.rating,
@@ -57,6 +66,10 @@ export default function TvSeriesPage() {
   }, [tmdbId]);
 
   const season = detail?.seasons?.[seasonIdx];
+  const episodes = season?.episodes ?? [];
+  const shownEp =
+    episodes.find((e) => e.episode_number === focusedEp) ?? episodes[0] ?? null;
+  const firstEp = detail?.seasons?.[0]?.episodes?.[0];
 
   const epKey = (s: number, e: number) => `s${s}e${e}`;
 
@@ -74,6 +87,11 @@ export default function TvSeriesPage() {
     },
     [tmdbId],
   );
+
+  const playEpisode = (s: number, e: number) => {
+    resolveEpisode(s, e);
+    setPlaying({ season: s, episode: e });
+  };
 
   const playingEpisode: Episode | undefined = useMemo(() => {
     if (!playing || !detail) return undefined;
@@ -131,11 +149,28 @@ export default function TvSeriesPage() {
 
   const closePlayback = useCallback(() => setPlaying(null), []);
 
-  // Episode picked but no playable source yet (no backend streams; HD resolve
-  // still in flight) — hold a full-screen waiting state instead of a dead
-  // Enter press, with Back as the escape hatch.
+  // Episode picked but no playable source yet — hold a full-screen waiting state.
   const waiting = playing !== null && playingSources.length === 0;
   useTvBack(waiting ? closePlayback : null);
+
+  const listed = isInList(seriesId, "series");
+  const toggleList = () => {
+    if (listed) removeFromList(seriesId, "series");
+    else
+      addToList({
+        tmdbId: seriesId,
+        title: display.title,
+        poster: display.poster,
+        kind: "series",
+        service: display.service,
+        addedAt: Date.now(),
+      });
+  };
+
+  const related = useMemo(
+    () => trending.filter((s) => s.tmdb_id !== seriesId).slice(0, 18),
+    [trending, seriesId],
+  );
 
   if (failed && !catItem) {
     return (
@@ -150,108 +185,185 @@ export default function TvSeriesPage() {
     return <p className="px-16 py-20 text-xl text-[#8197a4]">Loading…</p>;
   }
 
+  const seasonLabel =
+    detail && detail.seasons.length === 1 ? "1 season" : detail ? `${detail.seasons.length} seasons` : "";
+
   return (
-    <div className="px-16 pb-16">
-      <div className="flex items-start gap-8 mb-8">
-        {display.poster && (
-          <img
-            src={display.poster}
-            alt={display.title}
-            referrerPolicy="no-referrer"
-            className="w-44 rounded-lg shrink-0 ring-1 ring-white/10"
-          />
+    <div className="relative min-h-screen">
+      {/* Hero */}
+      <div className="relative">
+        {display.backdrop && (
+          <>
+            <img
+              src={display.backdrop}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="absolute top-0 right-0 w-[70%] h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#00050d] via-[#00050d]/70 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#00050d] via-transparent to-transparent" />
+          </>
         )}
-        <div className="min-w-0 pt-2">
-          <h1 className="text-4xl font-bold text-white mb-3">{display.title}</h1>
-          <div className="flex items-center gap-4 mb-4 text-lg text-[#aebbc5]">
+
+        <div className="relative px-16 pt-[18vh] pb-10 max-w-3xl">
+          {display.service && (
+            <p className="text-lg font-bold text-white/85 mb-2">{display.service}</p>
+          )}
+          <h1 className="text-6xl font-bold text-white mb-4">{display.title}</h1>
+          <div className="flex items-center gap-4 mb-6 text-lg text-[#aebbc5]">
             {display.year && <span>{display.year}</span>}
             {display.rating && (
               <span className="border border-[#8197a4]/60 rounded px-2 py-0.5 text-base">
                 {display.rating}
               </span>
             )}
-            {display.service && <span>{display.service}</span>}
+            {seasonLabel && <span>{seasonLabel}</span>}
           </div>
           {display.overview && (
-            <p className="text-lg text-[#aebbc5] leading-relaxed line-clamp-3 max-w-3xl">
+            <p className="text-xl text-[#c7d5e0] leading-relaxed mb-8 line-clamp-3 max-w-2xl">
               {display.overview}
             </p>
           )}
+
+          <div className="flex items-center gap-5">
+            <button
+              data-tv
+              data-tv-autofocus
+              disabled={!firstEp}
+              onClick={() => firstEp && playEpisode(detail!.seasons[0].season_number, firstEp.episode_number)}
+              className="flex items-center gap-3 bg-white text-black text-2xl font-bold px-10 py-5 rounded-lg disabled:opacity-50"
+            >
+              <Play className="w-7 h-7 fill-black" />
+              {firstEp
+                ? `Play S${detail!.seasons[0].season_number} E${firstEp.episode_number}`
+                : "Loading…"}
+            </button>
+            <button
+              data-tv
+              onClick={toggleList}
+              aria-label={listed ? "Remove from My Stuff" : "Add to My Stuff"}
+              className="tv-pill group flex items-center gap-3 bg-white/15 text-white text-xl font-semibold px-8 py-5 rounded-lg focus:outline-none focus:bg-white focus:text-black"
+            >
+              {listed ? <Check className="w-6 h-6" /> : <Plus className="w-6 h-6" />}
+              My Stuff
+            </button>
+          </div>
         </div>
       </div>
 
-      {!detail && (
-        <p className="text-xl text-[#8197a4] mb-6">Loading episodes…</p>
-      )}
+      {/* Episodes */}
+      <div className="relative bg-[#00050d] px-16 pb-4">
+        {!detail && <p className="text-xl text-[#8197a4] mb-6">Loading episodes…</p>}
 
-      {detail && detail.seasons.length > 1 && (
-        <div className="flex items-center gap-4 mb-8 flex-wrap">
-          {detail.seasons.map((s, i) => (
-            <button
-              key={s.season_number}
-              data-tv
-              onClick={() => setSeasonIdx(i)}
-              className={`px-6 py-3 rounded-lg text-xl font-semibold ${
-                i === seasonIdx ? "bg-white text-black" : "bg-[#1a242f] text-[#aebbc5]"
-              }`}
-            >
-              Season {s.season_number}
-            </button>
-          ))}
-        </div>
-      )}
+        {detail && detail.seasons.length > 1 && (
+          <div className="flex items-center gap-3 mb-6 flex-wrap">
+            {detail.seasons.map((s, i) => (
+              <button
+                key={s.season_number}
+                data-tv
+                onFocus={() => {
+                  setSeasonIdx(i);
+                  setFocusedEp(null);
+                }}
+                onClick={() => setSeasonIdx(i)}
+                className={`tv-pill px-6 py-2.5 rounded-lg text-xl font-semibold focus:outline-none focus:bg-white focus:text-black ${
+                  i === seasonIdx ? "text-white" : "text-[#8197a4]"
+                }`}
+              >
+                Season {s.season_number}
+              </button>
+            ))}
+          </div>
+        )}
 
-      <div className="flex flex-col gap-3 max-w-5xl">
-        {season?.episodes.map((ep, i) => {
-          const cw = cwFor(season.season_number, ep.episode_number);
-          return (
-            <button
-              key={ep.episode_number}
-              data-tv
-              {...(i === 0 ? { "data-tv-autofocus": true } : {})}
-              onFocus={() =>
-                prewarmVod("series", tmdbId, season.season_number, ep.episode_number)
-              }
-              onClick={() => {
-                resolveEpisode(season.season_number, ep.episode_number);
-                setPlaying({ season: season.season_number, episode: ep.episode_number });
-              }}
-              className="flex items-center gap-6 rounded-lg bg-[#1a242f] ring-1 ring-white/10 px-6 py-4 text-left"
-            >
-              <span className="text-2xl font-bold text-[#5a6b78] w-10 shrink-0 text-center">
-                {ep.episode_number}
-              </span>
-              {ep.still_url && (
-                <img
-                  src={ep.still_url}
-                  alt=""
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                  className="w-40 aspect-video object-cover rounded-lg shrink-0"
-                />
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-xl font-semibold text-white truncate">{ep.title}</p>
-                {ep.overview && (
-                  <p className="text-base text-[#8197a4] line-clamp-2 mt-1">{ep.overview}</p>
-                )}
-                {cw && cw.progress > 2 && cw.progress < 95 && (
-                  <div className="mt-2 h-1.5 w-56 rounded-full bg-white/15 overflow-hidden">
-                    <div
-                      className="h-full bg-[#1399ff]"
-                      style={{ width: `${Math.round(cw.progress)}%` }}
-                    />
+        {/* Focused-episode detail (Prime's "1. Episode 1" block) */}
+        {shownEp && (
+          <div className="mb-5 max-w-3xl">
+            <h2 className="text-2xl font-bold text-white">
+              {shownEp.episode_number}. {shownEp.title}
+            </h2>
+            {shownEp.overview && (
+              <p className="text-lg text-[#8197a4] leading-relaxed line-clamp-2 mt-1">
+                {shownEp.overview}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Horizontal episode row */}
+        {season && (
+          <div className="flex gap-5 overflow-x-auto py-2">
+            {episodes.map((ep, i) => {
+              const cw = cwFor(season.season_number, ep.episode_number);
+              return (
+                <button
+                  key={ep.episode_number}
+                  data-tv
+                  {...(i === 0 ? { "data-tv-autofocus": true } : {})}
+                  onFocus={() => {
+                    setFocusedEp(ep.episode_number);
+                    prewarmVod("series", tmdbId, season.season_number, ep.episode_number);
+                  }}
+                  onClick={() => playEpisode(season.season_number, ep.episode_number)}
+                  className="w-72 shrink-0 text-left focus:outline-none"
+                >
+                  <div className="relative aspect-video rounded-lg overflow-hidden bg-[#1a242f] ring-1 ring-white/10">
+                    {ep.still_url ? (
+                      <img
+                        src={ep.still_url}
+                        alt=""
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Play className="w-8 h-8 text-white/25" />
+                      </div>
+                    )}
+                    {cw && cw.progress > 2 && cw.progress < 95 && (
+                      <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20">
+                        <div
+                          className="h-full bg-[#e50914]"
+                          style={{ width: `${Math.round(cw.progress)}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              <Play className="w-6 h-6 text-[#8197a4] shrink-0" />
-            </button>
-          );
-        })}
+                  <p className="mt-2 text-base font-semibold text-white truncate">
+                    S{season.season_number} E{ep.episode_number}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      {/* More like this */}
+      {related.length > 0 && (
+        <div className="relative bg-[#00050d] pb-16 pt-2">
+          <TvRail title="Customers also watched">
+            {related.map((s) => (
+              <TvLandscapeCard
+                key={s.tmdb_id}
+                tmdbId={s.tmdb_id}
+                title={s.title}
+                backdrop={s.backdrop}
+                poster={s.poster}
+                kind="series"
+                showTitle
+              />
+            ))}
+          </TvRail>
+        </div>
+      )}
 
       {waiting && (
-        <div data-tv-trap className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center gap-4">
+        <div
+          data-tv-trap
+          className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center gap-4"
+        >
           <p className="text-2xl text-white">Finding streams…</p>
           <p className="text-xl text-text-muted">Press Back to cancel.</p>
         </div>

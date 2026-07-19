@@ -417,23 +417,40 @@ video::cue {
 .tv-root {
   cursor: none;
   scrollbar-width: none;
-  --tv-bg: #0f171e;
+  --tv-bg: #00050d;
   --tv-card: #1a242f;
   --tv-accent: #1399ff;
+  --tv-live: #c7040c;
   background-color: var(--tv-bg);
+  /* Prime home glow: a blue radial sweep out of the top-left fading into
+     near-black. Fixed, so content scrolls over it. */
+  background-image: radial-gradient(
+    140% 120% at 18% -10%,
+    rgba(37, 87, 165, 0.55) 0%,
+    rgba(23, 52, 102, 0.35) 38%,
+    rgba(0, 5, 13, 0) 68%
+  );
+  background-attachment: fixed;
 }
 .tv-root ::-webkit-scrollbar {
   display: none;
 }
 .tv-root [data-tv] {
-  transition: transform 0.15s ease;
+  transition: transform 0.18s ease;
 }
 .tv-root [data-tv]:focus {
   outline: 3px solid #ffffff;
-  outline-offset: 2px;
-  border-radius: 0.5rem;
+  outline-offset: 4px;
+  border-radius: 0.75rem;
   z-index: 1;
-  transform: scale(1.04);
+  transform: scale(1.02);
+}
+/* Text pills (nav tabs, action chips) become the solid white pill on focus —
+   Prime's cursor for text items — instead of the card ring-and-grow. The
+   white fill itself comes from each pill's focus:bg-white/focus:text-black. */
+.tv-root .tv-pill:focus {
+  outline: none;
+  transform: none;
 }
 
 /* ── Legacy-engine fallbacks (Samsung RU7100: Tizen 5.0 ≈ Chromium 63) ─────

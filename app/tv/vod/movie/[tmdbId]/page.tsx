@@ -2,14 +2,18 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
-import { Play, RotateCcw } from "lucide-react";
+import { Play, RotateCcw, Plus, Check } from "lucide-react";
 import { proxyFetch } from "@/lib/api";
 import { mergeSources } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
 import { useCatalogItem } from "@/hooks/useCatalogItem";
+import { useTrendingCatalog } from "@/hooks/useTrendingCatalog";
+import { useMyList } from "@/hooks/useMyList";
 import { useSubtitles } from "@/hooks/useSubtitles";
 import TvVodPlayback from "@/components/tv/TvVodPlayback";
+import TvRail from "@/components/tv/TvRail";
+import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
 import type { VodDetail } from "@/lib/types";
 
 /** TV movie page: backdrop hero + Play/Restart. Embeds are dropped (no way to
@@ -33,7 +37,9 @@ export default function TvMoviePage() {
   }, []);
 
   const { items, updateProgress, remove } = useContinueWatching();
+  const { add: addToList, remove: removeFromList, isInList } = useMyList();
   const subtitles = useSubtitles("movie", tmdbId);
+  const { movies: trending } = useTrendingCatalog();
 
   // Catalog fallback: the backend's details record is EMPTY for many trending
   // titles — the catalog row (which the user just came from) fills the header
@@ -108,6 +114,25 @@ export default function TvMoviePage() {
 
   const closePlayback = useCallback(() => setPlaying(false), []);
 
+  const listed = isInList(cwId, "movie");
+  const toggleList = () => {
+    if (listed) removeFromList(cwId, "movie");
+    else
+      addToList({
+        tmdbId: cwId,
+        title: display.title,
+        poster: display.backdrop,
+        kind: "movie",
+        service: display.service,
+        addedAt: Date.now(),
+      });
+  };
+
+  const related = useMemo(
+    () => trending.filter((m) => m.tmdb_id !== cwId).slice(0, 18),
+    [trending, cwId],
+  );
+
   if (failed && !catItem) {
     return (
       <div className="px-16 py-20">
@@ -123,70 +148,106 @@ export default function TvMoviePage() {
 
   return (
     <div className="relative min-h-screen">
-      {display.backdrop && (
-        <>
-          <img
-            src={display.backdrop}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0f171e] via-[#0f171e]/75 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0f171e] to-transparent" />
-        </>
-      )}
-
-      <div className="relative px-16 pt-[26vh] pb-16 max-w-3xl">
-        <h1 className="text-5xl font-bold text-white mb-4">{display.title}</h1>
-        <div className="flex items-center gap-4 mb-6 text-lg text-[#aebbc5]">
-          {display.year && <span>{display.year}</span>}
-          {display.rating && (
-            <span className="border border-[#8197a4]/60 rounded px-2 py-0.5 text-base">
-              {display.rating}
-            </span>
-          )}
-          {display.service && <span>{display.service}</span>}
-        </div>
-        {display.overview && (
-          <p className="text-xl text-[#aebbc5] leading-relaxed mb-10 line-clamp-4">
-            {display.overview}
-          </p>
+      {/* Full-bleed hero: backdrop bleeds from the right, details bottom-left. */}
+      <div className="relative h-screen">
+        {display.backdrop && (
+          <>
+            <img
+              src={display.backdrop}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="absolute top-0 right-0 w-[70%] h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#00050d] via-[#00050d]/70 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#00050d] via-transparent to-transparent" />
+          </>
         )}
 
-        <div className="flex items-center gap-5">
-          <button
-            data-tv
-            data-tv-autofocus
-            disabled={sources.length === 0}
-            onClick={() => {
-              setFromStart(false);
-              setPlaying(true);
-            }}
-            className="flex items-center gap-3 bg-white text-black text-2xl font-bold px-10 py-5 rounded-lg disabled:opacity-50"
-          >
-            <Play className="w-7 h-7 fill-black" />
-            {sources.length === 0
-              ? "Finding streams…"
-              : resumeTime > 0
-                ? "Resume"
-                : "Play"}
-          </button>
+        <div className="relative px-16 pt-[24vh] pb-16 max-w-3xl">
+          {display.service && (
+            <p className="text-lg font-bold text-white/85 mb-2">{display.service}</p>
+          )}
+          <h1 className="text-6xl font-bold text-white mb-4">{display.title}</h1>
+          <div className="flex items-center gap-4 mb-6 text-lg text-[#aebbc5]">
+            {display.year && <span>{display.year}</span>}
+            {display.rating && (
+              <span className="border border-[#8197a4]/60 rounded px-2 py-0.5 text-base">
+                {display.rating}
+              </span>
+            )}
+            <span>Movie</span>
+          </div>
+          {display.overview && (
+            <p className="text-xl text-[#c7d5e0] leading-relaxed mb-10 line-clamp-4 max-w-2xl">
+              {display.overview}
+            </p>
+          )}
 
-          {resumeTime > 0 && sources.length > 0 && (
+          <div className="flex items-center gap-5">
             <button
               data-tv
+              data-tv-autofocus
+              disabled={sources.length === 0}
               onClick={() => {
-                setFromStart(true);
+                setFromStart(false);
                 setPlaying(true);
               }}
-              className="flex items-center gap-3 bg-white/15 text-white text-2xl font-semibold px-10 py-5 rounded-lg"
+              className="flex items-center gap-3 bg-white text-black text-2xl font-bold px-10 py-5 rounded-lg disabled:opacity-50"
             >
-              <RotateCcw className="w-6 h-6" />
-              From beginning
+              <Play className="w-7 h-7 fill-black" />
+              {sources.length === 0
+                ? "Finding streams…"
+                : resumeTime > 0
+                  ? "Resume"
+                  : "Play"}
             </button>
-          )}
+
+            {resumeTime > 0 && sources.length > 0 && (
+              <button
+                data-tv
+                onClick={() => {
+                  setFromStart(true);
+                  setPlaying(true);
+                }}
+                className="flex items-center gap-3 bg-white/15 text-white text-2xl font-semibold px-10 py-5 rounded-lg"
+              >
+                <RotateCcw className="w-6 h-6" />
+                From beginning
+              </button>
+            )}
+
+            <button
+              data-tv
+              onClick={toggleList}
+              aria-label={listed ? "Remove from My Stuff" : "Add to My Stuff"}
+              className="tv-pill group flex items-center gap-3 bg-white/15 text-white text-xl font-semibold px-8 py-5 rounded-lg focus:outline-none focus:bg-white focus:text-black"
+            >
+              {listed ? <Check className="w-6 h-6" /> : <Plus className="w-6 h-6" />}
+              My Stuff
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* More like this — scrolls up over the solid page bg, Prime-style. */}
+      {related.length > 0 && (
+        <div className="relative bg-[#00050d] pb-16 -mt-8">
+          <TvRail title="More like this">
+            {related.map((m) => (
+              <TvLandscapeCard
+                key={m.tmdb_id}
+                tmdbId={m.tmdb_id}
+                title={m.title}
+                backdrop={m.backdrop}
+                poster={m.poster}
+                kind="movie"
+                badge="TRENDING"
+                showTitle
+              />
+            ))}
+          </TvRail>
+        </div>
+      )}
 
       {playing && sources.length > 0 && (
         <TvVodPlayback
