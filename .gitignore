@@ -46,3 +46,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Tizen package artifacts (built from tizen/ — see tizen/README.md)
+tizen/*.wgt
