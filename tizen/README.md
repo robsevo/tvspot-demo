@@ -11,34 +11,39 @@ browser, Fire TV Silk): just open `https://<your-domain>/tv`. TV browsers
 hitting `/` are redirected to `/tv` automatically by user-agent. The wrapper
 app is nicer (real home-screen tile, no address bar, remote Back key exits).
 
-## One-time setup
+## One-time setup (done 2026-07-18 on the RU7100 — kept for re-runs)
 
-1. **Set the app URL**: edit `index.html` and replace
-   `https://YOUR-TVSPOT-DOMAIN.vercel.app` with the real deployed origin.
+1. **App URL** is set in `index.html` (https://tvspot.vercel.app).
 
-2. **Install Tizen Studio** (with CLI) from
-   https://developer.samsung.com/smarttv/develop/getting-started/setting-up-sdk/installing-tv-sdk.html
-   — during install, add the "TV Extensions" package. The `tizen` CLI lands in
-   `~/tizen-studio/tools/ide/bin/`.
+2. **Tizen Studio CLI** is installed at `~/tizen-studio` (web-cli installer
+   from download.tizen.org/sdk/Installer/ — no AUR package needed), plus the
+   `Certificate-Manager` and `cert-add-on` packages via
+   `~/tizen-studio/package-manager/package-manager-cli.bin install`.
 
-3. **Create a Samsung certificate** (once): Tizen Studio → Tools →
-   Certificate Manager → new **Samsung** certificate (needs a free Samsung
-   account). Both an author and a distributor certificate are created.
+3. **Certificate**: a plain Tizen author certificate + default distributor
+   was ENOUGH for developer-mode sideloading on the RU7100 — no
+   Samsung-account certificate needed. Profile "tvspot" already exists
+   (created with `tizen certificate` / `tizen security-profiles add`).
 
-4. **Put the TV in developer mode**:
-   - On the TV: open the **Apps** panel, type `12345` on the remote (a hidden
-     dialog opens), switch Developer mode **On**, and enter your computer's
-     IP. Reboot the TV.
-   - TV and computer must be on the same network.
+4. **TV developer mode**: on the TV open the **Apps** panel, type `12345` on
+   the remote, switch Developer mode **On**, enter this computer's LAN IP,
+   reboot the TV. TV and computer on the same network.
 
 ## Package and install
 
 ```bash
 # from this tizen/ directory
-tizen package -t wgt -s <your-certificate-profile-name> -- .
-tizen connect <TV-IP>                 # sdb connects to the TV
-tizen install -n TVSpot.wgt -t <target-name-from-`sdb devices`>
+TIZEN=~/tizen-studio/tools/ide/bin/tizen
+~/tizen-studio/tools/sdb connect <TV-IP>
+$TIZEN package -t wgt -s tvspot -- .
+$TIZEN install -n TVSpot.wgt -t <name from `sdb devices`> -- .
+$TIZEN run -p TVSpotTVapp.TVSpot -t <name>     # optional: launch remotely
 ```
+
+**config.xml format rules (violations = opaque "Parsing error [118, -19]"
+at install):** the application id must be `<exactly-10-alphanumeric>.<name>`
+with `package` equal to the 10-char part, and the profile must be
+`tv-samsung`.
 
 The app appears in the TV's Apps row. Launch it — it should show
 "Starting TVSpot…" then land on the TV login. Sign in once with

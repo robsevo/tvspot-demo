@@ -5,29 +5,29 @@
   logic, auth, and the API proxy stay on the Vercel deployment, so the TV
   app updates itself on every deploy with no re-packaging.
 
-  Before packaging, set your deployed origin in index.html (APP_URL).
+  Format notes learned against a real RU7100: the application id MUST be
+  "<exactly-10-alphanumeric-chars>.<name>" with package = the 10-char part,
+  and the profile is "tv-samsung" — violations fail install with the opaque
+  "Parsing error [118, -19]".
 -->
 <widget xmlns="http://www.w3.org/ns/widgets"
         xmlns:tizen="http://tizen.org/ns/widgets"
         id="http://tvspot.local/tvspot-tv"
         version="1.0.0"
         viewmodes="maximized">
-  <tizen:application id="TVSpotTVap.TVSpot" package="TVSpotTVap" required_version="2.3"/>
+  <access origin="*" subdomains="true"/>
+  <tizen:application id="TVSpotTVapp.TVSpot" package="TVSpotTVapp" required_version="2.3"/>
   <content src="index.html"/>
   <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
   <icon src="icon.png"/>
   <name>TVSpot</name>
-  <!-- The wrapper page navigates to the hosted app; both allow-navigation and
-       access must cover the deployed origin (and any redirect targets). -->
   <tizen:allow-navigation>*</tizen:allow-navigation>
-  <access origin="*" subdomains="true"/>
   <tizen:privilege name="http://tizen.org/privilege/internet"/>
-  <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+  <tizen:profile name="tv-samsung"/>
   <tizen:setting screen-orientation="landscape"
                  context-menu="disable"
                  background-support="disable"
                  encryption="disable"
                  install-location="auto"
                  hwkey-event="enable"/>
-  <tizen:profile name="tv"/>
 </widget>
