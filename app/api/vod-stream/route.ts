@@ -15,8 +15,18 @@ import { verifyToken } from "@/lib/auth";
 // SSRF to private/loopback addresses.
 
 export const dynamic = "force-dynamic";
+/** Must exceed FULL_FETCH_TIMEOUT_MS below, or the platform kills the function
+ *  before our own timeout can fire and the caller gets an opaque failure instead
+ *  of a clean 502 — the cold-remux wait is legitimately ~26s. */
+export const maxDuration = 60;
 
 const CHUNK = 8 * 1024 * 1024; // per-response byte cap for media segments/mp4
+/** Patience for a whole-resource fetch (playlists, full segments).
+ *  Generous because the relay's remux spawns ffmpeg ON DEMAND and a COLD start
+ *  measured ~26s — the previous 15s cut that off and surfaced as "upstream fetch
+ *  failed" at 15.2s, making a perfectly good AAC fallback look dead. Byte-range
+ *  reads keep their own short timeouts; only this path waits on a cold encoder. */
+const FULL_FETCH_TIMEOUT_MS = 45_000;
 const UA = "VLC/3.0.20 LibVLC/3.0.20";
 const SELF = "/api/vod-stream?url=";
 
@@ -152,6 +162,17 @@ export async function GET(request: NextRequest) {
     (await verifyStreamToken(target, request.nextUrl.searchParams.get("st")));
   if (!authed) return new NextResponse("unauthorized", { status: 401 });
 
+  // The relay's remux accepts &start=<sec> to begin ffmpeg mid-file — that's how
+  // resume works on a stream you can't seek. It has to be forwarded rather than
+  // baked into `url`, because the signature is bound to the EXACT target: editing
+  // the inner URL to add a start offset would invalidate it. Numeric-only, so
+  // this can't be used to graft arbitrary query onto the upstream.
+  const startParam = request.nextUrl.searchParams.get("start");
+  const startSec = startParam && /^\d{1,7}$/.test(startParam) ? startParam : null;
+  const upstreamUrl = startSec
+    ? `${target}${target.includes("?") ? "&" : "?"}start=${startSec}`
+    : target;
+
   // Referer-gated CDN family (Provider B): the origin 403s every hop without a
   // Referer, and the whole playlist tree is extension-obfuscated (.txt master +
   // variants, .woff/.woff2 fMP4 segments) so the URL tells us nothing. Inject the
@@ -165,7 +186,7 @@ export async function GET(request: NextRequest) {
     if (!range) {
       let res: Response;
       try {
-        res = await fetch(target, { headers: base, redirect: "follow", signal: AbortSignal.timeout(15000) });
+        res = await fetch(upstreamUrl, { headers: base, redirect: "follow", signal: AbortSignal.timeout(FULL_FETCH_TIMEOUT_MS) });
       } catch {
         return new NextResponse("upstream fetch failed", { status: 502 });
       }
@@ -209,7 +230,7 @@ export async function GET(request: NextRequest) {
     const end = Math.min(reqEnd ?? start + CHUNK - 1, start + CHUNK - 1);
     let upstream: Response;
     try {
-      upstream = await fetch(target, {
+      upstream = await fetch(upstreamUrl, {
         headers: { ...base, Range: `bytes=${start}-${end}` },
         redirect: "follow",
         signal: AbortSignal.timeout(20000),
@@ -237,7 +258,7 @@ export async function GET(request: NextRequest) {
   if (M3U8_RE.test(target)) {
     let res: Response;
     try {
-      res = await fetch(target, { headers: { "User-Agent": UA }, redirect: "follow", signal: AbortSignal.timeout(15000) });
+      res = await fetch(upstreamUrl, { headers: { "User-Agent": UA }, redirect: "follow", signal: AbortSignal.timeout(FULL_FETCH_TIMEOUT_MS) });
     } catch {
       return new NextResponse("upstream fetch failed", { status: 502 });
     }
@@ -271,7 +292,7 @@ export async function GET(request: NextRequest) {
 
   let upstream: Response;
   try {
-    upstream = await fetch(target, {
+    upstream = await fetch(upstreamUrl, {
       headers: { "User-Agent": UA, Range: `bytes=${start}-${end}` },
       redirect: "follow",
       signal: AbortSignal.timeout(20000),

@@ -111,7 +111,7 @@ export default function VodPlayer({
 
   const arm = useCallback(() => {
     clear();
-    const ms = src.includes("/remux.m3u8") ? NEVER_STARTED_REMUX_MS : NEVER_STARTED_MS;
+    const ms = src.includes("remux.m3u8") ? NEVER_STARTED_REMUX_MS : NEVER_STARTED_MS;
     timer.current = setTimeout(() => {
       if (!failed.current && !started) fail();
     }, ms);
@@ -139,7 +139,7 @@ export default function VodPlayer({
 
   // Remux sources (relay live-style HLS) can't seek — resume is baked into the
   // URL instead: the relay's ffmpeg starts reading the file at &start=<sec>.
-  const isRemux = src.includes("/remux.m3u8");
+  const isRemux = src.includes("remux.m3u8");
   const effectiveSrc =
     isRemux && initialTime && initialTime > 30
       ? `${src}&start=${Math.max(0, Math.floor(initialTime) - 5)}`
