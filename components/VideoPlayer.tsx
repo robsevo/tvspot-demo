@@ -47,6 +47,17 @@ function writeCcPref(pref: CcPref) {
   try { localStorage.setItem(CC_PREF_KEY, JSON.stringify(pref)); } catch {}
 }
 
+/** Resting caption offset when the video frame hasn't been measured yet.
+ *  env() is Chrome 69+, and an engine that doesn't understand a value DROPS THE
+ *  WHOLE DECLARATION — on the TV's Chromium 63 that removed `bottom` entirely
+ *  and the absolutely-positioned overlay fell back to its static position, i.e.
+ *  captions rendered at the TOP of the picture. Only use env() where it parses. */
+const CC_BOTTOM_FALLBACK =
+  typeof CSS !== "undefined" && typeof CSS.supports === "function" &&
+  CSS.supports("bottom", "calc(0.75rem + env(safe-area-inset-bottom, 0px))")
+    ? "calc(0.75rem + env(safe-area-inset-bottom, 0px))"
+    : "0.75rem";
+
 /** One styled run of caption text; a rendered caption line is a list of these. */
 interface CcSeg { text: string; i: boolean; b: boolean; u: boolean }
 type CcLine = CcSeg[];
@@ -1131,11 +1142,20 @@ export default function VideoPlayer({
   useEffect(() => {
     const el = containerRef.current;
     const video = videoRef.current;
-    if (!el || !video || typeof ResizeObserver === "undefined") return;
+    // ResizeObserver is Chrome 64+. Bailing when it's missing meant this whole
+    // effect never ran on the TV's Chromium 63: ccFontPx stayed at its initial
+    // 16px (unreadably small across a room) and ccBottomPx stayed null. It is an
+    // OPTIONAL upgrade here, not a prerequisite — the measurement itself only
+    // needs clientWidth/Height, which every engine has.
+    if (!el || !video) return;
     const compute = () => {
       const w = el.clientWidth;
       const h = el.clientHeight;
-      if (w > 0) setCcFontPx(Math.round(Math.min(26, Math.max(13, w * 0.034))));
+      // A 10-foot screen needs far bigger text than a 375px phone, and the old
+      // 26px ceiling — tuned for handheld/desktop — capped the TV at something
+      // you squint at. `hideControls` is the TV shell's signal.
+      const maxPx = hideControls ? 52 : 26;
+      if (w > 0) setCcFontPx(Math.round(Math.min(maxPx, Math.max(13, w * 0.034))));
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       if (vw > 0 && vh > 0 && w > 0 && h > 0) {
@@ -1148,14 +1168,19 @@ export default function VideoPlayer({
       }
     };
     compute();
-    const ro = new ResizeObserver(compute);
-    ro.observe(el);
+    // Prefer ResizeObserver where it exists; fall back to window resize so
+    // legacy engines still track orientation/fullscreen changes.
+    const ro =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(compute) : null;
+    if (ro) ro.observe(el);
+    else window.addEventListener("resize", compute);
     video.addEventListener("loadedmetadata", compute);
     return () => {
-      ro.disconnect();
+      if (ro) ro.disconnect();
+      else window.removeEventListener("resize", compute);
       video.removeEventListener("loadedmetadata", compute);
     };
-  }, [src]);
+  }, [src, hideControls]);
 
   // Auto-apply the remembered preference once per source, as soon as there's
   // something to apply it to. Prefers a real embedded caption track (live
@@ -1458,7 +1483,7 @@ export default function VideoPlayer({
               ? `${Math.max(84, ccBottomPx ?? 0)}px`
               : ccBottomPx != null
                 ? `${ccBottomPx}px`
-                : "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+                : CC_BOTTOM_FALLBACK,
           }}
         >
           {/* One OPAQUE box around all lines: some movie/series encodes carry
