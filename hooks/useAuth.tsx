@@ -2,6 +2,11 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 
+/** Cap on the /api/auth/me round-trip. The TV shell shows its splash while
+ *  `loading` is true, so an unbounded fetch means an unbounded splash. Long
+ *  enough for a slow-but-alive panel, short enough not to look like a hang. */
+const AUTH_TIMEOUT_MS = 8000;
+
 interface AuthContextType {
   username: string | null;
   loading: boolean;
@@ -47,14 +52,36 @@ export function AuthProvider({
       // (the 2019 TV webview) default fetch to credentials:"omit", which both
       // drops the login response's Set-Cookie and stops the cookie being sent —
       // "signing in" simply never stuck on the TV.
-      const res = await fetch("/api/auth/me", { credentials: "include" });
+      //
+      // TIMEOUT (not optional): this fetch gates `loading`, and the /tv shell
+      // renders its "Starting TVSpot" splash for as long as loading is true. A
+      // fetch that never SETTLES never runs the finally below, so the TV sits on
+      // that splash forever with no error and no redirect — exactly the hang
+      // observed on the RU7100, whose network stack is routinely not up yet at
+      // cold app launch (tizen/app.js guards its own probe for the same reason).
+      // AbortSignal.timeout is Chrome 103+, so this is done by hand: the TV's
+      // Chromium 63 would throw on the modern form and skip straight to catch.
+      const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timer = setTimeout(() => { try { ctl?.abort(); } catch {} }, AUTH_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch("/api/auth/me", {
+          credentials: "include",
+          ...(ctl ? { signal: ctl.signal } : {}),
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       const data = await res.json();
       const u = data.username ?? null;
       setUsername(u);
       cacheUser(u);
     } catch {
-      // Network blip (e.g. offline after eviction): keep the optimistic cached
-      // user rather than logging them out. Only an explicit no-user response clears it.
+      // Network blip (e.g. offline after eviction), or the timeout above: keep
+      // the optimistic cached user rather than logging them out. Only an
+      // explicit no-user response clears it. Either way `loading` is released
+      // below, so the shell moves on to the TV login (which silently re-signs in
+      // with remembered credentials) instead of hanging on the splash.
     } finally {
       setLoading(false);
     }
