@@ -8,18 +8,10 @@ import { useTvBack } from "@/components/tv/TvNav";
 import { TVKEY } from "@/lib/tv";
 import type { PlayableSource } from "@/lib/sources";
 import type { SubtitleTrack } from "@/lib/subtitles";
-import {
-  AUTO_NEXT_SECONDS,
-  introEndFor,
-  showNextUp,
-  showSkipIntro,
-} from "@/lib/episodeMarkers";
+import { useEpisodeMarkers } from "@/hooks/useEpisodeMarkers";
 
 const SEEK_STEP_S = 15;
 const OSD_MS = 3500;
-/** Marker polling cadence. Independent of the OSD tick, which only runs while
- *  the OSD is visible — these buttons must appear with the OSD hidden. */
-const MARKER_TICK_MS = 500;
 
 interface Props {
   /** Failover chain, best first (stream sources only — embeds are unusable
@@ -117,81 +109,24 @@ export default function TvVodPlayback({
   }, [osdVisible]);
 
   // ── Skip intro / Next up ──────────────────────────────────────────────────
-  // Dismissals are stamped with the source `index` they were made against and
-  // compared during render, rather than reset by an effect: a failover restarts
-  // the episode on a new source, and a card waved away on the dead one should
-  // come back. (Deriving it also keeps the React-compiler lint happy — a
-  // setState inside an effect is an error in this repo.)
-  const [marks, setMarks] = useState({ skip: false, next: false });
-  const [dismissed, setDismissed] = useState({ src: -1, skip: false, next: false });
-  const [countdown, setCountdown] = useState<number | null>(null);
+  // Timing, dismissal and auto-advance live in the shared hook so the TV and
+  // mobile shells can't drift; everything below is TV-specific presentation
+  // (focusable pills, Enter/Back handling).
   const actionRef = useRef<HTMLButtonElement | null>(null);
-
-  const dismiss = useCallback((which: "skip" | "next") => {
-    setDismissed((d) => ({
-      ...(d.src === index ? d : { src: index, skip: false, next: false }),
-      src: index,
-      [which]: true,
-    }));
-  }, [index]);
-
-  const skipVisible = marks.skip && !(dismissed.src === index && dismissed.skip);
-  const nextVisible = marks.next && !(dismissed.src === index && dismissed.next) && !!nextUp;
+  const {
+    skipVisible,
+    nextVisible,
+    countdown: shownCount,
+    skipIntro: seekPastIntro,
+    playNext,
+    dismiss: dismissAction,
+  } = useEpisodeMarkers(videoElRef, nextUp ? nextUp.play : null, index);
   const actionVisible = skipVisible || nextVisible;
 
-  // Poll the element rather than driving off timeupdate: timeupdate stops
-  // firing while paused, and the card must stay put if someone pauses on the
-  // credits. Booleans only change a handful of times per episode, so the
-  // early-out keeps this from re-rendering 2x/second.
-  useEffect(() => {
-    const tick = () => {
-      const v = videoElRef.current;
-      if (!v) return;
-      const skip = showSkipIntro(v.currentTime, v.duration);
-      const next = showNextUp(v.currentTime, v.duration);
-      setMarks((m) => (m.skip === skip && m.next === next ? m : { skip, next }));
-    };
-    tick();
-    const id = setInterval(tick, MARKER_TICK_MS);
-    return () => clearInterval(id);
-  }, []);
-
-  const playNext = useCallback(() => {
-    nextUp?.play();
-  }, [nextUp]);
-
   const skipIntro = useCallback(() => {
-    const v = videoElRef.current;
-    if (!v) return;
-    // Seek to an ABSOLUTE target, never a relative jump — repeated presses (an
-    // easy thing to do on a remote) would otherwise walk into the episode.
-    v.currentTime = introEndFor(v.duration);
-    dismiss("skip");
-    raiseOsd(v.paused);
-  }, [raiseOsd, dismiss]);
-
-  // Auto-advance countdown. Deadline-based rather than a decrementing counter:
-  // the remaining value is computed from wall-clock inside the tick, so nothing
-  // is written to state during the effect body, and a webview that throttles
-  // timers can't stretch a 15s countdown into 40s of real time.
-  useEffect(() => {
-    if (!nextVisible) return;
-    const deadline = Date.now() + AUTO_NEXT_SECONDS * 1000;
-    const id = setInterval(() => {
-      const left = Math.ceil((deadline - Date.now()) / 1000);
-      if (left <= 0) {
-        clearInterval(id);
-        playNext();
-      } else {
-        setCountdown(left);
-      }
-    }, 250);
-    return () => clearInterval(id);
-  }, [nextVisible, playNext]);
-
-  // Shown value: fall back to the full count for the sub-tick before the first
-  // interval fires, so the card never paints a blank or a stale number.
-  const shownCount = nextVisible ? (countdown ?? AUTO_NEXT_SECONDS) : null;
+    seekPastIntro();
+    raiseOsd(videoElRef.current?.paused);
+  }, [seekPastIntro, raiseOsd]);
 
   // Move focus onto whichever action is showing so Enter activates it, and
   // hand focus back to the player when it goes away.
@@ -199,15 +134,14 @@ export default function TvVodPlayback({
     if (actionVisible) actionRef.current?.focus();
   }, [actionVisible, skipVisible, nextVisible]);
 
-  const dismissAction = useCallback(() => {
-    if (nextVisible) dismiss("next");
-    else if (skipVisible) dismiss("skip");
+  const dismissAndBlur = useCallback(() => {
+    dismissAction();
     actionRef.current?.blur();
-  }, [nextVisible, skipVisible, dismiss]);
+  }, [dismissAction]);
 
   // Back dismisses the card first, and only exits playback once nothing is up —
   // otherwise waving away "Next up" would quit the episode.
-  useTvBack(actionVisible ? dismissAction : onClose);
+  useTvBack(actionVisible ? dismissAndBlur : onClose);
 
   // This source is dead — resume the next one where playback left off.
   const fail = useCallback(

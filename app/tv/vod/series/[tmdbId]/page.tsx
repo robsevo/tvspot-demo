@@ -12,6 +12,7 @@ import { useTrendingCatalog } from "@/hooks/useTrendingCatalog";
 import { useMyList } from "@/hooks/useMyList";
 import { useSubtitles } from "@/hooks/useSubtitles";
 import TvVodPlayback from "@/components/tv/TvVodPlayback";
+import { findNextEpisode } from "@/lib/episodeMarkers";
 import TvRail from "@/components/tv/TvRail";
 import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
 import { useTvBack } from "@/components/tv/TvNav";
@@ -177,30 +178,14 @@ export default function TvSeriesPage() {
    */
   const nextUp = useMemo(() => {
     if (!playing || !detail) return null;
-    const sIdx = detail.seasons.findIndex((s) => s.season_number === playing.season);
-    if (sIdx < 0) return null;
-    const eps = detail.seasons[sIdx].episodes ?? [];
-    const eIdx = eps.findIndex((e) => e.episode_number === playing.episode);
-
-    let season = playing.season;
-    let ep = eIdx >= 0 ? eps[eIdx + 1] : undefined;
-    if (!ep) {
-      // Walk forward — a season with an empty episode list must not dead-end
-      // the binge (the backend does return those).
-      const nextSeason = detail.seasons.slice(sIdx + 1).find((s) => (s.episodes ?? []).length > 0);
-      if (!nextSeason) return null;
-      season = nextSeason.season_number;
-      ep = nextSeason.episodes[0];
-    }
-    if (!ep) return null;
-
-    const epNumber = ep.episode_number;
+    const n = findNextEpisode(detail.seasons, playing.season, playing.episode);
+    if (!n) return null;
     return {
-      label: `S${season} E${epNumber}${ep.title ? ` · ${ep.title}` : ""}`,
-      play: () => playEpisode(season, epNumber),
+      label: `S${n.season} E${n.episode}${n.title ? ` · ${n.title}` : ""}`,
+      play: () => playEpisode(n.season, n.episode),
     };
-    // playEpisode is stable enough here (it only closes over tmdbId/dispatch);
-    // including it would rebuild the card every render.
+    // playEpisode only closes over tmdbId/dispatch; including it would rebuild
+    // the card every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, detail]);
 

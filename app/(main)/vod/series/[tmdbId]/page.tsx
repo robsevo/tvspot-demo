@@ -8,6 +8,9 @@ import { ChevronLeft, ChevronDown, Check, X, Loader2, RefreshCw, ExternalLink, I
 import { mergeSources, type PlayableSource } from "@/lib/sources";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import VodPlayer from "@/components/VodPlayer";
+import EpisodeActions from "@/components/EpisodeActions";
+import { useEpisodeMarkers } from "@/hooks/useEpisodeMarkers";
+import { findNextEpisode } from "@/lib/episodeMarkers";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
 import { useSubtitles } from "@/hooks/useSubtitles";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
@@ -59,6 +62,8 @@ export default function VodSeriesPage() {
   const [expandedSeasons, setExpandedSeasons] = useState<Record<number, boolean>>({});
   // URL that actually reached first frame for the playing episode.
   const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
+  // The playing episode's <video>, so the marker hook can read currentTime.
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
 
   const { items, updateProgress, remove } = useContinueWatching();
   const seriesId = useMemo(() => (tmdbId ? Number(tmdbId) : 0), [tmdbId]);
@@ -119,6 +124,42 @@ export default function VodSeriesPage() {
       setEpStateField(epKey, "resolved", []);
     }
   }, [tmdbId, setEpStateField]);
+
+  /**
+   * Open an episode for playback. Shared by the row tap and by "Next episode"
+   * auto-advance, so both take exactly the same path — the auto-advance in
+   * particular must expand the target season (a next-season episode lives in a
+   * COLLAPSED accordion) and scroll to it, or playback would continue somewhere
+   * off screen.
+   */
+  const openEpisode = useCallback(
+    (seasonNumber: number, episodeNumber: number) => {
+      const key = `${seasonNumber}-${episodeNumber}`;
+      setPlayingEpisode(key);
+      setConfirmedUrl(null);
+      setExpandedSeasons((prev) => (prev[seasonNumber] ? prev : { ...prev, [seasonNumber]: true }));
+      // Snapshot the resume position NOW — deriving it live would churn the
+      // player src (see EpisodeState.resume).
+      const entry = items.find(
+        (i) =>
+          i.tmdbId === seriesId && i.kind === "series" &&
+          i.season === seasonNumber && i.episode === episodeNumber,
+      );
+      const resume =
+        entry?.duration && entry.duration > 0
+          ? Math.round((entry.progress / 100) * entry.duration)
+          : 0;
+      setEpStateField(key, "resume", resume);
+      if (getEpState(key).resolved.length === 0) {
+        resolveEpisode(key, seasonNumber, episodeNumber);
+      }
+      // Next frame — the row may have only just been revealed by the expand.
+      requestAnimationFrame(() =>
+        document.getElementById(`ep-${key}`)?.scrollIntoView({ block: "center", behavior: "smooth" }),
+      );
+    },
+    [items, seriesId, setEpStateField, getEpState, resolveEpisode],
+  );
 
   useEffect(() => {
     if (!tmdbId) return;
@@ -202,6 +243,22 @@ export default function VodSeriesPage() {
       if (idx >= 0 && idx !== playingIndex) setEpStateField(playingEpisode, "sourceIndex", idx);
     }
   }, [checking, playingEpisode, playingSources, playingIndex, isEpSourceDead, setEpStateField]);
+
+  // ── Skip intro / Next episode ─────────────────────────────────────────────
+  // Only one episode plays at a time, so the marker hook lives here at
+  // component level (it can't run inside the episode map) and the overlay is
+  // rendered into whichever row is playing.
+  const nextUp = useMemo(() => {
+    if (playSeason === undefined || playEpisode === undefined) return null;
+    const n = findNextEpisode(detail?.seasons, playSeason, playEpisode);
+    if (!n) return null;
+    return {
+      label: `S${n.season} E${n.episode}${n.title ? ` · ${n.title}` : ""}`,
+      play: () => openEpisode(n.season, n.episode),
+    };
+  }, [detail?.seasons, playSeason, playEpisode, openEpisode]);
+
+  const markers = useEpisodeMarkers(videoElRef, nextUp?.play ?? null, playingIndex);
 
   // Player pronounced the playing source dead: cool it down and advance.
   // Mid-probe (checking), record the cooldown but hold position — the effect
@@ -363,23 +420,12 @@ export default function VodSeriesPage() {
                       <div key={epKey} id={`ep-${epKey}`}>
                       <button
                         onClick={() => {
-                          const opening = !isPlaying;
-                          setPlayingEpisode(isPlaying ? null : epKey);
-                          setConfirmedUrl(null);
-                          if (opening) {
-                            // Snapshot the resume position NOW — deriving it live
-                            // would churn the player src (see EpisodeState.resume).
-                            const entry = items.find(
-                              (i) => i.tmdbId === seriesId && i.kind === "series" &&
-                                     i.season === season.season_number && i.episode === ep.episode_number
-                            );
-                            const resume = entry?.duration && entry.duration > 0
-                              ? Math.round((entry.progress / 100) * entry.duration)
-                              : 0;
-                            setEpStateField(epKey, "resume", resume);
-                            if (state.resolved.length === 0) {
-                              resolveEpisode(epKey, season.season_number, ep.episode_number);
-                            }
+                          if (isPlaying) {
+                            setPlayingEpisode(null);
+                            setConfirmedUrl(null);
+                          } else {
+                            // Same path as auto-advance, so the two can't drift.
+                            openEpisode(season.season_number, ep.episode_number);
                           }
                         }}
                         className="w-full flex items-center gap-3 glass-card rounded-xl px-3 py-2.5 text-left hover:bg-card/60 transition-colors"
@@ -427,17 +473,23 @@ export default function VodSeriesPage() {
                       )}
                       {isPlaying && currentSource && (
                         <div className="mt-2 space-y-3">
-                          <VodPlayer
-                            src={currentSource.url}
-                            poster={ep.still_url || detail.poster}
-                            title={`${detail.title} - S${season.season_number}E${ep.episode_number}: ${ep.title}`}
-                            initialTime={state.resume}
-                            autoPlay
-                            onProgress={handleProgress(season.season_number, ep.episode_number)}
-                            onSourceFail={handleSourceFailure(epKey)}
-                            onPlay={() => setConfirmedUrl(currentSource.url)}
-                            subtitles={subtitles}
-                          />
+                          {/* relative: EpisodeActions positions against this box */}
+                          <div className="relative">
+                            <VodPlayer
+                              src={currentSource.url}
+                              poster={ep.still_url || detail.poster}
+                              title={`${detail.title} - S${season.season_number}E${ep.episode_number}: ${ep.title}`}
+                              initialTime={state.resume}
+                              autoPlay
+                              videoElRef={videoElRef}
+                              onProgress={handleProgress(season.season_number, ep.episode_number)}
+                              onSourceFail={handleSourceFailure(epKey)}
+                              onPlay={() => setConfirmedUrl(currentSource.url)}
+                              onEnded={nextUp ? nextUp.play : undefined}
+                              subtitles={subtitles}
+                            />
+                            <EpisodeActions markers={markers} nextLabel={nextUp?.label} />
+                          </div>
 
                           {/* Open in new tab escape hatch */}
                           <div className="flex items-center justify-end px-1">

@@ -79,3 +79,40 @@ export function showNextUp(currentTime: number, duration: number): boolean {
   if (!hasUsableTimeline(duration)) return false;
   return currentTime >= creditsStartFor(duration);
 }
+
+/** Minimal shape needed to walk a series — structurally compatible with
+ *  SeriesDetail["seasons"] on both shells without importing the full type. */
+interface SeasonLike {
+  season_number: number;
+  episodes?: { episode_number: number; title?: string }[];
+}
+
+/**
+ * The episode after (season, episode): next in the same season, else the first
+ * episode of the next season that actually HAS episodes — the backend does
+ * return empty seasons, and one must not dead-end a binge. Null on the series
+ * finale, which is what suppresses "Next up" entirely.
+ *
+ * Shared so the TV and mobile shells can never disagree about what plays next.
+ */
+export function findNextEpisode(
+  seasons: SeasonLike[] | undefined,
+  season: number,
+  episode: number,
+): { season: number; episode: number; title?: string } | null {
+  if (!seasons?.length) return null;
+  const sIdx = seasons.findIndex((s) => s.season_number === season);
+  if (sIdx < 0) return null;
+
+  const eps = seasons[sIdx].episodes ?? [];
+  const eIdx = eps.findIndex((e) => e.episode_number === episode);
+  const sameSeason = eIdx >= 0 ? eps[eIdx + 1] : undefined;
+  if (sameSeason) {
+    return { season, episode: sameSeason.episode_number, title: sameSeason.title };
+  }
+
+  const nextSeason = seasons.slice(sIdx + 1).find((s) => (s.episodes ?? []).length > 0);
+  if (!nextSeason) return null;
+  const first = nextSeason.episodes![0];
+  return { season: nextSeason.season_number, episode: first.episode_number, title: first.title };
+}
