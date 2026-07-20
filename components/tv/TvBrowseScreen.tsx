@@ -26,6 +26,11 @@ export interface TvBrowseItem {
   provider?: string;
   progress?: number;
   sublabel?: string;
+  /** For a series tile that should open a SPECIFIC episode (Continue Watching):
+   *  the card deep-links to /tv/vod/series/<id>?s=&e=&play=1 so it lands on and
+   *  resumes that episode instead of the show's first. */
+  season?: number;
+  episode?: number;
   /** Present → renders as a channel tile linking to its live player. */
   channel?: Channel;
   /** Present → renders as a live-event tile; onOpen decides what happens. */
@@ -234,6 +239,8 @@ export default function TvBrowseScreen({
                       backdrop={item.backdrop}
                       poster={item.poster}
                       kind={item.kind!}
+                      season={item.season}
+                      episode={item.episode}
                       progress={item.progress}
                       sublabel={item.sublabel}
                       badge={item.badge}

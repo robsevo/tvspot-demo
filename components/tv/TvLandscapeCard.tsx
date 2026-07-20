@@ -12,6 +12,11 @@ interface Props {
   backdrop?: string;
   poster?: string;
   kind: "movie" | "series";
+  /** Deep-link a series card to a specific episode (Continue Watching): the
+   *  href becomes /tv/vod/series/<id>?s=&e=&play=1 so it opens and resumes that
+   *  episode. Omit for a normal series card (opens the show at its first). */
+  season?: number;
+  episode?: number;
   /** 0-100: paints a resume bar along the bottom (Continue Watching). */
   progress?: number;
   /** Small line under the card, e.g. "S2 E4" or the source channel. */
@@ -69,6 +74,8 @@ export default function TvLandscapeCard({
   backdrop,
   poster,
   kind,
+  season,
+  episode,
   progress,
   sublabel,
   badge,
@@ -79,7 +86,15 @@ export default function TvLandscapeCard({
   tvAutoFocus,
 }: Props) {
   const [imgError, setImgError] = useState(false);
-  const href = kind === "series" ? `/tv/vod/series/${tmdbId}` : `/tv/vod/movie/${tmdbId}`;
+  // A series card with a specific episode (Continue Watching) deep-links to it
+  // and auto-plays, so it resumes where the viewer left off rather than opening
+  // the show at S1E1.
+  const href =
+    kind === "series"
+      ? season && episode
+        ? `/tv/vod/series/${tmdbId}?s=${season}&e=${episode}&play=1`
+        : `/tv/vod/series/${tmdbId}`
+      : `/tv/vod/movie/${tmdbId}`;
   const raw = backdrop || poster;
   // Which ladder to use is decided by which field we actually took.
   const art = raw ? cardArt(raw, Boolean(backdrop)) : raw;

@@ -122,6 +122,10 @@ export default function TvHomePage() {
           title: i.title,
           kind: i.kind,
           tmdbId: i.tmdbId,
+          // Carry the exact episode so the tile deep-links to it and resumes,
+          // instead of opening the series at S1E1.
+          season: i.kind === "series" ? i.season : undefined,
+          episode: i.kind === "series" ? i.episode : undefined,
           backdrop: i.poster,
           metaLine:
             i.kind === "series" && i.episode

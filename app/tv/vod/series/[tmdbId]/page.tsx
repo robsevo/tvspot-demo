@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useReducer } from "react";
-import { useParams } from "next/navigation";
+import { useState, useEffect, useMemo, useCallback, useReducer, useRef } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import { Play, Plus, Check } from "lucide-react";
 import { proxyFetch } from "@/lib/api";
 import { mergeSources } from "@/lib/sources";
@@ -124,6 +124,31 @@ export default function TvSeriesPage() {
     resolveEpisode(s, e);
     setPlaying({ season: s, episode: e });
   };
+
+  // Deep link from Continue Watching (and anywhere else): /tv/vod/series/<id>?s=&e=&play=1
+  // lands on that exact season/episode and, with play=1, starts it — which then
+  // resumes at the saved position via resumeTime below. Runs once, after detail
+  // loads (we need the seasons to map season_number → selector index). Without
+  // this a CW tile only opened the series at S1E1.
+  const searchParams = useSearchParams();
+  const deepLinkDone = useRef(false);
+  useEffect(() => {
+    if (deepLinkDone.current || !detail) return;
+    const s = Number(searchParams.get("s"));
+    const e = Number(searchParams.get("e"));
+    if (!s || !e) return;
+    deepLinkDone.current = true;
+    // Applied in a microtask, not synchronously in the effect body: it keeps the
+    // updates out of the render-cascade the linter (rightly) flags, and it's
+    // still a tick — the player opens on the next frame either way.
+    Promise.resolve().then(() => {
+      const idx = detail.seasons?.findIndex((se) => se.season_number === s) ?? -1;
+      if (idx >= 0) setSeasonIdx(idx);
+      setFocusedEp(e);
+      if (searchParams.get("play") === "1") playEpisode(s, e);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail, searchParams]);
 
   const playingEpisode: Episode | undefined = useMemo(() => {
     if (!playing || !detail) return undefined;
