@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth, AuthUnreachableError } from "@/hooks/useAuth";
 import { saveTvCreds, loadTvCreds, clearTvCreds } from "@/lib/tvCreds";
 import { Check } from "lucide-react";
 
@@ -43,9 +43,16 @@ export default function TvLoginPage() {
     }
     login(creds.username, creds.password, creds.secretWord)
       .then(() => router.replace("/tv"))
-      .catch(() => {
-        // Replay failed — credentials changed. Clear them and fall to the form.
-        clearTvCreds();
+      .catch((err: unknown) => {
+        // Only a REJECTED replay means the credentials rotated. An unreachable
+        // backend — routine on this TV, whose network stack often isn't up at
+        // cold launch — says nothing about them, so keep them and let the user
+        // retry rather than making them retype a password on a remote.
+        if (err instanceof AuthUnreachableError) {
+          setError("Couldn't reach TVSpot. Check the TV's network, then sign in.");
+        } else {
+          clearTvCreds();
+        }
         setAutoTrying(false);
       });
   }, [login, router]);

@@ -11,19 +11,68 @@ import { createContext, useContext, useEffect, useState, useCallback, ReactNode 
  *  backend, short enough not to read as a hang. */
 const AUTH_TIMEOUT_MS = 8000;
 
-/**
- * fetch with a hard deadline. Hand-rolled AbortController rather than
- * AbortSignal.timeout (Chrome 103+) — the modern form would itself throw on the
- * TV's Chromium 63 and turn every auth call into an instant failure.
- */
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = setTimeout(() => { try { ctl?.abort(); } catch {} }, AUTH_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, ...(ctl ? { signal: ctl.signal } : {}) });
-  } finally {
-    clearTimeout(timer);
+/** The server never answered, or we couldn't reach it at all — as opposed to the
+ *  server actively rejecting us. Callers need the difference: rotated
+ *  credentials should be forgotten, an unreachable backend must not be, or one
+ *  slow cold boot silently un-remembers the TV and demands a password on a
+ *  remote control. */
+export class AuthUnreachableError extends Error {
+  constructor(message = "Could not reach the server") {
+    super(message);
+    this.name = "AuthUnreachableError";
   }
+}
+
+/**
+ * Runs one auth round-trip under a deadline that fires even when nothing can be
+ * cancelled.
+ *
+ * Aborting is NOT a timeout on the TV. fetch() only began honouring `signal` in
+ * Chrome 66, and tv-polyfills.js *defines* AbortController on the RU7100's
+ * Chromium 63 — so the feature check passes while, in that shim's own words,
+ * "fetch() won't truly cancel". The previous version therefore flipped a flag on
+ * a JS object at 8s while the real request hung on forever, and every await
+ * behind it hung too: "Signing you in…" with no error and no way out.
+ *
+ * So the deadline races the work from outside instead of trying to interrupt it.
+ * The orphaned request leaks until its socket dies, which is an acceptable
+ * trade — what matters is that the UI always gets an answer. Abort is kept as
+ * best-effort cleanup on engines where it actually does something.
+ *
+ * The body parse is inside the race on purpose: res.json() is a second
+ * unbounded await (headers can land while the body stalls), so a deadline
+ * covering only the fetch would just move the hang one hop down.
+ */
+function authFetch(
+  url: string,
+  init: RequestInit,
+): Promise<{ ok: boolean; data: Record<string, unknown> }> {
+  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+
+  const work = async () => {
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, ...(ctl ? { signal: ctl.signal } : {}) });
+    } catch {
+      // Refused/offline/aborted — indistinguishable here, and all mean the same
+      // thing to callers: we learned nothing about the session.
+      throw new AuthUnreachableError();
+    }
+    // An unparseable body isn't "the server said no" — the status decides.
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, data: data as Record<string, unknown> };
+  };
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try { ctl?.abort(); } catch {}
+      reject(new AuthUnreachableError());
+    }, AUTH_TIMEOUT_MS);
+    work().then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
 }
 
 interface AuthContextType {
@@ -77,9 +126,8 @@ export function AuthProvider({
       // fetch that never SETTLES never runs the finally below, so the TV sits on
       // that splash forever with no error and no redirect — exactly the hang
       // observed on the RU7100 (tizen/app.js guards its own probe likewise).
-      const res = await fetchWithTimeout("/api/auth/me", { credentials: "include" });
-      const data = await res.json();
-      const u = data.username ?? null;
+      const { data } = await authFetch("/api/auth/me", { credentials: "include" });
+      const u = (data.username as string | undefined) ?? null;
       setUsername(u);
       cacheUser(u);
     } catch {
@@ -120,22 +168,26 @@ export function AuthProvider({
       // autoTrying flag only clears in .then/.catch). An unsettled login call
       // therefore hangs that screen forever — which is exactly what happened
       // once the splash fix let the shell get this far.
-      const res = await fetchWithTimeout("/api/auth/login", {
+      const { ok, data } = await authFetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ username, password, secret_word }),
       });
-      const data = await res.json();
-      if (res.ok) {
+      if (ok) {
         setUsername(username);
         cacheUser(username);
         return true;
       }
-      throw new Error(data.error || "Login failed");
+      throw new Error((data.error as string | undefined) || "Login failed");
     } catch (e) {
-      setUsername(null);
-      cacheUser(null);
+      // A server that rejected us means we really are signed out. A server we
+      // couldn't REACH says nothing about the session, so keep the optimistic
+      // cached user — otherwise a cold-boot network stall blanks the shell too.
+      if (!(e instanceof AuthUnreachableError)) {
+        setUsername(null);
+        cacheUser(null);
+      }
       throw e;
     }
   };
@@ -143,7 +195,7 @@ export function AuthProvider({
   const logout = async () => {
     // Time-boxed like the others so a stalled call can't wedge the UI.
     try {
-      await fetchWithTimeout("/api/auth/logout", { method: "POST", credentials: "include" });
+      await authFetch("/api/auth/logout", { method: "POST", credentials: "include" });
     } catch {}
     setUsername(null);
     cacheUser(null);
