@@ -7,11 +7,6 @@
 <DigestValue>4R6dsgXIGDdPW1lQvTgrJEWSXoHoVuaAumUYadQ3DN+jXgz0MFzXHK9DgqdFtk7vF5OnWDdaXRT4
 yLqSZu9Jwg==</DigestValue>
 </Reference>
-<Reference URI="TVSpot.wgt">
-<DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></DigestMethod>
-<DigestValue>qasyUqIkSnUjEl0mibtVGaevtfEvDfMK9ukeLM297hCho2xGi8SlkvR57SvAVX8a4pPLdj520a7/
-o5laTNMM7Q==</DigestValue>
-</Reference>
 <Reference URI="app.css">
 <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></DigestMethod>
 <DigestValue>MRhxGBUiBg491dLOehUbOzkqLI0tsAiPJmxKKuSlWWiqgfJK29PsWIDjZ/74ktlge/D90OJkY8BD
@@ -19,13 +14,13 @@ Ik67NtNTCQ==</DigestValue>
 </Reference>
 <Reference URI="app.js">
 <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></DigestMethod>
-<DigestValue>McBpg2qL4nYiuks6WhR/aslfQ4MMljy7Iuh4pWGkQsJXzj/vQjW6SqjJtFCugKoLuDshcHXcXOfC
-LB8xEEWAzg==</DigestValue>
+<DigestValue>1GjNFK/roxMt/36EZ0rmZ6EpdOXQeiuNvQb0Ip2ZTjVYjEl2UE8i0JiaTZnTK5+5GGZ7qvF4j6k+
+gx6Q6B3rqw==</DigestValue>
 </Reference>
 <Reference URI="author-signature.xml">
 <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></DigestMethod>
-<DigestValue>cy1O1U3N8tFXFbBjj1JaxbG6Q7pFE2L7kQ/Q68OYxEqeIh+7ada5FgcyZY6fqLJYgaKQfUdTgZt5
-X1EGSaPfKw==</DigestValue>
+<DigestValue>b0duix019P4r03LuQMjd+B0dGx1wnB1MTq3VRdz0nARuUgFdwC1IYp/Ac3thCxnzGusx8LYmQ+3z
+AuQu5Y33zw==</DigestValue>
 </Reference>
 <Reference URI="config.xml">
 <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></DigestMethod>
@@ -52,9 +47,9 @@ GyvKX9Snig==</DigestValue>
 </Reference>
 </SignedInfo>
 <SignatureValue>
-dsSpC8kchxqwuErV9QFakVnMP00tFc58tECM1QMhP9O/zH5XEKregjXVlwvoUXtxCnmkPIOnJhqq
-X0jyfF9Gn5IzvjpifmKWsde77OewAHY8AJ6RLGJZLl4I/2scH5+oDg1io32uHyddtJMUrsiDNy0g
-/T8B9MRz1d6Ao5sYzCk=
+ciOr3bjL5CGTWi92eu8iE2nrIqYnFs4fD6vTFcmbbyrGPW33Nqk376O/0OjfaGTgujt8sF5FUAOl
+1rD39NIrNKYt0uiYUVbK3EfV+6uFnpCS0KKLg9n5RARJFY8ADGzlTFbJFkEm4WnpKxx+LOl2ODQ7
+qoyx+PjkGwFN00pk/Cw=
 </SignatureValue>
 <KeyInfo>
 <X509Data>
