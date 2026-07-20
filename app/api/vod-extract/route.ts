@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveVodStreams } from "@/lib/vod-resolve";
+import { mintStreamToken } from "@/lib/streamToken";
 
 // Resolution does live network calls to provider-a at request time — never static.
 export const dynamic = "force-dynamic";
@@ -23,7 +24,18 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const stream_urls = await resolveVodStreams({ tmdbId: tmdb, type, season, episode });
+    const resolved = await resolveVodStreams({ tmdbId: tmdb, type, season, episode });
+    // Sign every same-origin proxy URL before it leaves this (authenticated)
+    // request. The client that plays them — the TV's <video> — cannot send a
+    // cookie, so the authority has to travel in the URL itself.
+    const stream_urls = await Promise.all(
+      resolved.map(async (u) => {
+        if (!u.startsWith("/api/vod-stream?url=")) return u;
+        const target = new URLSearchParams(u.slice(u.indexOf("?") + 1)).get("url");
+        if (!target) return u;
+        return `${u}&st=${encodeURIComponent(await mintStreamToken(target))}`;
+      }),
+    );
     return NextResponse.json(
       { stream_urls },
       { headers: { "Cache-Control": "no-store" } },

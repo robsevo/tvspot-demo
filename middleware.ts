@@ -42,7 +42,13 @@ export async function middleware(request: NextRequest) {
     // apps whose session died at the 4 AM rollover. Gating it turned each of
     // those into an all-night 401 stream and blinded deploy detection exactly
     // where a stale build is most likely to be sitting.
-    pathname === "/api/version"
+    pathname === "/api/version" ||
+    // The media proxy authenticates ITSELF (cookie OR a signed, target-bound
+    // token) — see app/api/vod-stream. It has to: the TV's <video> element does
+    // not send cookies on media requests, so a middleware cookie gate 401s every
+    // stream that box asks for. Gating here would make the route's token path
+    // unreachable, since middleware runs first.
+    pathname.startsWith("/api/vod-stream")
   ) {
     return NextResponse.next();
   }

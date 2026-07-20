@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { mintStreamToken, verifyStreamToken } from "@/lib/streamToken";
+import { verifyToken } from "@/lib/auth";
 
 // Same-origin VOD media proxy — handles BOTH:
 //  • HLS playlists (.m3u8): fetched, every inner URI (variant playlists, segments,
@@ -32,31 +34,63 @@ function isBlockedHost(host: string): boolean {
   );
 }
 
-function rewriteUri(uri: string, base: string, ref?: string): string {
-  let abs: string;
-  try {
-    abs = new URL(uri, base).href;
-  } catch {
-    return uri;
-  }
-  const wrapped = SELF + encodeURIComponent(abs);
+function wrapUri(abs: string, token: string, ref?: string): string {
+  const wrapped = `${SELF}${encodeURIComponent(abs)}&st=${encodeURIComponent(token)}`;
   // Propagate the Referer to every child (variant playlists, segments, keys) —
   // the referer-gated CDN 403s each hop without it.
   return ref ? `${wrapped}&ref=${encodeURIComponent(ref)}` : wrapped;
 }
 
-/** Rewrite every URI in an HLS playlist to route back through this proxy. */
-function rewritePlaylist(text: string, base: string, ref?: string): string {
+/**
+ * Rewrite every URI in an HLS playlist to route back through this proxy.
+ *
+ * Async because each child now carries its OWN signature. Segment and key
+ * requests are made by the media stack exactly like the master, so on the TV
+ * they arrive without a cookie too — an unsigned child URI would 401 partway
+ * into playback, which is worse than failing up front.
+ */
+async function rewritePlaylist(text: string, base: string, ref?: string): Promise<string> {
+  const lines = text.split(/\r?\n/);
+
+  // 1. Collect every URI needing a wrap, so they can all be signed at once
+  //    rather than serially per line (a playlist can carry hundreds).
+  const uris = new Set<string>();
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    if (t.startsWith("#")) {
+      for (const m of t.matchAll(/URI="([^"]+)"/g)) uris.add(m[1]);
+    } else {
+      uris.add(t);
+    }
+  }
+
+  // 2. Sign in parallel.
+  const wrapped = new Map<string, string>();
+  await Promise.all(
+    [...uris].map(async (u) => {
+      let abs: string;
+      try {
+        abs = new URL(u, base).href;
+      } catch {
+        wrapped.set(u, u); // unparseable → leave exactly as-is
+        return;
+      }
+      wrapped.set(u, wrapUri(abs, await mintStreamToken(abs), ref));
+    }),
+  );
+
+  // 3. Substitute.
   const out: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
+  for (const line of lines) {
     const t = line.trim();
     if (!t) { out.push(line); continue; }
     if (t.startsWith("#")) {
       // Rewrite URIs embedded in tags (EXT-X-KEY, EXT-X-MEDIA, EXT-X-MAP, …).
-      out.push(line.replace(/URI="([^"]+)"/g, (_m, u) => `URI="${rewriteUri(u, base, ref)}"`));
+      out.push(line.replace(/URI="([^"]+)"/g, (_m, u) => `URI="${wrapped.get(u) ?? u}"`));
     } else {
       // A bare line = a segment or sub-playlist URI.
-      out.push(rewriteUri(t, base, ref));
+      out.push(wrapped.get(t) ?? t);
     }
   }
   return out.join("\n");
@@ -106,6 +140,18 @@ export async function GET(request: NextRequest) {
   try { host = new URL(target).host; } catch { return new NextResponse("bad url", { status: 400 }); }
   if (isBlockedHost(host)) return new NextResponse("blocked host", { status: 403 });
 
+  // AUTH LIVES HERE, not in middleware. The TV's <video> element does not send
+  // our cookie on media requests (proved on-device: the same MP4 errors while
+  // auth-gated and plays when public), so a cookie-only gate 401s every stream
+  // this box asks for — which is precisely why VOD worked on the phone and never
+  // on the TV. Accept either: a normal session cookie, or a signature bound to
+  // this exact target that the (authenticated) resolver minted earlier.
+  const cookie = request.cookies.get("tvspot_session")?.value ?? null;
+  const authed =
+    (cookie ? Boolean(await verifyToken(cookie)) : false) ||
+    (await verifyStreamToken(target, request.nextUrl.searchParams.get("st")));
+  if (!authed) return new NextResponse("unauthorized", { status: 401 });
+
   // Referer-gated CDN family (Provider B): the origin 403s every hop without a
   // Referer, and the whole playlist tree is extension-obfuscated (.txt master +
   // variants, .woff/.woff2 fMP4 segments) so the URL tells us nothing. Inject the
@@ -129,7 +175,7 @@ export async function GET(request: NextRequest) {
         looksLikeHls(target, res.headers.get("content-type")) ||
         buf.subarray(0, 16).toString("latin1").trimStart().startsWith("#EXTM3U");
       if (isHls) {
-        const rewritten = rewritePlaylist(buf.toString("utf8"), res.url || target, ref);
+        const rewritten = await rewritePlaylist(buf.toString("utf8"), res.url || target, ref);
         return new NextResponse(rewritten, {
           status: 200,
           headers: {
@@ -199,7 +245,7 @@ export async function GET(request: NextRequest) {
     const text = await res.text();
     if (looksLikeHls(target, res.headers.get("content-type")) || text.trimStart().startsWith("#EXTM3U")) {
       // res.url is the final URL after redirects — the correct base for relatives.
-      const rewritten = rewritePlaylist(text, res.url || target);
+      const rewritten = await rewritePlaylist(text, res.url || target);
       return new NextResponse(rewritten, {
         status: 200,
         headers: {
