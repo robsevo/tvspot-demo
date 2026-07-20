@@ -2,10 +2,29 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 
-/** Cap on the /api/auth/me round-trip. The TV shell shows its splash while
- *  `loading` is true, so an unbounded fetch means an unbounded splash. Long
- *  enough for a slow-but-alive panel, short enough not to look like a hang. */
+/** Cap on the auth round-trips. EVERY auth fetch gates a full-screen "waiting"
+ *  state on the TV — /api/auth/me gates the shell's splash, /api/auth/login
+ *  gates the login page's "Signing you in…" — so an unbounded fetch means an
+ *  unbounded splash. A fetch that REJECTS is fine (the catch runs); the killer
+ *  is one that never SETTLES, which is routine on the RU7100 whose network
+ *  stack often isn't up yet at cold launch. Long enough for a slow-but-alive
+ *  backend, short enough not to read as a hang. */
 const AUTH_TIMEOUT_MS = 8000;
+
+/**
+ * fetch with a hard deadline. Hand-rolled AbortController rather than
+ * AbortSignal.timeout (Chrome 103+) — the modern form would itself throw on the
+ * TV's Chromium 63 and turn every auth call into an instant failure.
+ */
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = setTimeout(() => { try { ctl?.abort(); } catch {} }, AUTH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, ...(ctl ? { signal: ctl.signal } : {}) });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 interface AuthContextType {
   username: string | null;
@@ -57,21 +76,8 @@ export function AuthProvider({
       // renders its "Starting TVSpot" splash for as long as loading is true. A
       // fetch that never SETTLES never runs the finally below, so the TV sits on
       // that splash forever with no error and no redirect — exactly the hang
-      // observed on the RU7100, whose network stack is routinely not up yet at
-      // cold app launch (tizen/app.js guards its own probe for the same reason).
-      // AbortSignal.timeout is Chrome 103+, so this is done by hand: the TV's
-      // Chromium 63 would throw on the modern form and skip straight to catch.
-      const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const timer = setTimeout(() => { try { ctl?.abort(); } catch {} }, AUTH_TIMEOUT_MS);
-      let res: Response;
-      try {
-        res = await fetch("/api/auth/me", {
-          credentials: "include",
-          ...(ctl ? { signal: ctl.signal } : {}),
-        });
-      } finally {
-        clearTimeout(timer);
-      }
+      // observed on the RU7100 (tizen/app.js guards its own probe likewise).
+      const res = await fetchWithTimeout("/api/auth/me", { credentials: "include" });
       const data = await res.json();
       const u = data.username ?? null;
       setUsername(u);
@@ -109,7 +115,12 @@ export function AuthProvider({
 
   const login = async (username: string, password: string, secret_word: string): Promise<boolean> => {
     try {
-      const res = await fetch("/api/auth/login", {
+      // Time-boxed for the same reason as checkAuth: the TV login page holds a
+      // full-screen "Signing you in…" until this promise SETTLES (its
+      // autoTrying flag only clears in .then/.catch). An unsettled login call
+      // therefore hangs that screen forever — which is exactly what happened
+      // once the splash fix let the shell get this far.
+      const res = await fetchWithTimeout("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -130,7 +141,10 @@ export function AuthProvider({
   };
 
   const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    // Time-boxed like the others so a stalled call can't wedge the UI.
+    try {
+      await fetchWithTimeout("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch {}
     setUsername(null);
     cacheUser(null);
   };
