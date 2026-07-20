@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Pause, SkipForward, RefreshCw, ListVideo } from "lucide-react";
+import { Pause, SkipForward, RefreshCw, ListVideo, Languages } from "lucide-react";
+import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 import VodPlayer from "@/components/VodPlayer";
 import type { TvCcHandle } from "@/components/VideoPlayer";
 import { useTvBack } from "@/components/tv/TvNav";
@@ -98,6 +99,17 @@ export default function TvVodPlayback({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Audio-language menu. English is always the default (the relay auto-picks it),
+  // so this only exists for someone who wants to change it. `audioTracks` is
+  // fetched lazily the first time the picker opens on a remux source; `audioUrl`
+  // is a chosen track's signed source, played in place of the plain source when set.
+  const [audioTracks, setAudioTracks] = useState<
+    { rel: number; lang: string; label: string; url: string }[]
+  >([]);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const audioFetchedFor = useRef<string | null>(null);
+
   const refresh = useCallback(async () => {
     if (!onRefreshSources || refreshing) return;
     setRefreshing(true);
@@ -123,7 +135,18 @@ export default function TvVodPlayback({
     const v = videoElRef.current;
     setResumeAt(v && v.currentTime > 5 ? v.currentTime : 0);
     setExhausted(false);
+    setAudioUrl(null); // a different source has its own audio; forget the override
     setIndex(i);
+    setPickerOpen(false);
+  }, []);
+
+  /** Switch the audio language: play the chosen track's remux, keeping position.
+   *  Only offered for remux sources (a direct mp4 is one baked-in track). */
+  const pickAudio = useCallback((track: { url: string }) => {
+    const v = videoElRef.current;
+    setResumeAt(v && v.currentTime > 5 ? v.currentTime : 0);
+    setExhausted(false);
+    setAudioUrl(track.url);
     setPickerOpen(false);
   }, []);
 
@@ -192,6 +215,9 @@ export default function TvVodPlayback({
   const fail = useCallback(
     (lastTime: number) => {
       setResumeAt(lastTime > 5 ? lastTime : 0);
+      // An audio override belongs to the FAILED source's file; the next source is
+      // a different file, so drop it and let that source's English default stand.
+      setAudioUrl(null);
       setIndex((i) => {
         // Remember what died so the picker can grey it out — otherwise the user
         // is invited to hand-pick sources the player has already ruled out.
@@ -286,15 +312,41 @@ export default function TvVodPlayback({
   }, [raiseOsd, paused, pickerOpen]);
 
   const source = sources[index];
+  // What actually plays: a chosen audio track's URL overrides the plain source.
+  const activeUrl = audioUrl ?? source?.url ?? "";
+  const isRemux = /remux\.m3u8/.test(source?.url ?? "");
   const pct = clock.d > 0 && isFinite(clock.d) ? (clock.t / clock.d) * 100 : 0;
+
+  // Load the language list the first time the picker opens on a remux source.
+  // Lazy on purpose — most titles are single-audio and never need it, and it's
+  // a relay probe we shouldn't spend on every play. Keyed to the source URL so
+  // switching sources refetches.
+  useEffect(() => {
+    if (!pickerOpen || !isRemux || !source) return;
+    if (audioFetchedFor.current === source.url) return;
+    audioFetchedFor.current = source.url;
+    setAudioLoading(true);
+    fetchWithDeadline(
+      `/api/vod-audio-tracks?src=${encodeURIComponent(source.url)}`,
+      { credentials: "include" },
+      DEADLINE.stream,
+    )
+      .then((r) => (r.ok ? r.json() : { tracks: [] }))
+      .then((d) => setAudioTracks(Array.isArray(d.tracks) ? d.tracks : []))
+      .catch(() => setAudioTracks([]))
+      .finally(() => setAudioLoading(false));
+  }, [pickerOpen, isRemux, source]);
 
   return (
     <div data-tv-trap className="fixed inset-0 z-50 bg-black">
       {source && !exhausted ? (
         <div className="w-full h-full flex items-center justify-center [&>div]:rounded-none">
           <VodPlayer
-            key={index}
-            src={source.url}
+            // Remount when the audio track changes too, not just the source
+            // index — a new src needs a fresh <video>/hls.js (resume is carried
+            // by initialTime).
+            key={`${index}:${audioUrl ?? ""}`}
+            src={activeUrl}
             poster={poster}
             title={title}
             autoPlay
@@ -400,6 +452,43 @@ export default function TvVodPlayback({
                 </button>
               )}
             </div>
+
+            {/* Audio language. Only for remux sources (a direct mp4 is one baked-in
+                track). English is already the default — this is the "if the user
+                wants, they can change it" path. */}
+            {isRemux && (audioLoading || audioTracks.length > 1) && (
+              <div className="mt-8">
+                <div className="flex items-center gap-2 mb-3">
+                  <Languages className="w-6 h-6 text-[#8197a4]" />
+                  <p className="text-2xl font-bold text-white">Audio</p>
+                </div>
+                {audioLoading ? (
+                  <p className="text-lg text-[#8197a4]">Checking languages…</p>
+                ) : (
+                  <div className="flex items-center gap-4 flex-wrap">
+                    {audioTracks.map((t) => {
+                      const isCurrent = audioUrl === t.url;
+                      const isEnglish = t.lang === "eng" || t.lang === "en";
+                      return (
+                        <button
+                          key={t.rel}
+                          data-tv
+                          onClick={() => pickAudio(t)}
+                          className={`tv-menu-item flex items-center gap-2 px-7 py-4 rounded-lg text-xl font-medium focus:outline-none ${
+                            isCurrent
+                              ? "bg-white text-black"
+                              : "bg-[#1a242f] text-[#aebbc5]"
+                          }`}
+                        >
+                          {t.label}
+                          {isEnglish && !isCurrent ? " · default" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             <p className="mt-7 text-base text-[#5a6b78]">
               Enter: switch source · Back: close
