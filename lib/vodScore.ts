@@ -113,10 +113,20 @@ export function vodScore(p: VodProbe): number {
   return Math.max(0, Math.min(100, score));
 }
 
-/** Sort comparator: tier first (hard guarantee), then score, then latency. */
+/**
+ * Sort comparator: tier, then probe-alive, then score, then latency.
+ *
+ * The `ok` step is NOT redundant with the score, and leaving it out is a live
+ * bug: remux rows keep their tier even when the probe fails (by design — those
+ * panels flap and the relay re-validates at play time), but a FAILED probe
+ * returns fast, and low latency scores HIGH. Without this, a dead remux
+ * outranks a working one and the player leads with a source that can't play.
+ * The pre-scoring code ordered remux alive-first explicitly; this preserves it.
+ */
 export function compareVod(a: VodProbe, b: VodProbe): number {
   const ta = tierOf(a), tb = tierOf(b);
   if (ta !== tb) return tb - ta;
+  if (a.ok !== b.ok) return a.ok ? -1 : 1;
   const sa = vodScore(a), sb = vodScore(b);
   if (sa !== sb) return sb - sa;
   return a.latencyMs - b.latencyMs;
