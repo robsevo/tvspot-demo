@@ -45,19 +45,36 @@ export function getPrewarmed(kind: Kind, tmdb: number | string, s?: number, e?: 
 /** Resolve a title's clean streams, sharing any cached/in-flight result. This is
  *  the single entry point the detail page should await — prewarm just calls it
  *  early and ignores the result. */
-export function resolveVod(kind: Kind, tmdb: number | string, s?: number, e?: number): Promise<string[]> {
+export function resolveVod(
+  kind: Kind,
+  tmdb: number | string,
+  s?: number,
+  e?: number,
+  /** Ignore every cached and in-flight answer and ask the backend again.
+   *  Without this a "refresh sources" control is a lie: a resolved title is
+   *  memoised for 30 minutes, so the retry would hand back the exact same dead
+   *  URLs the user is already staring at. Sources rot (upstream panels rate-
+   *  limit, links rotate nightly), so re-asking is the whole point. */
+  force = false,
+): Promise<string[]> {
   const k = keyOf(kind, tmdb, s, e);
-  const hit = cache.get(k);
-  if (hit && Date.now() - hit.at < TTL_MS) return Promise.resolve(hit.urls);
-  const existing = inflight.get(k);
-  if (existing) return existing;
+  if (force) {
+    cache.delete(k);
+    inflight.delete(k);
+  } else {
+    const hit = cache.get(k);
+    if (hit && Date.now() - hit.at < TTL_MS) return Promise.resolve(hit.urls);
+    const existing = inflight.get(k);
+    if (existing) return existing;
+  }
 
   // Deadlined because this promise is MEMOISED in `inflight`: on the TV, where
   // a stalled fetch never settles, a hung resolve would be handed to every
   // later caller for this title — one stall would break it for the whole
   // session, with "Finding streams…" up forever. The deadline guarantees the
   // entry is eventually rejected and cleared below.
-  const p = fetchWithDeadline(extractUrl(kind, tmdb, s, e), {}, DEADLINE.stream)
+  const url = extractUrl(kind, tmdb, s, e);
+  const p = fetchWithDeadline(force ? `${url}&_r=${Date.now()}` : url, {}, DEADLINE.stream)
     .then((r) => (r.ok ? r.json() : { stream_urls: [] }))
     .then((d) => (Array.isArray(d?.stream_urls) ? (d.stream_urls as string[]) : []))
     .then((urls) => {

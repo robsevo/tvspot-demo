@@ -110,6 +110,16 @@ export default function TvSeriesPage() {
     [tmdbId],
   );
 
+  /** Re-resolve the CURRENTLY PLAYING episode, ignoring every cache — the same
+   *  escape hatch the movie page has. Scoped to the playing episode because
+   *  that's the only one whose sources the viewer is stuck on. */
+  const refreshSources = useCallback(async () => {
+    if (!playing) return;
+    const { season, episode } = playing;
+    const urls = await resolveVod("series", tmdbId, season, episode, true);
+    if (urls.length > 0) dispatchResolved({ key: epKey(season, episode), urls });
+  }, [tmdbId, playing]);
+
   const playEpisode = (s: number, e: number) => {
     resolveEpisode(s, e);
     setPlaying({ season: s, episode: e });
@@ -426,6 +436,7 @@ export default function TvSeriesPage() {
           onClose={closePlayback}
           onProgress={handleProgress}
           nextUp={nextUp}
+          onRefreshSources={refreshSources}
         />
       )}
     </div>

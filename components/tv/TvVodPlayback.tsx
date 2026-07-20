@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Pause, SkipForward } from "lucide-react";
+import { Pause, SkipForward, RefreshCw, ListVideo } from "lucide-react";
 import VodPlayer from "@/components/VodPlayer";
 import type { TvCcHandle } from "@/components/VideoPlayer";
 import { useTvBack } from "@/components/tv/TvNav";
@@ -37,6 +37,11 @@ interface Props {
     /** Switch playback to that episode. */
     play: () => void;
   } | null;
+  /** Re-ask the backend for this title's sources, bypassing every cache.
+   *  Sources rot — upstream panels rate-limit and the nightly job rotates
+   *  links — so "the one it picked is dead" is a normal, recoverable state
+   *  rather than a dead end. Omit and the refresh control simply isn't shown. */
+  onRefreshSources?: () => Promise<void> | void;
 }
 
 function fmtClock(s: number): string {
@@ -58,6 +63,7 @@ function fmtClock(s: number): string {
  *   Enter / Play-Pause   pause / resume
  *   Left / Right         seek ∓/± 15s (no-op on unseekable remux streams)
  *   Down                 captions on/off (remembered across titles)
+ *   Up                   source picker (switch source / find new ones)
  *   Back                 stop and return to the detail page
  */
 export default function TvVodPlayback({
@@ -69,6 +75,7 @@ export default function TvVodPlayback({
   onClose,
   onProgress,
   nextUp,
+  onRefreshSources,
 }: Props) {
   const [index, setIndex] = useState(0);
   const [resumeAt, setResumeAt] = useState(initialTime ?? 0);
@@ -84,6 +91,41 @@ export default function TvVodPlayback({
   // Chip state mirrors the player's caption state on the OSD tick, so the CC
   // badge also reflects an auto-restored "remembered on" without a keypress.
   const [cc, setCc] = useState({ on: false, available: false });
+
+  // Sources the player has already given up on this session. Kept as URLs, not
+  // indices, so the marks survive a refresh reordering the list.
+  const [deadUrls, setDeadUrls] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!onRefreshSources || refreshing) return;
+    setRefreshing(true);
+    setNotice("Looking for new sources…");
+    try {
+      await onRefreshSources();
+      // A refresh is a fresh start: forget what died and re-enter the chain at
+      // the top, otherwise the newly-fetched list is judged by the old verdicts.
+      setDeadUrls([]);
+      setExhausted(false);
+      setIndex(0);
+      setNotice("Sources refreshed");
+    } catch {
+      setNotice("Couldn't refresh sources");
+    } finally {
+      setRefreshing(false);
+      setTimeout(() => setNotice(null), 3000);
+    }
+  }, [onRefreshSources, refreshing]);
+
+  /** Jump straight to a source the user picked, keeping their place. */
+  const pickSource = useCallback((i: number) => {
+    const v = videoElRef.current;
+    setResumeAt(v && v.currentTime > 5 ? v.currentTime : 0);
+    setExhausted(false);
+    setIndex(i);
+    setPickerOpen(false);
+  }, []);
 
   const raiseOsd = useCallback((holdOpen?: boolean) => {
     setOsdVisible(true);
@@ -139,15 +181,22 @@ export default function TvVodPlayback({
     actionRef.current?.blur();
   }, [dismissAction]);
 
-  // Back dismisses the card first, and only exits playback once nothing is up —
-  // otherwise waving away "Next up" would quit the episode.
-  useTvBack(actionVisible ? dismissAndBlur : onClose);
+  // Back unwinds one layer at a time: the source picker, then a Skip/Next card,
+  // and only quits playback once nothing is up — otherwise waving away "Next up"
+  // (or closing the picker) would drop the user out of the episode entirely.
+  useTvBack(
+    pickerOpen ? () => setPickerOpen(false) : actionVisible ? dismissAndBlur : onClose,
+  );
 
   // This source is dead — resume the next one where playback left off.
   const fail = useCallback(
     (lastTime: number) => {
       setResumeAt(lastTime > 5 ? lastTime : 0);
       setIndex((i) => {
+        // Remember what died so the picker can grey it out — otherwise the user
+        // is invited to hand-pick sources the player has already ruled out.
+        const dead = sources[i]?.url;
+        if (dead) setDeadUrls((prev) => (prev.indexOf(dead) === -1 ? [...prev, dead] : prev));
         if (i + 1 < sources.length) {
           setNotice(`Source failed — trying ${sources[i + 1].label}`);
           setTimeout(() => setNotice(null), 4000);
@@ -173,6 +222,10 @@ export default function TvVodPlayback({
       if (onAction && (code === TVKEY.enter || code === TVKEY.play || code === TVKEY.playPause)) {
         return;
       }
+      // While the picker is up it owns the remote: arrows move between source
+      // buttons (TvNav) and Enter activates one. Without this, Enter would be
+      // swallowed into play/pause and Left/Right would seek the video behind it.
+      if (pickerOpen) return;
       switch (code) {
         case TVKEY.enter:
         case TVKEY.playPause:
@@ -218,14 +271,19 @@ export default function TvVodPlayback({
           return;
         }
         case TVKEY.up:
+          // Up opens the source picker. Every other direction is already spoken
+          // for (Left/Right seek, Down captions), and a stuck or stuttering
+          // source is exactly when someone reaches for the remote — so the
+          // escape hatch gets the one free key rather than being buried.
           e.preventDefault();
-          raiseOsd(paused);
+          setPickerOpen(true);
+          raiseOsd(true);
           return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [raiseOsd, paused]);
+  }, [raiseOsd, paused, pickerOpen]);
 
   const source = sources[index];
   const pct = clock.d > 0 && isFinite(clock.d) ? (clock.t / clock.d) * 100 : 0;
@@ -252,9 +310,101 @@ export default function TvVodPlayback({
           />
         </div>
       ) : (
-        <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+        <div className="w-full h-full flex flex-col items-center justify-center gap-6 px-16">
           <p className="text-2xl text-white">No source could play {title}.</p>
-          <p className="text-xl text-[#8197a4]">Press Back to return.</p>
+          <p className="text-xl text-[#8197a4] text-center max-w-2xl">
+            Sources go offline and get replaced — asking again often finds a
+            working one.
+          </p>
+          <div className="flex items-center gap-5 mt-2">
+            {onRefreshSources && (
+              <button
+                data-tv
+                data-tv-autofocus
+                data-tv-overlay-action
+                onClick={refresh}
+                disabled={refreshing}
+                className="tv-menu-item flex items-center gap-3 px-9 py-4 rounded-xl bg-white text-black text-xl font-bold disabled:opacity-50 focus:outline-none"
+              >
+                <RefreshCw className={`w-6 h-6 ${refreshing ? "animate-spin" : ""}`} />
+                {refreshing ? "Looking…" : "Find new sources"}
+              </button>
+            )}
+            {sources.length > 1 && (
+              <button
+                data-tv
+                data-tv-overlay-action
+                onClick={() => setPickerOpen(true)}
+                className="tv-menu-item flex items-center gap-3 px-9 py-4 rounded-xl bg-white/15 text-white text-xl font-semibold focus:outline-none"
+              >
+                <ListVideo className="w-6 h-6" />
+                Choose a source
+              </button>
+            )}
+          </div>
+          <p className="text-lg text-[#5a6b78] mt-2">Press Back to return.</p>
+        </div>
+      )}
+
+      {/* Source picker. The player already fails over on its own, but that only
+          helps when a source FAILS loudly — the common TV case is one that
+          stalls without ever erroring, where only the person watching knows
+          it's stuck. This is their way out. */}
+      {pickerOpen && (
+        <div data-tv-trap className="absolute inset-0 z-20 bg-black/85 flex flex-col justify-end">
+          <div className="px-14 pb-14">
+            <p className="text-3xl font-bold text-white mb-2">Sources</p>
+            <p className="text-lg text-[#8197a4] mb-7">
+              {sources.length} available
+              {deadUrls.length > 0 ? ` · ${deadUrls.length} stopped working` : ""}
+            </p>
+
+            <div className="flex items-center gap-4 flex-wrap">
+              {sources.map((s, i) => {
+                const isCurrent = i === index;
+                const isDead = deadUrls.indexOf(s.url) !== -1;
+                return (
+                  <button
+                    key={s.url}
+                    data-tv
+                    {...(isCurrent ? { "data-tv-autofocus": true } : {})}
+                    onClick={() => pickSource(i)}
+                    className={`tv-menu-item flex items-center gap-3 px-7 py-4 rounded-lg text-xl font-medium focus:outline-none ${
+                      isCurrent
+                        ? "bg-white text-black"
+                        : isDead
+                          ? "bg-[#1a242f] text-[#5a6b78]"
+                          : "bg-[#1a242f] text-[#aebbc5]"
+                    }`}
+                  >
+                    <span
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        isCurrent ? "bg-black" : isDead ? "bg-[#5a6b78]" : "bg-[#28c76f]"
+                      }`}
+                    />
+                    {s.label}
+                    {isDead && !isCurrent ? " · failed" : ""}
+                  </button>
+                );
+              })}
+
+              {onRefreshSources && (
+                <button
+                  data-tv
+                  onClick={refresh}
+                  disabled={refreshing}
+                  className="tv-menu-item flex items-center gap-3 px-7 py-4 rounded-lg text-xl font-medium bg-[#1a242f] text-[#aebbc5] disabled:opacity-50 focus:outline-none"
+                >
+                  <RefreshCw className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`} />
+                  {refreshing ? "Looking…" : "Find new"}
+                </button>
+              )}
+            </div>
+
+            <p className="mt-7 text-base text-[#5a6b78]">
+              Enter: switch source · Back: close
+            </p>
+          </div>
         </div>
       )}
 

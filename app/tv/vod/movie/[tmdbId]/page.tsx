@@ -112,6 +112,14 @@ export default function TvMoviePage() {
     [display.title, display.backdrop, cwId, updateProgress, remove],
   );
 
+  /** Ask the backend again, ignoring every cache. Sources rot between the
+   *  nightly link refresh and now, so a dead chain is often fixed by simply
+   *  re-resolving — that used to require backing out and re-opening the title. */
+  const refreshSources = useCallback(async () => {
+    const urls = await resolveVod("movie", tmdbId, undefined, undefined, true);
+    if (urls.length > 0) setResolved(urls);
+  }, [tmdbId]);
+
   const closePlayback = useCallback(() => setPlaying(false), []);
 
   const listed = isInList(cwId, "movie");
@@ -258,6 +266,7 @@ export default function TvMoviePage() {
           subtitles={subtitles}
           onClose={closePlayback}
           onProgress={handleProgress}
+          onRefreshSources={refreshSources}
         />
       )}
     </div>
