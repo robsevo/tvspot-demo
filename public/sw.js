@@ -11,11 +11,18 @@
  *
  * Bump VERSION to force-evict all caches on the next deploy.
  */
-const VERSION = "v5"; // v5: evict chunks cached before the chunk-guard fix — cached
-// unguarded chunks can evaluate ahead of the layout's inline polyfill on the TV
-// (globalThis ReferenceError, page dead at eval), and a crashed page can never
-// revalidate itself. The browser still updates sw.js on navigation, so this is
-// the recovery path for a wedged TV. (see scripts/chunk-guard.mjs)
+const VERSION = "v6"; // v6 (2026-07-20): evict shells cached across a night of
+// four back-to-back deploys. A cached shell references that build's chunk
+// HASHES; any chunk not already in ASSET_CACHE is then fetched from a server
+// that no longer has that hash → 404 → ChunkLoadError → the app never hydrates
+// and the TV sits on the "starting TVSpot" splash forever. Bumping evicts both
+// caches on activate. The self-healing below stops it recurring.
+//
+// v5: evict chunks cached before the chunk-guard fix — cached unguarded chunks
+// can evaluate ahead of the layout's inline polyfill on the TV (globalThis
+// ReferenceError, page dead at eval), and a crashed page can never revalidate
+// itself. The browser still updates sw.js on navigation, so this is the
+// recovery path for a wedged TV. (see scripts/chunk-guard.mjs)
 const SHELL_CACHE = `tvspot-shell-${VERSION}`;
 const ASSET_CACHE = `tvspot-assets-${VERSION}`;
 
@@ -63,7 +70,18 @@ self.addEventListener("fetch", (event) => {
         const hit = await cache.match(req);
         if (hit) return hit;
         const res = await fetch(req);
-        if (res && res.ok) cache.put(req, res.clone());
+        if (res && res.ok) {
+          cache.put(req, res.clone());
+        } else if (res && res.status === 404 && url.pathname.startsWith("/_next/static/")) {
+          // A content-hashed chunk that 404s means the SHELL that referenced it
+          // is from a build that no longer exists on the server. The page is
+          // already doomed (ChunkLoadError → no hydration → stuck on the splash),
+          // and stale-while-revalidate alone can leave a TV wedged there across
+          // relaunches. Drop the shell cache so the very next navigation is
+          // forced to fetch fresh HTML with valid chunk hashes — the app
+          // self-heals on relaunch instead of needing a VERSION bump + deploy.
+          await caches.delete(SHELL_CACHE);
+        }
         return res;
       }),
     );
