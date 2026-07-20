@@ -565,6 +565,18 @@ video::cue {
   div.aspect-video { position: relative; height: 0; padding-bottom: 56.25%; }
   div.aspect-video > * { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
   img.aspect-video { height: auto; }
+  /* The caption overlay is a direct child of the player's .aspect-video box, so
+     the blanket `> *` rule above was pinning it to top:0 + height:100% and
+     overriding its inline bottom-anchor — captions rendered at the TOP of the
+     picture, but ONLY on the TV, since only Chromium 63 hits this fallback.
+     Let it keep its own bottom-based positioning (it sets `bottom` inline, and
+     justify-end keeps text at the bottom even if height stays full). The class
+     selector out-specifies `> *`. */
+  div.aspect-video > .tv-cc-overlay {
+    top: auto;
+    height: auto;
+    justify-content: flex-end;
+  }
   div.aspect-\[2\/3\] { position: relative; height: 0; padding-bottom: 150%; }
   div.aspect-\[2\/3\] > * { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
   /* series page episode thumbs: w-40 (10rem) at 16:9 */

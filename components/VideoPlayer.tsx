@@ -1474,7 +1474,7 @@ export default function VideoPlayer({
           through to play/pause exactly as before. */}
       {ccLines.length > 0 && !casting && !ccNativeSurface && (
         <div
-          className="absolute inset-x-3 z-10 flex flex-col items-center pointer-events-none transition-[bottom] duration-200"
+          className="tv-cc-overlay absolute inset-x-3 z-10 flex flex-col items-center justify-end pointer-events-none transition-[bottom] duration-200"
           style={{
             fontSize: `${ccFontPx}px`,
             // Inside the picture (ccBottomPx accounts for letterboxing), but
