@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import TvRail from "@/components/tv/TvRail";
 import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
 import TvChannelCard from "@/components/tv/TvChannelCard";
@@ -44,6 +44,15 @@ export interface TvBrowseRail {
   trailing?: ReactNode;
 }
 
+/** Rails painted on the very first frame — the hero plus one rail is a complete
+ *  screen to look at, and holds initial focus. */
+const RAILS_FIRST_PAINT = 1;
+/** How many more to add per step, and how long to leave the renderer alone
+ *  between steps. Tuned to be generous on the slowest device we support rather
+ *  than snappy on a desktop; the rails below the fold aren't visible yet anyway. */
+const RAILS_PER_STEP = 1;
+const RAIL_STEP_MS = 400;
+
 /**
  * The Prime Video browse chassis: a pinned hero pane that always describes
  * the FOCUSED card (art top-right, details top-left), with the rails
@@ -64,6 +73,36 @@ export default function TvBrowseScreen({
   onChannelSelect?: (channel: Channel) => void;
 }) {
   const [focused, setFocused] = useState<TvBrowseItem | null>(null);
+
+  /**
+   * Mount rails a few at a time instead of all at once.
+   *
+   * A cold, direct load of a browse screen used to take the 2019 Samsung's
+   * renderer down completely — the process stopped answering, no JS execution
+   * context, nothing on screen but the launcher splash. Reaching the SAME screen
+   * by navigating from another page was always fine, and the measured
+   * difference was not size but SIMULTANEITY: arriving by navigation puts a
+   * gap (auth round-trip, route change) between parsing/hydrating the bundle
+   * and building the full screen, while a cold load does both back to back.
+   * Cutting decoded image memory 3.2x did NOT fix it, so the trigger is the
+   * concurrent burst of layout + decode + data work, not any single resource.
+   *
+   * Staggering reproduces that gap deliberately: paint the hero and the first
+   * rail, hand the frame back, then add the rest. Everything still arrives, just
+   * not in one blocking chunk. The first rail is what holds initial D-pad focus
+   * (tvAutoFocus below), so this is invisible in use.
+   */
+  const [railBudget, setRailBudget] = useState(RAILS_FIRST_PAINT);
+  useEffect(() => {
+    if (railBudget >= rails.length) return;
+    // A timer, not requestIdleCallback: rIC is Chrome 47+ but unreliable on this
+    // webview under load, and "later" is the only guarantee we actually need.
+    const t = setTimeout(
+      () => setRailBudget((n) => n + RAILS_PER_STEP),
+      RAIL_STEP_MS,
+    );
+    return () => clearTimeout(t);
+  }, [railBudget, rails.length]);
   // The landing hero must be a real IMAGE (like the reference), not the first
   // rail's tile when that's a sports event or channel (no backdrop → a dark
   // void). Default to the first backdrop/poster-bearing item; focus still takes
@@ -160,7 +199,7 @@ export default function TvBrowseScreen({
           scroll container don't scroll with content), so cards settle onto a
           calm dark base instead of clashing with the hero art. */}
       <div className="tv-fade-rails relative z-10 flex-1 overflow-y-auto pb-12 pt-1">
-        {rails.map(
+        {rails.slice(0, railBudget).map(
           (rail, railIdx) =>
             (rail.items.length > 0 || rail.trailing) && (
               <TvRail key={rail.title} title={rail.title}>

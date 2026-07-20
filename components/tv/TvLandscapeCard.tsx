@@ -31,22 +31,34 @@ interface Props {
   tvAutoFocus?: boolean;
 }
 
+/** Smallest TMDB size that still looks right in a 320×180 tile. The ladders
+ *  differ by asset type and do NOT overlap: backdrops offer w300/w780/w1280,
+ *  posters offer …/w342/w500/w780. Asking for a size the type doesn't have 404s,
+ *  which is why this has to be chosen per type rather than globally. */
+const CARD_BACKDROP_SIZE = "w300";
+const CARD_POSTER_SIZE = "w342";
+
 /**
- * Downsize TMDB art for rail cards. The catalog hands out w1280 backdrops /
- * w500 posters (right for the hero pane); painting 70+ of those into 320×180
- * tiles decodes ~265MB of bitmaps and blows past the 2019 TV's raster budget —
- * the compositor then paints the tiles WHITE even though every <img> reports
- * loaded (verified on-device via DevTools: naturalWidth 1280, canvas readback
- * shows real art, screen shows white). Rewrites the size segment inside the
- * proxied URL (both encoded and plain forms); ladders differ per TMDB type:
- * backdrops have w300, posters' nearest is w342.
+ * Downsize TMDB art for rail cards. Painting 70+ full-size images into 320×180
+ * tiles blows past the 2019 TV's raster budget — the compositor then paints
+ * tiles WHITE even though every <img> reports loaded (verified on-device:
+ * naturalWidth 1280, canvas readback shows real art, screen shows white), and a
+ * cold /tv paint builds all of them at once, which is enough to take the whole
+ * renderer down on a ~1GB box.
+ *
+ * Rewrites ANY size segment — w<n> or "original", in both the encoded and plain
+ * forms of the proxied URL — rather than enumerating known sizes. The previous
+ * version listed only w1280 and w500, so the catalog's w780 backdrops sailed
+ * through at full size: measured on prod, 38 of 73 card images came down as
+ * 780×439, which is ~52MB of the 59.7MB decoded on a cold home screen. Matching
+ * the shape instead of the values means the next size TMDB hands us can't
+ * silently reintroduce that.
  */
-function cardArt(url: string): string {
+function cardArt(url: string, isBackdrop: boolean): string {
+  const size = isBackdrop ? CARD_BACKDROP_SIZE : CARD_POSTER_SIZE;
   return url
-    .replace(/%2Fw1280%2F/, "%2Fw300%2F")
-    .replace(/\/w1280\//, "/w300/")
-    .replace(/%2Fw500%2F/, "%2Fw342%2F")
-    .replace(/\/w500\//, "/w342/");
+    .replace(/%2F(?:w\d+|original)%2F/, `%2F${size}%2F`)
+    .replace(/\/(?:w\d+|original)\//, `/${size}/`);
 }
 
 /** Prime-style landscape card: 16:9 art, corner badge, provider mark,
@@ -69,7 +81,8 @@ export default function TvLandscapeCard({
   const [imgError, setImgError] = useState(false);
   const href = kind === "series" ? `/tv/vod/series/${tmdbId}` : `/tv/vod/movie/${tmdbId}`;
   const raw = backdrop || poster;
-  const art = raw ? cardArt(raw) : raw;
+  // Which ladder to use is decided by which field we actually took.
+  const art = raw ? cardArt(raw, Boolean(backdrop)) : raw;
 
   return (
     <Link
