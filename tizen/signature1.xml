@@ -14,13 +14,13 @@ Ik67NtNTCQ==</DigestValue>
 </Reference>
 <Reference URI="app.js">
 <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></DigestMethod>
-<DigestValue>1GjNFK/roxMt/36EZ0rmZ6EpdOXQeiuNvQb0Ip2ZTjVYjEl2UE8i0JiaTZnTK5+5GGZ7qvF4j6k+
-gx6Q6B3rqw==</DigestValue>
+<DigestValue>Ru8LaI/uidgZYmDKaAycThs/g2wrbJRRlSMJShK4z7pjFyCT8F7ySuCOMIm7z2v5Qi8FHOwFX033
+PWWl4OoBVw==</DigestValue>
 </Reference>
 <Reference URI="author-signature.xml">
 <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></DigestMethod>
-<DigestValue>b0duix019P4r03LuQMjd+B0dGx1wnB1MTq3VRdz0nARuUgFdwC1IYp/Ac3thCxnzGusx8LYmQ+3z
-AuQu5Y33zw==</DigestValue>
+<DigestValue>KxSJkytmL0iBiudPYI6ZPrS7YO4+CmkruZsn9vNjjdvXmSnUMPEHDct2xE8ifpnlJEfb8RQxwXXz
+kwnv36NIEQ==</DigestValue>
 </Reference>
 <Reference URI="config.xml">
 <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></DigestMethod>
@@ -47,9 +47,9 @@ GyvKX9Snig==</DigestValue>
 </Reference>
 </SignedInfo>
 <SignatureValue>
-ciOr3bjL5CGTWi92eu8iE2nrIqYnFs4fD6vTFcmbbyrGPW33Nqk376O/0OjfaGTgujt8sF5FUAOl
-1rD39NIrNKYt0uiYUVbK3EfV+6uFnpCS0KKLg9n5RARJFY8ADGzlTFbJFkEm4WnpKxx+LOl2ODQ7
-qoyx+PjkGwFN00pk/Cw=
+p0D79gNASnECPIt5i26TO2lHK7ZfqlGMVnzrYvgDx/NAQL7ZjjEohU12PIJaendoNRzEnngNcb+r
+DdVPmrcnedavzvWZ4X4NocCDWp7JzUbS1zvWPWtbimfBTYnJBCcePCxT9GT15zQeYNGCd4X7sIKp
+TeRWPvPTiYlm8WfFMiw=
 </SignatureValue>
 <KeyInfo>
 <X509Data>

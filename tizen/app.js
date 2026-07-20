@@ -82,21 +82,40 @@ function onNavStalled() {
 
   show("Still loading — retrying…", null);
   retryTimer = setTimeout(function () {
-    go(true);
+    go();
   }, 1500);
 }
 
-/* Navigate to the app, watchdogged. */
-function go(bustCache) {
+/* Navigate to the app, watchdogged.
+ *
+ * TARGET IS /tv/login, NOT /tv — this is load-bearing, measured on the RU7100.
+ *
+ * Loading /tv DIRECTLY as the first document reliably kills the TV's renderer:
+ * the process stops responding entirely (no JS execution context, and even
+ * Runtime.enable/DOM.getDocument time out over remote DevTools), so the screen
+ * never leaves this splash. Reaching the exact same /tv through /tv/login does
+ * NOT: the login page paints, silently re-signs in with the remembered
+ * credentials, and hands off to /tv as a CLIENT-SIDE navigation, which builds
+ * the home screen incrementally into an already-warm runtime instead of
+ * server-rendering and hydrating the whole thing as a cold first paint. On a
+ * ~1GB 2019 box that difference is the difference between working and wedged.
+ *
+ * Proven by bisecting on the device: /api/version loaded fine (so the webview,
+ * network and this wrapper are healthy), direct /tv wedged every launch, and
+ * /tv/login came up and landed on a fully live /tv.
+ *
+ * It is also the flow the README always described ("should show 'Starting
+ * TVSpot…' then land on the TV login") — going straight to /tv was the drift.
+ *
+ * The cache-busting query stays as insurance: it guarantees a poisoned service
+ * worker entry can never be handed back for this key. The TV build no longer
+ * registers a service worker at all, so it costs nothing.
+ */
+function go() {
   clearTimers();
   show("Loading TVSpot…", null);
   navWatchdog = setTimeout(onNavStalled, NAV_WATCHDOG_MS);
-  var target = APP_URL + "/tv";
-  if (bustCache) {
-    // Distinct URL ⇒ distinct service-worker cache key ⇒ a poisoned or
-    // permanently-pending entry for "/tv" cannot be served to us again.
-    target += (target.indexOf("?") === -1 ? "?" : "&") + "r=" + Date.now();
-  }
+  var target = APP_URL + "/tv/login?b=" + Date.now();
   try {
     window.location.replace(target);
   } catch (err) {
@@ -116,7 +135,7 @@ function start() {
   probe.onload = function () {
     // Reachable. From here the risk is no longer "can we get a response" but
     // "will the navigation ever commit" — hence the watchdog in go().
-    go(navAttempts > 0);
+    go();
   };
   probe.onerror = probe.ontimeout = function () {
     inFlight = false;

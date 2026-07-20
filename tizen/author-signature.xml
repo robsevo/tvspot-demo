@@ -14,8 +14,8 @@ Ik67NtNTCQ==</DigestValue>
 </Reference>
 <Reference URI="app.js">
 <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></DigestMethod>
-<DigestValue>1GjNFK/roxMt/36EZ0rmZ6EpdOXQeiuNvQb0Ip2ZTjVYjEl2UE8i0JiaTZnTK5+5GGZ7qvF4j6k+
-gx6Q6B3rqw==</DigestValue>
+<DigestValue>Ru8LaI/uidgZYmDKaAycThs/g2wrbJRRlSMJShK4z7pjFyCT8F7ySuCOMIm7z2v5Qi8FHOwFX033
+PWWl4OoBVw==</DigestValue>
 </Reference>
 <Reference URI="config.xml">
 <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha512"></DigestMethod>
@@ -42,9 +42,9 @@ QY10fG1EWQ==</DigestValue>
 </Reference>
 </SignedInfo>
 <SignatureValue>
-DqXC9TgBDDrUtWetoG7uxJTyHPJv54cF2nPT7HicBi5AzypC+WwQBL3uy9WIWmtQ+ICdHWExPhvB
-bGyQwW5KS8tZt2tPiKESPWUF2FuLkBFuyS2Rs6pJ9zm/WhJQA9VusDMM1v6fp0beFCTWGgvKbvkQ
-6X/gU8QMgv2qEKrdNl4=
+Or8ltp7Y4jbQ9T9fkrW8+cKZwWyGMS1hCa0lTSFC4H4liByqFWUOhr1mnqdIpByU9XMh1zDAL4Zr
+knRdRz/1qY4Mv8EOmHgCyulT2i2Q9EC3eXIKPFgAu9bVLDTXSGLQf2TMymZr6+hhjuiZpHymPOJK
+kHNpBscURtPXuMgkxuA=
 </SignatureValue>
 <KeyInfo>
 <X509Data>
