@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { isPlaybackActive, onPlaybackChange } from "@/lib/playbackState";
+import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 
 /**
  * Reload gracefully when THIS page's build no longer matches the deployment
@@ -60,7 +61,7 @@ export default function DeployRefresh() {
       if (disposed) return;
       let id: string | null = null;
       try {
-        const res = await fetch("/api/version", { cache: "no-store" });
+        const res = await fetchWithDeadline("/api/version", { cache: "no-store" }, DEADLINE.normal);
         if (!res.ok) return;
         id = (await res.json())?.id || null;
       } catch {

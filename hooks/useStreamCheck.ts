@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { StreamCheck } from "@/lib/stream-verify";
+import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 
 /** Keep probing until at least this many sources verify working + non-busy. */
 const TARGET_WORKING = 3;
@@ -51,11 +52,11 @@ export function useStreamCheck(urls: string[], opts?: { mode?: "live" | "vod" })
     let active = true;
     (async () => {
       try {
-        const res = await fetch("/api/stream-check", {
+        const res = await fetchWithDeadline("/api/stream-check", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ urls, mode }),
-        });
+        }, DEADLINE.normal);
         const data: { results?: StreamCheck[] } = await res.json();
         if (!active) return;
         const map: Record<string, StreamCheck> = {};
@@ -93,11 +94,11 @@ export function useStreamCheck(urls: string[], opts?: { mode?: "live" | "vod" })
     const us = urlsRef.current;
     if (us.length === 0) return;
     try {
-      const res = await fetch("/api/stream-check", {
+      const res = await fetchWithDeadline("/api/stream-check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ urls: us, mode }),
-      });
+      }, DEADLINE.normal);
       const data: { results?: StreamCheck[] } = await res.json();
       const map: Record<string, StreamCheck> = {};
       for (const r of data.results || []) map[r.url] = r;

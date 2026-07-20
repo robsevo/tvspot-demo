@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SubtitleTrack } from "@/lib/subtitles";
+import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 
 /**
  * External subtitle tracks for a VOD title.
@@ -44,7 +45,7 @@ export function useSubtitles(
       params.set("episode", String(episode));
     }
 
-    fetch(`/api/subtitles?${params.toString()}`)
+    fetchWithDeadline(`/api/subtitles?${params.toString()}`, {}, DEADLINE.normal)
       .then((r) => (r.ok ? r.json() : { tracks: [] }))
       .then((d) => {
         if (!cancelled && Array.isArray(d?.tracks)) setTracks(d.tracks);

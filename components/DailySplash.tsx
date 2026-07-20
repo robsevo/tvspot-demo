@@ -5,6 +5,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { proxyFetch } from "@/lib/api";
 import { writeCache } from "@/lib/localCache";
 import { lastRolloverMs } from "@/lib/dailyBoundary";
+import { fetchJson, DEADLINE } from "@/lib/fetchDeadline";
+import { EPG_BATCH } from "@/hooks/useEpg";
 import type {
   CatalogItem,
   ChannelsResponse,
@@ -67,12 +69,18 @@ async function prewarmLive(): Promise<void> {
     const names = channels.map((c) => c.name).filter(Boolean);
     if (names.length === 0) return;
 
-    const res = await fetch(
-      `/api/lounge/epg?channels=${encodeURIComponent(names.join(","))}`,
+    // ONE BATCH ONLY. This used to request every channel at once, which is the
+    // ~6.3MB single-shot response useEpg was batched (EPG_BATCH) to avoid: the
+    // 2019 TV's ~1GB webview can't reliably download and JSON.parse that, and
+    // the attempt janks or wedges the main thread at app start — on /tv this
+    // prewarm runs on every load. Warming the first batch gives the guide a
+    // useful head start at a fraction of the cost; useEpg fetches the rest.
+    const { ok, data: epg } = await fetchJson<EpgResponse>(
+      `/api/lounge/epg?channels=${encodeURIComponent(names.slice(0, EPG_BATCH).join(","))}`,
       { credentials: "include" },
+      DEADLINE.background,
     );
-    if (!res.ok) return;
-    const epg = (await res.json()) as EpgResponse;
+    if (!ok || !epg) return;
     // Trim to the fields the grid renders (same shape useEpg caches).
     const map: Record<string, Pick<EpgProgram, "title" | "start_utc" | "stop_utc">[]> = {};
     for (const [name, progs] of Object.entries(epg.programmes || {})) {

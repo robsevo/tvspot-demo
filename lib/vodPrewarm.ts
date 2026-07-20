@@ -17,6 +17,8 @@
  * a client cache is the reliable layer for "feels instant".
  */
 
+import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
+
 type Kind = "movie" | "series";
 
 const TTL_MS = 30 * 60_000;
@@ -50,7 +52,12 @@ export function resolveVod(kind: Kind, tmdb: number | string, s?: number, e?: nu
   const existing = inflight.get(k);
   if (existing) return existing;
 
-  const p = fetch(extractUrl(kind, tmdb, s, e))
+  // Deadlined because this promise is MEMOISED in `inflight`: on the TV, where
+  // a stalled fetch never settles, a hung resolve would be handed to every
+  // later caller for this title — one stall would break it for the whole
+  // session, with "Finding streams…" up forever. The deadline guarantees the
+  // entry is eventually rejected and cleared below.
+  const p = fetchWithDeadline(extractUrl(kind, tmdb, s, e), {}, DEADLINE.stream)
     .then((r) => (r.ok ? r.json() : { stream_urls: [] }))
     .then((d) => (Array.isArray(d?.stream_urls) ? (d.stream_urls as string[]) : []))
     .then((urls) => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { readCache, writeCache } from "@/lib/localCache";
+import { fetchJson, DEADLINE } from "@/lib/fetchDeadline";
 import type { EpgProgram, EpgResponse } from "@/lib/types";
 
 const CACHE_KEY = "tvspot_epg_v1";
@@ -13,7 +14,7 @@ const RETRY_MS = [2_000, 5_000, 15_000, 60_000]; // backoff after a failed/empty
 // single fetch+JSON.parse — EPG never loaded on the TV. Fetch in channel
 // batches (~1MB each) so the guide loads there and fills in progressively; the
 // big parse no longer spikes the main thread mid-playback either.
-const EPG_BATCH = 20;
+export const EPG_BATCH = 20;
 
 export type EpgMap = Record<string, EpgProgram[]>;
 
@@ -69,21 +70,35 @@ export function useEpg(channelNames: string[]) {
         // erases a channel we already had — the write is always a union.
         const merged: EpgMap = { ...(readCache<EpgMap>(CACHE_KEY)?.data ?? {}) };
         let anyData = false;
+        // Give up early when the network is plainly down. The batches run in
+        // SEQUENCE, so without this a dead backend costs every batch its full
+        // deadline before the guide reports anything (6 batches × 15s = 90s of
+        // "Loading guide…", which reads as a hang even though it is bounded).
+        // Two consecutive failures is enough evidence; the retry/backoff below
+        // is what recovers, not grinding through the remaining batches.
+        const MAX_CONSECUTIVE_FAILURES = 2;
+        let consecutiveFailures = 0;
         for (let i = 0; i < names.length; i += EPG_BATCH) {
           if (cancelled) return;
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) break;
           const batch = names.slice(i, i + EPG_BATCH);
-          // Per-batch timeout: one slow batch can't sink the rest, and the total
-          // isn't capped by a single timer (the TV is slow, batches are many).
-          const ctl = new AbortController();
-          const killer = setTimeout(() => ctl.abort(), 15_000);
+          // Per-batch DEADLINE (not an abort): one slow batch can't sink the
+          // rest, and the total isn't capped by a single timer (the TV is slow,
+          // batches are many). It has to be a real deadline because this loop is
+          // SEQUENTIAL — on the TV, where AbortController cannot cancel a fetch,
+          // a single batch that never settles wedges every remaining batch and
+          // leaves "Loading guide…" up forever.
           try {
-            const res = await fetch(
+            const { ok, data } = await fetchJson<EpgResponse>(
               `/api/lounge/epg?channels=${encodeURIComponent(batch.join(","))}`,
-              { credentials: "include", signal: ctl.signal },
+              { credentials: "include" },
+              DEADLINE.normal,
             );
-            if (!res.ok) continue;
-            const data = (await res.json()) as EpgResponse;
+            if (!ok || !data) { consecutiveFailures++; continue; }
             const map = trim(data.programmes);
+            // An empty batch is a real answer from a warming backend, not a
+            // network failure — don't let it trip the early exit.
+            consecutiveFailures = 0;
             if (Object.keys(map).length === 0) continue;
             anyData = true;
             Object.assign(merged, map);
@@ -94,8 +109,7 @@ export function useEpg(channelNames: string[]) {
             }
           } catch {
             // This batch failed (timeout/network) — skip it, keep the others.
-          } finally {
-            clearTimeout(killer);
+            consecutiveFailures++;
           }
         }
         // Treat "every batch empty/failed" as a failure so we retry rather than

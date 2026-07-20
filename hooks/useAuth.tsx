@@ -1,15 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
-
-/** Cap on the auth round-trips. EVERY auth fetch gates a full-screen "waiting"
- *  state on the TV — /api/auth/me gates the shell's splash, /api/auth/login
- *  gates the login page's "Signing you in…" — so an unbounded fetch means an
- *  unbounded splash. A fetch that REJECTS is fine (the catch runs); the killer
- *  is one that never SETTLES, which is routine on the RU7100 whose network
- *  stack often isn't up yet at cold launch. Long enough for a slow-but-alive
- *  backend, short enough not to read as a hang. */
-const AUTH_TIMEOUT_MS = 8000;
+import { fetchJson, DEADLINE } from "@/lib/fetchDeadline";
 
 /** The server never answered, or we couldn't reach it at all — as opposed to the
  *  server actively rejecting us. Callers need the difference: rotated
@@ -24,55 +16,31 @@ export class AuthUnreachableError extends Error {
 }
 
 /**
- * Runs one auth round-trip under a deadline that fires even when nothing can be
- * cancelled.
+ * One auth round-trip under DEADLINE.auth — short, because every one of these
+ * gates a full-screen waiting state (/api/auth/me gates the shell splash,
+ * /api/auth/login gates "Signing you in…").
  *
- * Aborting is NOT a timeout on the TV. fetch() only began honouring `signal` in
- * Chrome 66, and tv-polyfills.js *defines* AbortController on the RU7100's
- * Chromium 63 — so the feature check passes while, in that shim's own words,
- * "fetch() won't truly cancel". The previous version therefore flipped a flag on
- * a JS object at 8s while the real request hung on forever, and every await
- * behind it hung too: "Signing you in…" with no error and no way out.
- *
- * So the deadline races the work from outside instead of trying to interrupt it.
- * The orphaned request leaks until its socket dies, which is an acceptable
- * trade — what matters is that the UI always gets an answer. Abort is kept as
- * best-effort cleanup on engines where it actually does something.
- *
- * The body parse is inside the race on purpose: res.json() is a second
- * unbounded await (headers can land while the body stalls), so a deadline
- * covering only the fetch would just move the hang one hop down.
+ * The deadline mechanics live in lib/fetchDeadline: on the TV a fetch cannot be
+ * cancelled, so the timeout must race the work rather than abort it, and the
+ * body parse must sit inside that race. Everything here does is translate the
+ * outcome into the reachable/rejected distinction the TV login page needs.
  */
-function authFetch(
+async function authFetch(
   url: string,
   init: RequestInit,
 ): Promise<{ ok: boolean; data: Record<string, unknown> }> {
-  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
-
-  const work = async () => {
-    let res: Response;
-    try {
-      res = await fetch(url, { ...init, ...(ctl ? { signal: ctl.signal } : {}) });
-    } catch {
-      // Refused/offline/aborted — indistinguishable here, and all mean the same
-      // thing to callers: we learned nothing about the session.
-      throw new AuthUnreachableError();
-    }
-    // An unparseable body isn't "the server said no" — the status decides.
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, data: data as Record<string, unknown> };
-  };
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      try { ctl?.abort(); } catch {}
-      reject(new AuthUnreachableError());
-    }, AUTH_TIMEOUT_MS);
-    work().then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (err) => { clearTimeout(timer); reject(err); },
+  try {
+    const { ok, data } = await fetchJson<Record<string, unknown> | null>(
+      url,
+      init,
+      DEADLINE.auth,
     );
-  });
+    return { ok, data: data ?? {} };
+  } catch {
+    // TimeoutError, refused, offline — indistinguishable here, and all mean the
+    // same thing to callers: we learned nothing about the session.
+    throw new AuthUnreachableError();
+  }
 }
 
 interface AuthContextType {

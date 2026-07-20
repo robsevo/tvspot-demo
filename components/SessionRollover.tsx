@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { nextRolloverMs } from "@/lib/dailyBoundary";
 import { isPlaybackActive, onPlaybackChange } from "@/lib/playbackState";
+import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 
 /**
  * Client half of the nightly 4 AM ET forced-logout.
@@ -64,7 +65,9 @@ export default function SessionRollover() {
       checking = true;
       let loggedIn: boolean | null = null; // null = couldn't tell (network blip)
       try {
-        const res = await fetch("/api/auth/me", { cache: "no-store", credentials: "include" });
+        // Deadlined: `checking` is only cleared after this settles, so a fetch
+        // that never answers would permanently disable rollover detection.
+        const res = await fetchWithDeadline("/api/auth/me", { cache: "no-store", credentials: "include" }, DEADLINE.auth);
         if (res.ok) loggedIn = Boolean((await res.json())?.username);
       } catch {}
       checking = false;

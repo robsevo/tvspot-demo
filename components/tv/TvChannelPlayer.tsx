@@ -12,6 +12,7 @@ import { useTvBack } from "@/components/tv/TvNav";
 import { nowAndNext, fmtTime } from "@/lib/tvEpg";
 import { TVKEY } from "@/lib/tv";
 import { Check, X, Loader2, RefreshCw } from "lucide-react";
+import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 
 /** How many sources to surface in the overlay. */
 const MAX_SOURCES = 6;
@@ -92,12 +93,12 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
     const controller = new AbortController();
     (async () => {
       try {
-        const res = await fetch("/api/extra-sources", {
+        const res = await fetchWithDeadline("/api/extra-sources", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ slug: channelSlugValue, exclude: probedUrls }),
           signal: controller.signal,
-        });
+        }, DEADLINE.normal);
         if (!res.ok) return;
         const data: { urls?: string[] } = await res.json();
         if (Array.isArray(data.urls) && data.urls.length > 0) setExtraUrls(data.urls);

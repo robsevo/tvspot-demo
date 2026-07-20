@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { proxyFetch } from "@/lib/api";
+import { DEADLINE } from "@/lib/fetchDeadline";
 import { readCache, writeCache } from "@/lib/localCache";
 import type { CatalogResponse, ServiceCatalogResponse, CatalogItem, CatalogSummaryEntry } from "@/lib/types";
 import { curate } from "@/lib/discovery";
@@ -50,7 +51,7 @@ export function useCatalog() {
       if (!background) setLoading(true);
       setError(null);
 
-      const data = await proxyFetch<CatalogResponse>("/api/lounge/vod/catalog");
+      const data = await proxyFetch<CatalogResponse>("/api/lounge/vod/catalog", undefined, DEADLINE.catalog);
       const { realServices, allServices, allSummary } = assembleCatalog(data);
       // A transient empty backend response must not blank the provider list the
       // user is looking at during a background revalidation.
@@ -153,8 +154,12 @@ export function useServiceCatalog(service: string | null) {
       }
 
       // Regular service catalog
+      // Same cold-build risk as the provider index — this gates the per-provider
+      // grid's "Loading …" screen, so it must be bounded but not impatient.
       const data = await proxyFetch<ServiceCatalogResponse>(
-        `/api/lounge/catalog?service=${encodeURIComponent(service)}`
+        `/api/lounge/catalog?service=${encodeURIComponent(service)}`,
+        undefined,
+        DEADLINE.catalog,
       );
       const svcMovies = curate(data.movies || []);
       const svcSeries = curate(data.series || []);
@@ -212,7 +217,7 @@ const inflightPrewarm = new Set<string>();
 export function prewarmCatalog(): void {
   if (inflightPrewarm.has("catalog") || readCache(CATALOG_CACHE_KEY)) return;
   inflightPrewarm.add("catalog");
-  proxyFetch<CatalogResponse>("/api/lounge/vod/catalog")
+  proxyFetch<CatalogResponse>("/api/lounge/vod/catalog", undefined, DEADLINE.catalog)
     .then((data) => {
       const { realServices, allServices, allSummary } = assembleCatalog(data);
       if (realServices.length > 0) {
@@ -230,7 +235,11 @@ export function prewarmService(service: string): void {
   const key = SERVICE_CACHE_PREFIX + service;
   if (inflightPrewarm.has(key) || readCache(key)) return;
   inflightPrewarm.add(key);
-  proxyFetch<ServiceCatalogResponse>(`/api/lounge/catalog?service=${encodeURIComponent(service)}`)
+  proxyFetch<ServiceCatalogResponse>(
+    `/api/lounge/catalog?service=${encodeURIComponent(service)}`,
+    undefined,
+    DEADLINE.catalog,
+  )
     .then((data) => {
       const movies = curate(data.movies || []);
       const series = curate(data.series || []);

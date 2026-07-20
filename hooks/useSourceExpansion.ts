@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { channelSlug } from "@/lib/sources";
+import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 
 /**
  * Fetches additional verified source URLs for a channel from /api/extra-sources
@@ -41,12 +42,12 @@ export function useSourceExpansion(
 
     (async () => {
       try {
-        const res = await fetch("/api/extra-sources", {
+        const res = await fetchWithDeadline("/api/extra-sources", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ slug, exclude: probedUrls }),
           signal: controller.signal,
-        });
+        }, DEADLINE.normal);
         if (!res.ok) return;
         const data: { urls?: string[] } = await res.json();
         if (Array.isArray(data.urls) && data.urls.length > 0) {

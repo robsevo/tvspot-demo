@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { readCache, writeCache } from "@/lib/localCache";
+import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 import type { EventsResponse } from "@/lib/leagues";
 
 /** Local YYYYMMDD (user's timezone), so "today's games" matches the user's day. */
@@ -34,7 +35,9 @@ export function useEvents(date?: string) {
       setLoading(true);
     }
 
-    fetch(`/api/events?date=${day}`)
+    // Deadlined: this gates `loading` via .finally(), which never runs if the
+    // request never settles — the TV's failure mode, not an exception.
+    fetchWithDeadline(`/api/events?date=${day}`, {}, DEADLINE.normal)
       .then((r) => (r.ok ? r.json() : null))
       .then((payload: EventsResponse | null) => {
         if (cancelled) return;
