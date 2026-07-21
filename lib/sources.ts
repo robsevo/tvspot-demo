@@ -62,6 +62,13 @@ export function getChannelSources(channelName: string): string[] {
   }
 }
 
+/**
+ * Helper to construct an Internet Archive embed URL.
+ */
+export function iaEmbedUrl(identifier: string): string {
+  return `https://archive.org/embed/${identifier}`;
+}
+
 const PROVIDER_NAMES: Record<string, string> = {
   "vidlink.pro": "Vidlink",
   "moviesapi.club": "MoviesAPI",
@@ -107,7 +114,9 @@ export function filterEmbeds(urls: string[] | undefined | null): string[] {
 /** Human-friendly provider name for an embed URL, e.g. "Vidlink". */
 export function providerName(url: string): string {
   try {
-    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    const u = new URL(url);
+    if (u.hostname.includes("archive.org")) return "Internet Archive";
+    const host = u.hostname.replace(/^www\./, "").toLowerCase();
     if (PROVIDER_NAMES[host]) return PROVIDER_NAMES[host];
     // Fall back to the registrable-ish domain (drop subdomains), title-cased.
     const parts = host.split(".");
@@ -116,6 +125,11 @@ export function providerName(url: string): string {
   } catch {
     return "Source";
   }
+}
+
+/** Constructs an Internet Archive embed URL from an identifier. */
+export function getIAEmbedUrl(identifier: string): string {
+  return `https://archive.org/embed/${identifier}`;
 }
 
 export interface PlayableSource {

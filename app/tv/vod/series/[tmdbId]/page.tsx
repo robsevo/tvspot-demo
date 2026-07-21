@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useReducer, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { Play, Plus, Check } from "lucide-react";
+import { Play, RotateCcw, Plus, Check } from "lucide-react";
 import { proxyFetch } from "@/lib/api";
 import { mergeSources } from "@/lib/sources";
 import { resolveVod, prewarmVod, getPrewarmed } from "@/lib/vodPrewarm";
@@ -27,6 +27,9 @@ export default function TvSeriesPage() {
   const [seasonIdx, setSeasonIdx] = useState(0);
   const [focusedEp, setFocusedEp] = useState<number | null>(null);
   const [playing, setPlaying] = useState<{ season: number; episode: number } | null>(null);
+  // Set when the chosen episode should ignore its saved position and start over
+  // (the "Restart" actions), so the same episode can be resumed OR restarted.
+  const [fromStart, setFromStart] = useState(false);
 
   const [detailState, dispatch] = useReducer(
     (
@@ -140,8 +143,9 @@ export default function TvSeriesPage() {
     if (urls.length > 0) dispatchResolved({ key: epKey(season, episode), urls });
   }, [tmdbId, playing]);
 
-  const playEpisode = (s: number, e: number) => {
+  const playEpisode = (s: number, e: number, restart = false) => {
     resolveEpisode(s, e);
+    setFromStart(restart);
     setPlaying({ season: s, episode: e });
   };
 
@@ -190,6 +194,11 @@ export default function TvSeriesPage() {
     items.find(
       (i) => i.tmdbId === seriesId && i.kind === "series" && i.season === s && i.episode === e,
     );
+
+  // Resume state of the focused episode — gates the per-episode "Restart episode"
+  // action (a restart only means anything for an episode you're partway through).
+  const shownEpCw = season && shownEp ? cwFor(season.season_number, shownEp.episode_number) : undefined;
+  const shownEpResumable = !!shownEpCw && shownEpCw.progress > 2 && shownEpCw.progress < 95;
 
   const resumeTime = useMemo(() => {
     if (!playing) return 0;
@@ -326,20 +335,30 @@ export default function TvSeriesPage() {
               data-tv-autofocus
               disabled={!playTarget}
               onClick={() => playTarget && playEpisode(playTarget.season, playTarget.episode)}
-              className="flex items-center gap-3 bg-white text-black text-2xl font-bold px-10 py-5 rounded-lg disabled:opacity-50"
+              className="flex items-center gap-3 bg-white text-black text-xl font-bold px-8 py-3.5 rounded-lg disabled:opacity-50"
             >
-              <Play className="w-7 h-7 fill-black" />
+              <Play className="w-6 h-6 fill-black" />
               {playTarget
                 ? `${resumeTarget ? "Resume" : "Play"} S${playTarget.season} E${playTarget.episode}`
                 : "Loading…"}
             </button>
+            {resumeTarget && playTarget && (
+              <button
+                data-tv
+                onClick={() => playEpisode(playTarget.season, playTarget.episode, true)}
+                className="flex items-center gap-3 bg-white/15 text-white text-xl font-semibold px-8 py-3.5 rounded-lg"
+              >
+                <RotateCcw className="w-5 h-5" />
+                From beginning
+              </button>
+            )}
             <button
               data-tv
               onClick={toggleList}
               aria-label={listed ? "Remove from My Stuff" : "Add to My Stuff"}
-              className="tv-pill group flex items-center gap-3 bg-white/15 text-white text-xl font-semibold px-8 py-5 rounded-lg focus:outline-none focus:bg-white focus:text-black"
+              className="tv-pill group flex items-center gap-3 bg-white/15 text-white text-lg font-semibold px-6 py-3.5 rounded-lg focus:outline-none focus:bg-white focus:text-black"
             >
-              {listed ? <Check className="w-6 h-6" /> : <Plus className="w-6 h-6" />}
+              {listed ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
               My Stuff
             </button>
           </div>
@@ -381,6 +400,16 @@ export default function TvSeriesPage() {
               <p className="text-lg text-[#8197a4] leading-relaxed line-clamp-2 mt-1">
                 {shownEp.overview}
               </p>
+            )}
+            {shownEpResumable && season && (
+              <button
+                data-tv
+                onClick={() => playEpisode(season.season_number, shownEp.episode_number, true)}
+                className="mt-3 flex items-center gap-2 bg-white/15 text-white text-lg font-semibold px-6 py-3 rounded-lg"
+              >
+                <RotateCcw className="w-5 h-5" />
+                Restart episode
+              </button>
             )}
           </div>
         )}
@@ -476,7 +505,7 @@ export default function TvSeriesPage() {
           sources={playingSources}
           title={`${display.title} — S${playing.season} E${playing.episode}`}
           poster={playingEpisode.still_url || display.poster}
-          initialTime={resumeTime}
+          initialTime={fromStart ? 0 : resumeTime}
           subtitles={subtitles}
           onClose={closePlayback}
           onProgress={handleProgress}

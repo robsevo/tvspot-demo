@@ -200,9 +200,9 @@ export default function TvMoviePage() {
                 setFromStart(false);
                 setPlaying(true);
               }}
-              className="flex items-center gap-3 bg-white text-black text-2xl font-bold px-10 py-5 rounded-lg disabled:opacity-50"
+              className="flex items-center gap-3 bg-white text-black text-xl font-bold px-8 py-3.5 rounded-lg disabled:opacity-50"
             >
-              <Play className="w-7 h-7 fill-black" />
+              <Play className="w-6 h-6 fill-black" />
               {sources.length === 0
                 ? "Finding streams…"
                 : resumeTime > 0
@@ -217,9 +217,9 @@ export default function TvMoviePage() {
                   setFromStart(true);
                   setPlaying(true);
                 }}
-                className="flex items-center gap-3 bg-white/15 text-white text-2xl font-semibold px-10 py-5 rounded-lg"
+                className="flex items-center gap-3 bg-white/15 text-white text-xl font-semibold px-8 py-3.5 rounded-lg"
               >
-                <RotateCcw className="w-6 h-6" />
+                <RotateCcw className="w-5 h-5" />
                 From beginning
               </button>
             )}
@@ -228,9 +228,9 @@ export default function TvMoviePage() {
               data-tv
               onClick={toggleList}
               aria-label={listed ? "Remove from My Stuff" : "Add to My Stuff"}
-              className="tv-pill group flex items-center gap-3 bg-white/15 text-white text-xl font-semibold px-8 py-5 rounded-lg focus:outline-none focus:bg-white focus:text-black"
+              className="tv-pill group flex items-center gap-3 bg-white/15 text-white text-lg font-semibold px-6 py-3.5 rounded-lg focus:outline-none focus:bg-white focus:text-black"
             >
-              {listed ? <Check className="w-6 h-6" /> : <Plus className="w-6 h-6" />}
+              {listed ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
               My Stuff
             </button>
           </div>

@@ -473,6 +473,17 @@ video::cue {
 .tv-root .tv-pill:focus {
   outline: none;
   transform: none;
+  /* The solid white "cursor" fill. Handwritten (unlayered) because the pills
+     ask for it via focus:bg-white/focus:text-black, but those are Tailwind v4
+     UTILITY-layer rules and the unlayered `.tv-pill` rest-fill above outranks
+     them regardless of source order — so on focus the pill kept its 12% fill
+     while only focus:text-black landed: dark text on a dark pill, "not
+     highlighted, just dark font" (nav tabs + the VOD season picker). Setting
+     both here, unlayered, restores the cursor. color also flips a pill's raw
+     text node AND its currentColor icon to black — which is what made the
+     "Skip intro" label (a bare text node, not a <span>) show white-on-white. */
+  background-color: #ffffff;
+  color: #000000;
 }
 
 /* Menu/action rows (side menu, settings, channel panel): the focused row IS

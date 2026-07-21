@@ -396,6 +396,10 @@ export default function VideoPlayer({
   const ccAutoAppliedRef = useRef(false);
   const controlsTimer = useRef<NodeJS.Timeout | null>(null);
   const hlsRef = useRef<Hls | null>(null);
+  // True once THIS source has actually begun rendering frames (first `playing`).
+  // FRAG_BUFFERED retries the initial autostart while this is false; once true,
+  // a paused element means the user paused on purpose, so nothing re-plays it.
+  const startedRef = useRef(false);
 
   // Proactively load Cast SDK so button appears
   useEffect(() => {
@@ -521,6 +525,8 @@ export default function VideoPlayer({
 
     // Cancel any pending play() from previous src to avoid race
     video.pause();
+    // Fresh source hasn't started yet — re-arm the FRAG_BUFFERED autostart retry.
+    startedRef.current = false;
     // Fresh source: clear a stale spinner; VOD auto-advance (autoPlay after a
     // failover) starts in the "waiting for playback" state so the user sees
     // progress, not a dead frame. Live keeps its existing overlay behavior.
@@ -666,9 +672,13 @@ export default function VideoPlayer({
       });
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         recoverAttempts = 0;
-        // If video isn't playing yet (initial play() failed because segments
-        // weren't ready), retry now that we have buffered content.
-        if (video.paused && autoPlay && !cancelled) {
+        // If the INITIAL play() failed because segments weren't ready, retry now
+        // that we have buffered content. Guarded by startedRef: hls keeps
+        // buffering for ~60-90s AFTER a pause, and without this guard every one
+        // of those FRAG_BUFFERED events re-issued play() — so pausing a VOD
+        // source silently resumed itself a moment later. Once playback has begun,
+        // a paused element is the user's choice; leave it paused.
+        if (!startedRef.current && video.paused && autoPlay && !cancelled) {
           video.play().catch(() => {});
         }
       });
@@ -747,6 +757,10 @@ export default function VideoPlayer({
     // version-skew reload waits for playback to stop instead of interrupting it.
     const onPlayHandler = () => { setPlaying(true); setAwaitingPlay(false); setPlaybackActive(true); onPlay?.(); };
     const onPauseHandler = () => { setPlaying(false); setPlaybackActive(false); onPause?.(); };
+    // `playing` (frames actually rendering), not `play` (which fires on the play()
+    // CALL, before the initial autostart has really taken) — this is the point
+    // after which FRAG_BUFFERED must stop resuming a paused element.
+    const onPlayingHandler = () => { startedRef.current = true; };
     const onTimeHandler = () => {
       if (video.duration) {
         setProgress(video.currentTime / video.duration);
@@ -763,6 +777,7 @@ export default function VideoPlayer({
 
     video.addEventListener("play", onPlayHandler);
     video.addEventListener("pause", onPauseHandler);
+    video.addEventListener("playing", onPlayingHandler);
     video.addEventListener("timeupdate", onTimeHandler);
     video.addEventListener("ended", onEndedHandler);
     video.addEventListener("error", onErrorHandler);
@@ -770,6 +785,7 @@ export default function VideoPlayer({
     return () => {
       video.removeEventListener("play", onPlayHandler);
       video.removeEventListener("pause", onPauseHandler);
+      video.removeEventListener("playing", onPlayingHandler);
       video.removeEventListener("timeupdate", onTimeHandler);
       video.removeEventListener("ended", onEndedHandler);
       video.removeEventListener("error", onErrorHandler);
@@ -1198,11 +1214,12 @@ export default function VideoPlayer({
     const compute = () => {
       const w = el.clientWidth;
       const h = el.clientHeight;
-      // A 10-foot screen needs far bigger text than a 375px phone, and the old
-      // 26px ceiling — tuned for handheld/desktop — capped the TV at something
-      // you squint at. `hideControls` is the TV shell's signal.
-      const maxPx = hideControls ? 52 : 26;
-      if (w > 0) setCcFontPx(Math.round(Math.min(maxPx, Math.max(13, w * 0.034))));
+      // A 10-foot screen needs bigger text than a 375px phone, but 52px filled
+      // too much of the frame across a room — pulled back to a 40px TV ceiling
+      // (and a slightly gentler width factor) so captions read without dominating
+      // the picture. `hideControls` is the TV shell's signal.
+      const maxPx = hideControls ? 40 : 26;
+      if (w > 0) setCcFontPx(Math.round(Math.min(maxPx, Math.max(13, w * 0.03))));
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       if (vw > 0 && vh > 0 && w > 0 && h > 0) {
