@@ -258,7 +258,15 @@ export default function VodSeriesPage() {
     };
   }, [detail?.seasons, playSeason, playEpisode, openEpisode]);
 
-  const markers = useEpisodeMarkers(videoElRef, nextUp?.play ?? null, playingIndex);
+  const markers = useEpisodeMarkers(
+    videoElRef,
+    nextUp?.play ?? null,
+    playingIndex,
+    // Suppress Skip/Next on rolling relay-remux sources — their duration tracks
+    // just ahead of the playhead, so "Next up" would fire mid-episode (see
+    // useEpisodeMarkers).
+    !/remux\.m3u8/.test(playingSources[playingIndex]?.url ?? ""),
+  );
 
   // Player pronounced the playing source dead: cool it down and advance.
   // Mid-probe (checking), record the cooldown but hold position — the effect

@@ -42,11 +42,20 @@ export interface EpisodeMarkers {
  * @param sourceIndex current failover position — dismissals are scoped to it, so
  *                    a card waved away on a source that then DIED comes back on
  *                    the replacement rather than staying hidden for the episode
+ * @param reliableTimeline false for rolling/live sources (the relay remux),
+ *                    whose `video.duration` tracks just AHEAD of the playhead
+ *                    instead of being the episode's real length. On those, the
+ *                    "50s from the end" credit-window test is true almost the
+ *                    whole time, so "Next up" pops up randomly mid-episode (and
+ *                    would auto-advance you out of it). All markers are
+ *                    suppressed there — Skip intro can't seek a remux anyway,
+ *                    and the end genuinely can't be detected on a live stream.
  */
 export function useEpisodeMarkers(
   videoElRef: React.MutableRefObject<HTMLVideoElement | null>,
   onNext?: (() => void) | null,
   sourceIndex = 0,
+  reliableTimeline = true,
 ): EpisodeMarkers {
   const [marks, setMarks] = useState({ skip: false, next: false });
   const [dismissed, setDismissed] = useState({ src: -1, skip: false, next: false });
@@ -60,14 +69,17 @@ export function useEpisodeMarkers(
     const tick = () => {
       const v = videoElRef.current;
       if (!v) return;
-      const skip = showSkipIntro(v.currentTime, v.duration);
-      const next = showNextUp(v.currentTime, v.duration);
+      // Rolling/live source → no reliable episode length, so never offer either
+      // marker (see reliableTimeline). Keeps "Next up" from appearing — and
+      // auto-advancing — at random points through a remux-played episode.
+      const skip = reliableTimeline && showSkipIntro(v.currentTime, v.duration);
+      const next = reliableTimeline && showNextUp(v.currentTime, v.duration);
       setMarks((m) => (m.skip === skip && m.next === next ? m : { skip, next }));
     };
     tick();
     const id = setInterval(tick, MARKER_TICK_MS);
     return () => clearInterval(id);
-  }, [videoElRef]);
+  }, [videoElRef, reliableTimeline]);
 
   const dismissOne = useCallback(
     (which: "skip" | "next") => {

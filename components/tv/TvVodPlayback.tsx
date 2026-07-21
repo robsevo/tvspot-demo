@@ -185,7 +185,15 @@ export default function TvVodPlayback({
     skipIntro: seekPastIntro,
     playNext,
     dismiss: dismissAction,
-  } = useEpisodeMarkers(videoElRef, nextUp ? nextUp.play : null, index);
+    // Rolling relay-remux sources have no reliable episode length, so Skip
+    // intro / Next up are suppressed on them (they'd otherwise fire mid-episode
+    // — see useEpisodeMarkers). `isRemux` below reuses this same test.
+  } = useEpisodeMarkers(
+    videoElRef,
+    nextUp ? nextUp.play : null,
+    index,
+    !/remux\.m3u8/.test(sources[index]?.url ?? ""),
+  );
   const actionVisible = skipVisible || nextVisible;
 
   const skipIntro = useCallback(() => {
