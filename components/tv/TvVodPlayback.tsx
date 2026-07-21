@@ -395,7 +395,7 @@ export default function TvVodPlayback({
                 data-tv
                 data-tv-overlay-action
                 onClick={() => setPickerOpen(true)}
-                className="tv-menu-item flex items-center gap-3 px-9 py-4 rounded-xl bg-white/15 text-white text-xl font-semibold focus:outline-none"
+                className="tv-menu-item flex items-center gap-3 px-9 py-4 rounded-xl bg-[#223243] text-white text-xl font-semibold focus:outline-none"
               >
                 <ListVideo className="w-6 h-6" />
                 Choose a source

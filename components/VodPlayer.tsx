@@ -140,10 +140,13 @@ export default function VodPlayer({
   // Remux sources (relay live-style HLS) can't seek — resume is baked into the
   // URL instead: the relay's ffmpeg starts reading the file at &start=<sec>.
   const isRemux = src.includes("remux.m3u8");
-  const effectiveSrc =
-    isRemux && initialTime && initialTime > 30
-      ? `${src}&start=${Math.max(0, Math.floor(initialTime) - 5)}`
-      : src;
+  // The exact second the relay's ffmpeg begins reading the file. The remux then
+  // clocks from 0 here, so this is also how far the media clock lags the
+  // episode-absolute caption clock — passed to VideoPlayer as captionTimeOffset
+  // so subtitles line up on a resumed remux instead of showing the opening.
+  const remuxStart =
+    isRemux && initialTime && initialTime > 30 ? Math.max(0, Math.floor(initialTime) - 5) : 0;
+  const effectiveSrc = remuxStart ? `${src}&start=${remuxStart}` : src;
 
   return (
     <VideoPlayer
@@ -151,6 +154,7 @@ export default function VodPlayer({
       poster={poster}
       title={title}
       initialTime={isRemux ? undefined : initialTime}
+      captionTimeOffset={remuxStart}
       autoPlay={autoPlay}
       stallMs={STALL_MS}
       subtitles={subtitles}

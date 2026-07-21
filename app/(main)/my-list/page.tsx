@@ -42,7 +42,7 @@ export default function MyListPage() {
                   episode={item.episode}
                 />
                 <button
-                  onClick={() => removeFromContinue(item.tmdbId, item.kind, item.season, item.episode)}
+                  onClick={() => removeFromContinue(item.tmdbId, item.kind)}
                   aria-label={`Remove ${item.title} from Continue Watching`}
                   className="absolute top-1.5 right-1.5 z-10 w-7 h-7 rounded-full bg-black/70 backdrop-blur-sm flex items-center justify-center text-white/90 hover:bg-brand hover:text-white ring-1 ring-white/15 transition-colors"
                 >

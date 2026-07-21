@@ -302,7 +302,7 @@ export default function VodSeriesPage() {
     (seasonNum: number, episodeNum: number) => (currentTime: number, duration: number) => {
       if (!detail || !seriesId || !duration || duration <= 0) return;
       if (currentTime >= duration - 30) {
-        remove(seriesId, "series", seasonNum, episodeNum);
+        remove(seriesId, "series");
         return;
       }
       updateProgress({

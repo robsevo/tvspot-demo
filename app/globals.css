@@ -461,6 +461,15 @@ video::cue {
 /* Text pills (nav tabs, action chips) become the solid white pill on focus —
    Prime's cursor for text items — instead of the card ring-and-grow. The
    white fill itself comes from each pill's focus:bg-white/focus:text-black. */
+/* Rest-state fill, handwritten. The pills set it with bg-white/10, which
+   Tailwind v4 compiles to color-mix(in oklab, #fff 10%, transparent) — Chromium
+   63 can't parse color-mix and drops the declaration, so the pill had NO
+   background and rendered as white text/icon floating on the video ("Skip intro
+   is just white"). rgba paints everywhere; :focus below still flips it to the
+   solid white cursor. */
+.tv-root .tv-pill {
+  background-color: rgba(255, 255, 255, 0.12);
+}
 .tv-root .tv-pill:focus {
   outline: none;
   transform: none;

@@ -130,6 +130,30 @@ function cueToLines(cue: TextTrackCue): CcLine[] {
   return out;
 }
 
+/** Same flattening as linesFromActiveCues, but for the cues active at an
+ *  EXPLICIT time rather than the browser's `track.activeCues`. Used when the
+ *  media clock and the cue clock don't share a zero — a resumed relay remux
+ *  plays from &start=<offset> so video.currentTime is 0-based from there, while
+ *  the WebVTT cues are episode-absolute. We look up cues at currentTime+offset
+ *  instead of trusting activeCues, which would show the wrong line. */
+function linesAtTime(track: TextTrack, t: number): CcLine[] {
+  const cues = track.cues;
+  if (!cues) return [];
+  const out: CcLine[] = [];
+  let prev = "";
+  for (let i = 0; i < cues.length; i++) {
+    const c = cues[i] as VTTCue;
+    if (!(c.startTime <= t && t < c.endTime)) continue;
+    for (const line of cueToLines(c)) {
+      const key = line.map((s) => s.text).join(" ");
+      if (key === prev) continue;
+      prev = key;
+      out.push(line);
+    }
+  }
+  return out.slice(-4);
+}
+
 /**
  * Flatten a track's active cues into the lines to draw. CEA-608 roll-up
  * re-emits lines it has already shown as the window scrolls (hls.js cuts a new
@@ -226,6 +250,11 @@ interface Props {
    *  their own — both land in video.textTracks alongside these, so the CC menu
    *  is built from one list either way. */
   subtitles?: SubtitleTrack[];
+  /** Seconds to ADD to video.currentTime to reach the caption clock. Non-zero
+   *  only for a resumed relay remux, which plays from &start=<offset> so its
+   *  currentTime is 0-based while the WebVTT cues are episode-absolute. Aligns
+   *  captions with the audio; 0 (default) leaves everything as it was. */
+  captionTimeOffset?: number;
   /** Exposes the internal <video> element to a parent that drives playback
    *  from OUTSIDE the touch overlay — the /tv pages, where remote keys (not
    *  taps) do pause/seek and this ref is the only control surface needed. */
@@ -269,6 +298,7 @@ export default function VideoPlayer({
   title,
   isLive = false,
   initialTime,
+  captionTimeOffset = 0,
   stallMs = 10000,
   subtitles,
   videoElRef,
@@ -1119,12 +1149,29 @@ export default function VideoPlayer({
     // stays up during a pause, matching how streaming players present them.
     const LINGER_MS = 1200;
     let lingerTimer: ReturnType<typeof setTimeout> | null = null;
-    const update = () => {
+    const apply = (lines: CcLine[]) => {
       if (lingerTimer) { clearTimeout(lingerTimer); lingerTimer = null; }
-      const lines = linesFromActiveCues(track);
       if (lines.length) setCcLines(lines);
       else lingerTimer = setTimeout(() => setCcLines([]), LINGER_MS);
     };
+
+    // When the media clock and the cue clock DON'T share a zero (a resumed remux
+    // — see captionTimeOffset), the browser's own activeCues/cuechange are
+    // computed against currentTime and would surface the wrong line, so poll and
+    // look cues up at currentTime+offset ourselves. With no offset (the usual
+    // case) keep the cheap cuechange path, which only fires on cue boundaries.
+    if (captionTimeOffset) {
+      const tick = () => apply(linesAtTime(track, (video.currentTime || 0) + captionTimeOffset));
+      tick();
+      const id = setInterval(tick, 300);
+      return () => {
+        clearInterval(id);
+        if (lingerTimer) clearTimeout(lingerTimer);
+        setCcLines([]);
+      };
+    }
+
+    const update = () => apply(linesFromActiveCues(track));
     update();
     track.addEventListener("cuechange", update);
     return () => {
@@ -1132,7 +1179,7 @@ export default function VideoPlayer({
       track.removeEventListener("cuechange", update);
       setCcLines([]);
     };
-  }, [ccSelected, ccTracks, src]);
+  }, [ccSelected, ccTracks, src, captionTimeOffset]);
 
   // Caption geometry: font scales with the player's on-screen width (~4%,
   // clamped — one size did not fit both a 375px inline player and fullscreen),

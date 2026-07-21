@@ -93,6 +93,26 @@ export default function TvSeriesPage() {
     episodes.find((e) => e.episode_number === focusedEp) ?? episodes[0] ?? null;
   const firstEp = detail?.seasons?.[0]?.episodes?.[0];
 
+  // The episode the viewer is actually on, from Continue Watching (one row per
+  // show now). The hero Play button resumes THIS instead of always S1E1.
+  const resumeTarget = useMemo(() => {
+    const cw = items.find(
+      (i) =>
+        i.tmdbId === seriesId &&
+        i.kind === "series" &&
+        i.progress > 2 &&
+        i.progress < 95 &&
+        i.season &&
+        i.episode,
+    );
+    return cw ? { season: cw.season as number, episode: cw.episode as number } : null;
+  }, [items, seriesId]);
+
+  // Where the Play/Resume button points: the in-progress episode if there is
+  // one, else the first episode.
+  const playTarget = resumeTarget
+    ?? (firstEp ? { season: detail!.seasons[0].season_number, episode: firstEp.episode_number } : null);
+
   const epKey = (s: number, e: number) => `s${s}e${e}`;
 
   const resolveEpisode = useCallback(
@@ -185,7 +205,7 @@ export default function TvSeriesPage() {
       if (!playing || !display.title || !isFinite(d) || d <= 0) return;
       const pct = (t / d) * 100;
       if (pct > 95) {
-        remove(seriesId, "series", playing.season, playing.episode);
+        remove(seriesId, "series");
       } else {
         updateProgress({
           tmdbId: seriesId,
@@ -304,13 +324,13 @@ export default function TvSeriesPage() {
             <button
               data-tv
               data-tv-autofocus
-              disabled={!firstEp}
-              onClick={() => firstEp && playEpisode(detail!.seasons[0].season_number, firstEp.episode_number)}
+              disabled={!playTarget}
+              onClick={() => playTarget && playEpisode(playTarget.season, playTarget.episode)}
               className="flex items-center gap-3 bg-white text-black text-2xl font-bold px-10 py-5 rounded-lg disabled:opacity-50"
             >
               <Play className="w-7 h-7 fill-black" />
-              {firstEp
-                ? `Play S${detail!.seasons[0].season_number} E${firstEp.episode_number}`
+              {playTarget
+                ? `${resumeTarget ? "Resume" : "Play"} S${playTarget.season} E${playTarget.episode}`
                 : "Loading…"}
             </button>
             <button
