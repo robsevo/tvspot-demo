@@ -1,12 +1,16 @@
 /**
- * TV (Samsung Tizen) platform helpers.
+ * TV platform helpers (Samsung Tizen + Amazon Fire TV).
  *
- * The TV client is the SAME hosted Next.js app: the Tizen .wgt package (see
- * tizen/) is a thin wrapper whose start page redirects to the deployed origin's
- * /tv routes, so auth cookies, the /api proxy layer, and stream verification
- * all keep working unchanged. Everything here must feature-detect — this code
- * runs in desktop browsers (dev), the TV's built-in browser, and the Tizen web
- * runtime, and only the last one injects the `tizen` global.
+ * The TV client is the SAME hosted Next.js app. BOTH native packages are thin
+ * wrappers that open the deployed origin's /tv routes — the Tizen .wgt (see
+ * tizen/) and the Fire TV APK (see firetv/), whose single Activity is a
+ * full-screen WebView. So auth cookies, the /api proxy layer, and stream
+ * verification keep working unchanged, and the two TV apps are identical by
+ * construction: same routes, same components, same pixels.
+ *
+ * Everything here must feature-detect — this code runs in desktop browsers
+ * (dev), TV built-in browsers, the Tizen web runtime (which injects `tizen`),
+ * and the Fire TV WebView (which injects `TVSpotAndroid`).
  */
 
 /** UAs of TV browsers/webviews we route to the /tv experience. Shared with
@@ -41,9 +45,20 @@ interface TizenGlobal {
   application?: { getCurrentApplication?: () => { exit?: () => void } };
 }
 
+/* The Fire TV wrapper's @JavascriptInterface bridge (firetv/…/MainActivity.kt).
+ * Present only inside the APK's WebView. */
+interface AndroidTvBridge {
+  exit?: () => void;
+}
+
 function tizenApis(): TizenGlobal | null {
   if (typeof window === "undefined") return null;
   return (window as unknown as { tizen?: TizenGlobal }).tizen ?? null;
+}
+
+function androidBridge(): AndroidTvBridge | null {
+  if (typeof window === "undefined") return null;
+  return (window as unknown as { TVSpotAndroid?: AndroidTvBridge }).TVSpotAndroid ?? null;
 }
 
 /** Media/channel remote keys are opt-in on Tizen — unregistered keys never
@@ -70,9 +85,19 @@ export function registerTvKeys(): void {
   }
 }
 
-/** Close the TV app (Back pressed at the TV root). No-op in normal browsers. */
+/** Close the TV app (Back pressed at the TV root). No-op in normal browsers.
+ *
+ *  Fire TV's Back key never reaches the page on its own — the wrapper Activity
+ *  intercepts it and re-dispatches it as the Tizen back code, so the SAME back
+ *  stack in TvNav decides everything. When that stack bottoms out here, we hand
+ *  control back to the Activity to finish(). */
 export function exitTvApp(): void {
   try {
+    const android = androidBridge();
+    if (android?.exit) {
+      android.exit();
+      return;
+    }
     tizenApis()?.application?.getCurrentApplication?.()?.exit?.();
   } catch {}
 }

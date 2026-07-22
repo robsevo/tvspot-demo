@@ -14,7 +14,7 @@ import { useMyList } from "@/hooks/useMyList";
 import { useSubtitles } from "@/hooks/useSubtitles";
 import TvVodPlayback from "@/components/tv/TvVodPlayback";
 import TvRail from "@/components/tv/TvRail";
-import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
+import TvPosterCard from "@/components/tv/TvPosterCard";
 import type { VodDetail } from "@/lib/types";
 
 /** TV movie page: backdrop hero + Play/Restart. Embeds are dropped (no way to
@@ -253,7 +253,7 @@ export default function TvMoviePage() {
         <div className="relative bg-[#00050d] pb-16 -mt-8">
           <TvRail title="More like this">
             {related.map((m) => (
-              <TvLandscapeCard
+              <TvPosterCard
                 key={m.tmdb_id}
                 tmdbId={m.tmdb_id}
                 title={m.title}
@@ -261,7 +261,6 @@ export default function TvMoviePage() {
                 poster={m.poster}
                 kind="movie"
                 badge="TRENDING"
-                showTitle
               />
             ))}
           </TvRail>

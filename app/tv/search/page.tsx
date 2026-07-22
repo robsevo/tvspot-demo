@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useTrendingCatalog } from "@/hooks/useTrendingCatalog";
-import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
+import TvPosterCard from "@/components/tv/TvPosterCard";
 import type { CatalogItem } from "@/lib/types";
 
 const MAX = 32;
@@ -51,9 +51,9 @@ export default function TvSearchPage() {
       ) : results.length === 0 ? (
         <p className="py-6 text-xl text-[#8197a4]">No titles match “{query}”.</p>
       ) : (
-        <div className="grid grid-cols-4 gap-6">
+        <div className="grid grid-cols-6 gap-6">
           {results.map((item) => (
-            <TvLandscapeCard
+            <TvPosterCard
               key={`${item.kind}-${item.tmdb_id}`}
               tmdbId={item.tmdb_id}
               title={item.title}
