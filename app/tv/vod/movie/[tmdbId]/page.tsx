@@ -272,7 +272,9 @@ export default function TvMoviePage() {
         <TvVodPlayback
           sources={sources}
           title={display.title}
-          poster={display.backdrop}
+          // Fullscreen loading background at full res (w1280), not the raw
+          // display.backdrop which can be the details' w780 upscaled soft.
+          poster={heroSrc || display.backdrop}
           initialTime={fromStart ? 0 : resumeTime}
           subtitles={subtitles}
           onClose={closePlayback}

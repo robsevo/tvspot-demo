@@ -512,7 +512,11 @@ export default function TvSeriesPage() {
           key={`${playing.season}-${playing.episode}`}
           sources={playingSources}
           title={`${display.title} — S${playing.season} E${playing.episode}`}
-          poster={playingEpisode.still_url || display.poster}
+          // Fullscreen loading background: the show's w1280 backdrop, NOT the
+          // episode still (TMDB serves those at ~w300 → very pixelated blown up)
+          // or the w500 portrait poster. The still stays in the episode grid,
+          // where it's shown small.
+          poster={heroSrc || playingEpisode.still_url || display.poster}
           initialTime={fromStart ? 0 : resumeTime}
           subtitles={subtitles}
           onClose={closePlayback}
