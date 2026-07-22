@@ -134,7 +134,10 @@ export default function TvHomePage() {
           // instead of opening the series at S1E1.
           season: i.kind === "series" ? i.season : undefined,
           episode: i.kind === "series" ? i.episode : undefined,
-          backdrop: i.poster,
+          // Continue-watching only stores a POSTER. Put it in the poster field,
+          // not backdrop, so the hero requests it at the poster ladder's max
+          // (w780) instead of upscaling a w500 into a soft, stretched hero.
+          poster: i.poster,
           metaLine:
             i.kind === "series" && i.episode
               ? `S${i.season ?? 1} E${i.episode} · ${Math.round(i.progress)}% watched`

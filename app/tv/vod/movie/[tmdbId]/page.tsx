@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Play, RotateCcw, Plus, Check } from "lucide-react";
 import { proxyFetch } from "@/lib/api";
 import { mergeSources } from "@/lib/sources";
+import { heroArt } from "@/lib/tmdbImage";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
 import { useCatalogItem } from "@/hooks/useCatalogItem";
@@ -53,6 +54,16 @@ export default function TvMoviePage() {
     rating: detail?.rating || catItem?.rating,
     service: detail?.service || catItem?.service,
   };
+  // Hero art at full display resolution, chosen with its TYPE known: a real
+  // landscape backdrop → w1280 (details serves only w780, which upscaled soft);
+  // a poster fallback → its w780 max. display.backdrop above stays as-is for the
+  // continue-watching / MediaSession poster, which just wants any image.
+  const heroBackdrop = detail?.backdrop || catItem?.backdrop;
+  const heroSrc = heroBackdrop
+    ? heroArt(heroBackdrop, true)
+    : catItem?.poster
+      ? heroArt(catItem.poster, false)
+      : undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -158,10 +169,10 @@ export default function TvMoviePage() {
     <div className="relative min-h-screen">
       {/* Full-bleed hero: backdrop bleeds from the right, details bottom-left. */}
       <div className="relative h-screen">
-        {display.backdrop && (
+        {heroSrc && (
           <>
             <img
-              src={display.backdrop}
+              src={heroSrc}
               alt=""
               referrerPolicy="no-referrer"
               className="absolute top-0 right-0 w-[70%] h-full object-cover"

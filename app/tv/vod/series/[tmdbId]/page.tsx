@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { Play, RotateCcw, Plus, Check } from "lucide-react";
 import { proxyFetch } from "@/lib/api";
 import { mergeSources } from "@/lib/sources";
+import { heroArt } from "@/lib/tmdbImage";
 import { resolveVod, prewarmVod, getPrewarmed } from "@/lib/vodPrewarm";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
 import { useCatalogItem } from "@/hooks/useCatalogItem";
@@ -76,6 +77,13 @@ export default function TvSeriesPage() {
     rating: detail?.rating || catItem?.rating,
     service: detail?.service || catItem?.service,
   };
+  // Hero art at full display resolution, type-aware: a real landscape backdrop
+  // → w1280; a poster fallback → its w780 max, so it isn't upscaled soft.
+  const heroSrc = catItem?.backdrop
+    ? heroArt(catItem.backdrop, true)
+    : detail?.poster || catItem?.poster
+      ? heroArt((detail?.poster || catItem?.poster)!, false)
+      : undefined;
 
   // Fetch series details
   useEffect(() => {
@@ -296,10 +304,10 @@ export default function TvSeriesPage() {
     <div className="relative min-h-screen">
       {/* Hero */}
       <div className="relative">
-        {display.backdrop && (
+        {heroSrc && (
           <>
             <img
-              src={display.backdrop}
+              src={heroSrc}
               alt=""
               referrerPolicy="no-referrer"
               className="absolute top-0 right-0 w-[70%] h-full object-cover"

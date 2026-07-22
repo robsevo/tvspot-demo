@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import TvRail from "@/components/tv/TvRail";
 import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
 import TvChannelCard from "@/components/tv/TvChannelCard";
 import TvEventCard from "@/components/tv/TvEventCard";
+import { heroArt } from "@/lib/tmdbImage";
+import { TVKEY } from "@/lib/tv";
 import type { Channel } from "@/lib/types";
 import { etTime, type EventTeam, type GameEvent } from "@/lib/leagues";
 
@@ -68,6 +70,17 @@ const RAILS_FIRST_PAINT = 1;
 const RAILS_PER_STEP = 1;
 const RAIL_STEP_MS = 400;
 
+/** Hero auto-rotation, until the user takes over with the D-pad. A 10-foot
+ *  highlight reel of the best art, paced slower than a phone carousel. */
+const HERO_ROTATE_MS = 7000;
+const HERO_ROTATION_MAX = 7;
+/** Remote codes that mean "the user is driving now" — hand the hero to
+ *  follow-focus. Programmatic focus seeding dispatches no keydown, so only a
+ *  genuine press trips this. */
+const INTERACT_CODES = new Set<number>([
+  TVKEY.left, TVKEY.right, TVKEY.up, TVKEY.down, TVKEY.enter,
+]);
+
 /**
  * The Prime Video browse chassis: a pinned hero pane that always describes
  * the FOCUSED card (art top-right, details top-left), with the rails
@@ -88,6 +101,11 @@ export default function TvBrowseScreen({
   onChannelSelect?: (channel: Channel) => void;
 }) {
   const [focused, setFocused] = useState<TvBrowseItem | null>(null);
+  // Hero auto-rotation. `rotIdx` steps through the highlight reel on a timer;
+  // `userInteracted` latches true on the first remote press and permanently
+  // hands the hero over to follow-focus ("show what we're on") for the visit.
+  const [rotIdx, setRotIdx] = useState(0);
+  const [userInteracted, setUserInteracted] = useState(false);
 
   /**
    * Mount rails a few at a time instead of all at once.
@@ -124,8 +142,50 @@ export default function TvBrowseScreen({
   // over the moment the user moves.
   const firstVisual = rails.flatMap((r) => r.items).find((it) => it.backdrop || it.poster) ?? null;
   const fallback = rails.find((r) => r.items.length > 0)?.items[0] ?? null;
-  const shown = focused ?? firstVisual ?? fallback;
-  const art = shown?.backdrop || shown?.poster;
+
+  // The rotation reel: items with real art (plus themed sports events), capped
+  // to a tight highlight set rather than the whole catalog.
+  const heroRotation = useMemo(
+    () =>
+      rails
+        .flatMap((r) => r.items)
+        .filter((it) => it.backdrop || it.poster || it.event)
+        .slice(0, HERO_ROTATION_MAX),
+    [rails],
+  );
+
+  // Advance the reel on a timer while the user hasn't taken over.
+  useEffect(() => {
+    if (userInteracted || heroRotation.length < 2) return;
+    const t = setInterval(() => setRotIdx((i) => (i + 1) % heroRotation.length), HERO_ROTATE_MS);
+    return () => clearInterval(t);
+  }, [userInteracted, heroRotation.length]);
+
+  // First real remote press → follow-focus for the rest of the visit.
+  useEffect(() => {
+    if (userInteracted) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (INTERACT_CODES.has(e.keyCode)) setUserInteracted(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [userInteracted]);
+
+  // Before the user drives, the hero IS the rotating reel; after, it mirrors the
+  // focused card. Either way fall back to the first visual so it's never a void.
+  const rotating =
+    !userInteracted && heroRotation.length > 0
+      ? heroRotation[rotIdx % heroRotation.length]
+      : null;
+  const shown = (userInteracted ? focused : rotating) ?? firstVisual ?? fallback;
+  const showDots = !userInteracted && heroRotation.length > 1;
+
+  // Hero art at full display resolution: the catalog's w1280 backdrops stay as
+  // they are, but a w500 poster (e.g. a Continue-Watching tile) is bumped to its
+  // w780 max so it isn't upscaled into a soft, stretched hero. Per-type because
+  // the poster/backdrop size ladders don't overlap.
+  const artRaw = shown?.backdrop || shown?.poster;
+  const art = artRaw ? heroArt(artRaw, Boolean(shown?.backdrop)) : undefined;
 
   return (
     <div className="relative h-[calc(100vh-76px)] flex flex-col overflow-hidden">
@@ -180,10 +240,11 @@ export default function TvBrowseScreen({
           Height is deliberately short: the hero pane and the rails pane split
           the screen, so every extra vh here costs a rail. At 40vh the rails
           pane keeps ~570px @1080p — two full card rows, on every menu. */}
-      <div
-        key={`hero-copy-${shown?.key ?? "empty"}`}
-        className="relative z-10 flex-none h-[40vh] px-16 max-w-4xl flex flex-col justify-end pb-6 animate-[fadeIn_0.35s_ease]"
-      >
+      <div className="relative z-10 flex-none h-[40vh] px-16 max-w-4xl flex flex-col justify-end pb-6">
+        {/* Keyed inner wrapper does the crossfade; the dots below sit OUTSIDE it
+            so they persist and animate their width instead of remounting each
+            rotation. */}
+        <div key={`hero-copy-${shown?.key ?? "empty"}`} className="animate-[fadeIn_0.35s_ease]">
         {shown?.event ? (
           <EventHeroCopy item={shown} />
         ) : shown ? (
@@ -220,13 +281,33 @@ export default function TvBrowseScreen({
         ) : loading ? (
           <p className="text-xl text-[#8197a4]">{loadingText}</p>
         ) : null}
+        </div>
+
+        {/* Carousel dots — only while auto-rotating; the active one elongates in
+            the brand cyan, matching the web hero. */}
+        {showDots && (
+          <div className="flex items-center gap-2 mt-5">
+            {heroRotation.map((_, i) => (
+              <span
+                key={i}
+                className={`h-1.5 rounded-full transition-all duration-300 ${
+                  i === rotIdx % heroRotation.length ? "w-7 bg-[#22d3ee]" : "w-1.5 bg-white/35"
+                }`}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Rails scroll in their own pane; the hero above never moves. The pane
           carries its own top-transparent → solid fade (backgrounds on a
           scroll container don't scroll with content), so cards settle onto a
-          calm dark base instead of clashing with the hero art. */}
-      <div className="tv-fade-rails relative z-10 flex-1 overflow-y-auto pb-12 pt-1">
+          calm dark base instead of clashing with the hero art.
+          A defined "shelf" seam — a hairline top highlight + an upward shadow —
+          separates the rails from the hero, which otherwise dissolved into the
+          same #00050d and read as one surface. Explicit rgba (not Tailwind
+          /opacity, which can compile to color-mix and not paint on the TV). */}
+      <div className="tv-fade-rails relative z-10 flex-1 overflow-y-auto pb-12 pt-4 border-t border-[rgba(255,255,255,0.10)] shadow-[0_-18px_38px_-10px_rgba(0,0,0,0.7)]">
         {rails.slice(0, railBudget).map(
           (rail, railIdx) =>
             (rail.items.length > 0 || rail.trailing) && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useChannels } from "@/hooks/useChannels";
 import { getChannelType } from "@/lib/logos";
 import { LogoImage } from "@/components/LogoImage";
@@ -9,7 +9,7 @@ import { useEvents } from "@/hooks/useEvents";
 import { useEpg } from "@/hooks/useEpg";
 import { carriersForLeague, type GameEvent } from "@/lib/leagues";
 import Link from "next/link";
-import { Tv, CalendarDays, RefreshCw } from "lucide-react";
+import { Tv, CalendarDays, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 
 const HOUR_WIDTH = 240; // pixels per hour
 const NOW_COLOR = "#38bdf8";
@@ -59,6 +59,27 @@ export default function LivePage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const timeRulerRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(new Date());
+
+  // Left/right paging for the events filter row. On a full slate the games run
+  // well off-screen and the scrollbar is hidden (poster-rail), so a mouse user
+  // couldn't reach the later games — these arrows page the row. `evNav` tracks
+  // which directions have more to show, so an arrow only appears when it does.
+  const eventsRowRef = useRef<HTMLDivElement>(null);
+  const [evNav, setEvNav] = useState({ left: false, right: false });
+  const updateEvNav = useCallback(() => {
+    const el = eventsRowRef.current;
+    if (!el) return;
+    // 2px slack so sub-pixel rounding at an end doesn't leave a dead arrow.
+    setEvNav({
+      left: el.scrollLeft > 2,
+      right: el.scrollLeft < el.scrollWidth - el.clientWidth - 2,
+    });
+  }, []);
+  const pageEvents = (dir: 1 | -1) => {
+    const el = eventsRowRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth * 0.7, behavior: "smooth" });
+  };
 
   // Desktop drag-to-scroll for the EPG timeline: the horizontal scrollbar sits
   // below the fold on a tall grid, so a mouse user couldn't pan to see later
@@ -200,6 +221,20 @@ export default function LivePage() {
     return list;
   }, [eventsData, channels]);
 
+  // Recompute the events-row arrows whenever the row scrolls, the window
+  // resizes, or the game list changes (which changes the scrollable width).
+  useEffect(() => {
+    const el = eventsRowRef.current;
+    if (!el) return;
+    updateEvNav();
+    el.addEventListener("scroll", updateEvNav, { passive: true });
+    window.addEventListener("resize", updateEvNav);
+    return () => {
+      el.removeEventListener("scroll", updateEvNav);
+      window.removeEventListener("resize", updateEvNav);
+    };
+  }, [games, updateEvNav]);
+
   const selectedEntry = useMemo(
     () => games.find((x) => x.game.id === selectedGameId) || null,
     [games, selectedGameId],
@@ -297,8 +332,14 @@ export default function LivePage() {
       </div>
 
       {/* Today's sporting events — status-colored (grey=later · amber=within 1h ·
-          green=live · red=done). Tap to filter the grid to channels carrying it. */}
-      <div className="flex gap-2.5 overflow-x-auto px-4 mb-5 poster-rail items-center">
+          green=live · red=done). Tap to filter the grid to channels carrying it.
+          Wrapped so the paging arrows can overlay each edge when the row runs
+          off-screen (a full slate is wider than any phone/desktop viewport). */}
+      <div className="relative mb-5">
+        <div
+          ref={eventsRowRef}
+          className="flex gap-2.5 overflow-x-auto px-4 poster-rail items-center scroll-smooth"
+        >
         <button
           onClick={() => setSelectedGameId(null)}
           className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all ${
@@ -355,6 +396,34 @@ export default function LivePage() {
               </button>
             );
           })
+        )}
+        </div>
+
+        {/* Paging arrows — each shown only when that side has more to reach.
+            Overlaid at the edges with a fade so they never hide a whole chip;
+            aria-hidden because the row is natively scrollable/swipeable and the
+            arrows are a pointer convenience. */}
+        {evNav.left && (
+          <button
+            aria-label="Scroll events left"
+            onClick={() => pageEvents(-1)}
+            className="absolute left-0 top-0 bottom-0 z-10 flex items-center pl-2 pr-6 bg-gradient-to-r from-surface via-surface/90 to-transparent"
+          >
+            <span className="flex items-center justify-center w-8 h-8 rounded-full glass-card text-white shadow-md">
+              <ChevronLeft className="w-5 h-5" />
+            </span>
+          </button>
+        )}
+        {evNav.right && (
+          <button
+            aria-label="Scroll events right"
+            onClick={() => pageEvents(1)}
+            className="absolute right-0 top-0 bottom-0 z-10 flex items-center pr-2 pl-6 bg-gradient-to-l from-surface via-surface/90 to-transparent"
+          >
+            <span className="flex items-center justify-center w-8 h-8 rounded-full glass-card text-white shadow-md">
+              <ChevronRight className="w-5 h-5" />
+            </span>
+          </button>
         )}
       </div>
 
