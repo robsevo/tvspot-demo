@@ -570,6 +570,24 @@ video::cue {
    can't. Each activates only on engines missing the feature, so modern
    browsers are untouched. */
 
+/* `rounded-full` is the one utility whose COMPILED value is itself risky.
+   Tailwind v4 emits `border-radius: calc(infinity * 1px)`, which the build
+   lowers to `border-radius: 3.40282e38px` — a number in SCIENTIFIC NOTATION.
+   Reliable scientific-notation parsing in CSS is a later addition than this
+   engine, and an unparseable value drops the whole declaration, so every
+   circle on the TV (hero carousel dots, team crests, the settings avatar, the
+   See-all chevron ring, player controls — 17 of them) would square off, while
+   the Fire TV's Chromium 108 draws them correctly. 9999px is identical at
+   every size we render and parses everywhere.
+
+   !important, and scoped to .tv-root: Tailwind's flattened utilities carry an
+   artificially raised specificity (`:not(#\#)` repeated), so a plain class
+   selector loses to them, and nothing in the app legitimately overrides the
+   radius of a rounded-full element. Scoping keeps mobile untouched. */
+.tv-root .rounded-full {
+  border-radius: 9999px !important;
+}
+
 /* `inset` shorthand landed in Chromium 87 — without this, every fixed
    overlay (players, traps) loses its 0-offsets and collapses in-flow. */
 @supports not (inset: 0) {
