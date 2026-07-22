@@ -642,16 +642,15 @@ video::cue {
     box-shadow: 0 0 0 4px #00050d, 0 0 0 7px #ffffff;
   }
 
-  /* `background-attachment: fixed` is widely ignored or mis-composited on
-     embedded TV webviews, and when it fails the whole layered background can
-     go with it — leaving the flat #00050d base and a visibly DARKER app than
-     the Fire TV, which is what "it seems darker on the Samsung" describes.
-     `scroll` is universally supported and identical here in practice: .tv-root
-     itself barely scrolls, since the rails and grids each scroll in their own
-     inner pane. */
-  .tv-root {
-    background-attachment: scroll;
-  }
+  /* NOTE: do NOT override background-attachment here.
+     A previous version set `scroll` for old engines on the theory that `fixed`
+     might not composite on a TV webview. That was a guess with no evidence
+     behind it, and it made things WORSE: the ambience gradients are sized in
+     PERCENTAGES of their positioning area, which is the 1920x1080 viewport
+     under `fixed` but .tv-root's own (min-h-screen, often taller) box under
+     `scroll`. The taller area stretched the blue radial, so the Samsung read
+     visibly more navy than the Fire TV — a difference we introduced rather
+     than one we found. Both engines use `fixed` from .tv-root, unchanged. */
 }
 
 /* Tailwind v4 builds transforms from the STANDALONE `translate` / `scale` /
