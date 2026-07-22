@@ -8,6 +8,7 @@ import TopBar from "@/components/TopBar";
 import BottomNav from "@/components/BottomNav";
 import FloatingPlayer from "@/components/FloatingPlayer";
 import ScrollToTop from "@/components/ScrollToTop";
+import UpdateNotice from "@/components/UpdateNotice";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { username, loading } = useAuth();
@@ -37,6 +38,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       {/* Match the TopBar's safe-area inset so page content clears the notch too
           (pages already pad for the 48px bar; this adds the inset on top). */}
       <main className="safe-area-top">
+        {/* Above the page content, below the fixed TopBar — warns before a
+            disruptive deploy without covering the nav controls. Self-clears.
+            Skipped on the fullscreen video page for the same reason. */}
+        {showNav && <UpdateNotice />}
         {children}
       </main>
       {showNav && <BottomNav />}
