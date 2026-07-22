@@ -9,6 +9,7 @@ import { ChevronRight } from "lucide-react";
 export default function TvRail({
   title,
   seeAllHref,
+  leading,
   children,
 }: {
   title: string;
@@ -20,9 +21,18 @@ export default function TvRail({
    * a chip sitting above the cards is either left-aligned — and then intercepts
    * every downward move through the page, adding a stop per rail — or
    * right-aligned, where the cross-axis penalty makes it effectively
-   * unreachable. End-of-row is also what the existing "Full guide" tile does.
+   * unreachable.
    */
   seeAllHref?: string;
+  /**
+   * Focusable tile pinned at the START of the row, before the content (the
+   * "Full guide" entry on Live TV).
+   *
+   * Being first has a real navigation consequence, and it's the wanted one:
+   * TvNav snaps a vertical move into a rail onto that rail's FIRST tile, so
+   * arriving from above lands on this tile rather than on a channel.
+   */
+  leading?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -32,6 +42,7 @@ export default function TvRail({
           [data-tv]:focus rule draws a 3px outline at 4px offset, so a focused
           card needs 7px of breathing room or it clips against the row edge. */}
       <div data-tv-row className="flex gap-5 overflow-x-auto px-16 py-2">
+        {leading}
         {children}
         {seeAllHref && (
           <Link

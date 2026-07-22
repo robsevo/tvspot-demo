@@ -28,12 +28,16 @@ const HEADER_PROVIDERS = 4;
 
 // Two DISTINCT signals that never fight for the same look:
 //   focus  = solid white pill, black text — "the remote cursor is here".
-//   active = a FILLED cyan-tinted container + bright cyan ring — "this is the
-//            section you're in", clearly highlighted while focus is down in the
-//            content. Explicit rgba, not Tailwind /opacity (which can compile to
-//            color-mix and not paint on the TV). Focus's white pill still wins on
-//            :focus because the focus variant lands later in the cascade.
-const ACTIVE_PILL = "bg-[rgba(34,211,238,0.20)] text-white font-bold ring-1 ring-[rgba(34,211,238,0.9)]";
+//   active = BABY BLUE label in a filled cyan-tinted container + bright cyan
+//            ring — "this is the section you're in", readable at a glance from
+//            the couch while focus is down in the content. Every other tab stays
+//            the idle near-white. Explicit hex/rgba, not Tailwind /opacity
+//            (which can compile to color-mix and not paint on the TV). Focus's
+//            white pill still wins on :focus because the focus variant lands
+//            later in the cascade — and it sets text-black, so the baby blue
+//            never has to fight the white fill.
+const ACTIVE_PILL =
+  "bg-[rgba(34,211,238,0.20)] text-[#89cff0] font-bold ring-1 ring-[rgba(34,211,238,0.9)]";
 const IDLE_PILL = "text-[#c7d5e0] font-semibold";
 
 /** Prime-style header: plain text tabs, the active (or focused) one a solid

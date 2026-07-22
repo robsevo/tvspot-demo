@@ -166,12 +166,16 @@ export default function TvLivePage() {
     if (favorites.length > 0) list.push({ title: "Favorites", items: favorites.map(channelItem) });
     list.push(...categoryRails);
 
-    // Anchor the Full-guide entry on the first channel rail (skip the events
-    // rail, whose tiles are a different shape). Immutable — never touch the
-    // memoized category-rail objects in place.
+    // Anchor the Full-guide entry at the START of the first channel rail (skip
+    // the events rail, whose tiles are a different shape). Leading, not
+    // trailing: the guide is a primary destination, and burying it past a rail
+    // of channels meant holding Right to reach it. As the first tile it also
+    // catches the downward move into the rail, since TvNav snaps a vertical
+    // entry onto the row's first tile. Immutable — never touch the memoized
+    // category-rail objects in place.
     const anchorIdx = list.findIndex((r) => r.title !== EVENTS_TITLE && r.items.length > 0);
     const idx = anchorIdx === -1 ? 0 : anchorIdx;
-    return list.map((r, i) => (i === idx ? { ...r, trailing: fullGuideTile } : r));
+    return list.map((r, i) => (i === idx ? { ...r, leading: fullGuideTile } : r));
   }, [eventItems, recent, favorites, categoryRails, channelItem]);
 
   return (

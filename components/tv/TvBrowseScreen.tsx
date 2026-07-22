@@ -54,8 +54,10 @@ export interface TvBrowseItem {
 export interface TvBrowseRail {
   title: string;
   items: TvBrowseItem[];
-  /** Extra tile at the end of the row (e.g. a "Full guide" link). */
+  /** Extra tile at the end of the row. */
   trailing?: ReactNode;
+  /** Extra tile at the START of the row (e.g. the "Full guide" link). */
+  leading?: ReactNode;
   /** Opens a full grid of this row's category — renders a "See all" tile at
    *  the end of the row (see TvRail). */
   seeAllHref?: string;
@@ -325,8 +327,13 @@ export default function TvBrowseScreen({
       <div className="tv-fade-rails relative z-10 flex-1 overflow-y-auto pb-12 pt-2 border-t border-[rgba(255,255,255,0.10)] shadow-[0_-18px_38px_-10px_rgba(0,0,0,0.7)]">
         {rails.slice(0, railBudget).map(
           (rail, railIdx) =>
-            (rail.items.length > 0 || rail.trailing) && (
-              <TvRail key={rail.title} title={rail.title} seeAllHref={rail.seeAllHref}>
+            (rail.items.length > 0 || rail.trailing || rail.leading) && (
+              <TvRail
+                key={rail.title}
+                title={rail.title}
+                seeAllHref={rail.seeAllHref}
+                leading={rail.leading}
+              >
                 {rail.items.map((item, i) => {
                   const focusProps = {
                     onCardFocus: () => setFocused(item),
