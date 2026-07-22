@@ -86,8 +86,15 @@ export default function TvTopNav() {
       </div>
 
       {/* The give in the layout. min-w-0 is what actually lets a flex item
-          shrink below its content width. */}
-      <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden">
+          shrink below its content width.
+
+          py-2 -my-2 is load-bearing, not spacing: overflow-hidden clips in BOTH
+          axes, and the D-pad focus cursor is drawn OUTSIDE the pill (a 3px ring
+          at 4px offset), so a focused provider chip had its ring sliced off top
+          and bottom. The padding gives the clip box 8px of vertical room for the
+          ring and the negative margin takes it back out of the layout, so the
+          header's height is unchanged and horizontal clipping still works. */}
+      <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden py-2 -my-2">
         {services.length > 0 && (
           <>
             <span className="w-px h-7 bg-white/25 mx-3 shrink-0" />
