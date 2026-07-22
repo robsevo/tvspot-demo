@@ -39,12 +39,30 @@ export default function TvRail({
             data-tv
             /* Poster-shaped: seeAllHref is only ever set on VOD rails
                (TvProviderBrowse / TvCatalogTabPage), so this tile sits beside
-               176×264 TvPosterCards and must match them. Channel/event rails
-               use `trailing` instead and keep their own tile shape. */
-            className="tv-card-shadow tv-channel-surface w-[176px] h-[264px] shrink-0 rounded-lg ring-1 ring-white/10 flex flex-col items-center justify-center gap-2 text-[#c7d5e0] focus:outline-none"
+               176×264 TvPosterCards and must match their footprint. Channel/
+               event rails use `trailing` instead and keep their own shape.
+
+               Styled as a quiet end-cap rather than a card: at poster height the
+               bright blue-steel channel surface read as a big empty slab next to
+               real artwork. A flat dark fill with a hairline edge and a ringed
+               chevron says "end of row, more this way" without competing with
+               the posters. Explicit rgba — Tailwind /opacity utilities compile
+               to color-mix(), which the TV's Chromium 63 drops. */
+            className="tv-card-shadow w-[176px] h-[264px] shrink-0 rounded-lg flex flex-col items-center justify-center gap-4 focus:outline-none"
+            style={{
+              backgroundColor: "#121a24",
+              border: "1px solid rgba(255,255,255,0.10)",
+            }}
           >
-            <ChevronRight className="w-8 h-8" />
-            <span className="text-base font-medium">See all</span>
+            <span
+              className="flex items-center justify-center w-16 h-16 rounded-full"
+              style={{ border: "2px solid rgba(255,255,255,0.30)" }}
+            >
+              <ChevronRight className="w-8 h-8" style={{ color: "#e6eef5" }} />
+            </span>
+            <span className="text-base font-medium" style={{ color: "#c7d5e0" }}>
+              See all
+            </span>
           </Link>
         )}
       </div>

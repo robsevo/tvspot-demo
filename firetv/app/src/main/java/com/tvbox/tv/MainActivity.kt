@@ -109,6 +109,12 @@ class MainActivity : Activity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             }
+            // Announce ourselves as a TV. The server keys the 10-foot layout
+            // viewport (a fixed 1920px, see app/layout.tsx) off TV_UA_RE, and
+            // middleware routes TV UAs to /tv. Matching on Amazon's model token
+            // (AFTT/AFTB/…) works today but is Amazon's to change; this token is
+            // ours. Appended, so the real UA is preserved for everything else.
+            userAgentString = "$userAgentString TVSpotAndroid/1.0"
         }
         web.setBackgroundColor(0xFF0B0D12.toInt())
         web.addJavascriptInterface(TvBridge(), "TVSpotAndroid")

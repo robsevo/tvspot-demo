@@ -1,7 +1,8 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { verifyToken } from "@/lib/auth";
+import { TV_UA_RE } from "@/lib/tv";
 import Providers from "@/components/Providers";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import DeployRefresh from "@/components/DeployRefresh";
@@ -29,10 +30,31 @@ export default async function RootLayout({
   const token = (await cookies()).get("tvspot_session")?.value;
   const initialUsername = token ? (await verifyToken(token))?.username ?? null : null;
 
+  /**
+   * TVs get a FIXED 1920px layout viewport instead of width=device-width.
+   *
+   * The /tv UI is authored against 1920 CSS px (h-[calc(100vh-76px)], px-16,
+   * the poster height budget in TvBrowseScreen — all assume it). Whether
+   * device-width yields 1920 depends on the panel's density, and it doesn't
+   * always: the Samsung TV is 1920x1080 @160dpi, so device-width IS 1920 and it
+   * looks right — but a Fire TV Stick is 1920x1080 @320dpi, so device-width is
+   * 960 and every one of those measurements renders at DOUBLE size. Verified on
+   * an AFTT stick: the login screen came up zoomed to roughly 2x.
+   *
+   * Pinning 1920 makes the layout viewport density-independent; the WebView
+   * then scales that 1920 down to whatever the window really is (1:1 on
+   * Samsung, 0.5 dip/px on the stick, which is 1 CSS px per PHYSICAL px — so it
+   * gets sharper, not blurrier). Phones are untouched.
+   */
+  const ua = (await headers()).get("user-agent") ?? "";
+  const viewportContent = TV_UA_RE.test(ua)
+    ? "width=1920, viewport-fit=cover"
+    : "width=device-width, initial-scale=1, viewport-fit=cover";
+
   return (
     <html lang="en">
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta name="viewport" content={viewportContent} />
         <meta name="theme-color" content="#0a0a0a" />
         {/* MUST precede the app bundles: shims runtime APIs the 2019 Samsung
             TV webview (Chromium 63) lacks. Feature-detected — a no-op on

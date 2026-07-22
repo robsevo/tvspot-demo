@@ -15,8 +15,12 @@
 
 /** UAs of TV browsers/webviews we route to the /tv experience. Shared with
  *  middleware.ts (edge runtime) — keep this module dependency-free. Covers
- *  Samsung (Tizen/SMART-TV), LG (Web0S), and Fire TV's Silk (AFT*). */
-export const TV_UA_RE = /\bTizen\b|SMART-TV|SmartTV|Web0S|NetCast|\bAFT[A-Z]\b|HbbTV/i;
+ *  Samsung (Tizen/SMART-TV), LG (Web0S), Fire TV's Silk and sticks (AFT*), and
+ *  our own Fire TV wrapper, which appends the TVSpotAndroid token to its WebView
+ *  UA (firetv/…/MainActivity.kt) so this never rests on Amazon's model string —
+ *  AFT* happens to match today's sticks, but it is Amazon's to change. */
+export const TV_UA_RE =
+  /\bTizen\b|SMART-TV|SmartTV|Web0S|NetCast|\bAFT[A-Z]\b|HbbTV|TVSpotAndroid/i;
 
 /** Remote-control keyCodes. Arrows/Enter are standard; the 4xx/102xx codes are
  *  Tizen's — they only arrive after registerTvKeys(). Escape doubles as the

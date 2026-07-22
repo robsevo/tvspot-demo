@@ -67,9 +67,13 @@ export default function TvLayout({ children }: { children: React.ReactNode }) {
         <main>{children}</main>
         {/* Pinned just under TvTopNav (it positions itself). One banner serves
             BOTH TV apps, since the Samsung and Fire TV packages are wrappers on
-            these same routes. Never over a player page — the player owns the
-            whole panel. */}
-        {!isPlayerPage && <UpdateNotice variant="tv" />}
+            these same routes.
+
+            Not on the player (it owns the whole panel) and not on login, where
+            there is no TvTopNav to sit under so the strip lands squarely on the
+            Username field — verified on a real Fire TV stick. Login is
+            transient anyway: the TV signs itself back in. */}
+        {!isPlayerPage && !isLogin && <UpdateNotice variant="tv" />}
       </TvNavProvider>
     </div>
   );
