@@ -116,6 +116,23 @@ class MainActivity : Activity() {
             // ours. Appended, so the real UA is preserved for everything else.
             userAgentString = "$userAgentString TVSpotAndroid/1.0"
         }
+        /*
+         * Render one CSS pixel per PHYSICAL pixel.
+         *
+         * The server hands TVs a fixed 1920px layout viewport (the /tv UI is
+         * authored against 1920 CSS px). This stick is 1920x1080 at 320dpi, so
+         * its window is only 960 dip — at the default 100% scale we'd show the
+         * left half of a 1920px page. Next also emits `initial-scale=1` in the
+         * viewport tag, which would pin exactly that, and setInitialScale takes
+         * precedence over the page's value.
+         *
+         * 100 / density: 50% on this 2x stick (1920 CSS px across 960 dip = 1
+         * CSS px per physical px, so text gets SHARPER, not upscaled), and a
+         * no-op 100% on a 160dpi panel like the Samsung.
+         */
+        val density = resources.displayMetrics.density
+        if (density > 0f) web.setInitialScale((100f / density).toInt())
+
         web.setBackgroundColor(0xFF0B0D12.toInt())
         web.addJavascriptInterface(TvBridge(), "TVSpotAndroid")
 
