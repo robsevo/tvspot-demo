@@ -53,6 +53,13 @@ export default function TvTopNav() {
 
   return (
     <nav className="flex items-center gap-3 px-16 pt-5 pb-3 overflow-x-hidden">
+      {/* Brand mark, top-left. Decorative (no data-tv), so it never steals a
+          D-pad stop — the leftmost focusable stays the Home tab. */}
+      <img
+        src="/tvspot-logo.svg"
+        alt="TVSpot"
+        className="w-10 h-10 mr-2 shrink-0 rounded-lg"
+      />
       {TABS.map(({ href, label }) => (
         <Link key={href} href={href} data-tv className={pillClass(isActive(href))}>
           {label}

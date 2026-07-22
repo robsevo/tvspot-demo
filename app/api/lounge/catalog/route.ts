@@ -46,12 +46,13 @@ function normalizeItems(items: any[]): any[] {
   }));
 }
 
-// Pages of TMDB US/CA popular titles to pull per region (≈20 titles/page). At 3
-// pages only ~60 titles/region got a real popularity score, so most of the
-// (thousands-strong) catalog fell back to rating-only ordering — trending didn't
-// feel "current". 18 pages (~360/region, ~720 US+CA) covers far more of the
-// catalog's popular titles. Discover is cheap and this route response is cached.
-const TMDB_PAGES = 18;
+// Pages of TMDB US/CA popular titles to pull per region (≈20 titles/page). This
+// is the US/CA allowlist AND the popularity-score source, so its depth directly
+// bounds how many of the backend's ~5k-per-service titles survive the isUsCa
+// gate and get a real "current" rank. 18 pages (~360/region) was dropping recent
+// popular shows that sit just past it; 32 (~640/region, ~1280 US+CA) surfaces
+// far more of them. Discover is cheap and this route response is cached.
+const TMDB_PAGES = 32;
 
 /**
  * US/CA, English-only TMDB signal for a kind. Returns two things from ONE cached
@@ -169,6 +170,8 @@ async function fetchDiscover(
   kind: "movie" | "tv",
   extra: string,
   pages: number,
+  sort = "popularity.desc",
+  voteFloor = 50,
 ): Promise<any[]> {
   const tmdbToken = process.env.TMDB_ACCESS_TOKEN;
   if (!tmdbToken) return [];
@@ -178,7 +181,7 @@ async function fetchDiscover(
     const url =
       `https://api.themoviedb.org/3/discover/${kind}` +
       `?language=en-US&watch_region=US&with_original_language=en&with_origin_country=US%7CCA` +
-      `&sort_by=popularity.desc&vote_count.gte=50&page=${page}${extra}`;
+      `&sort_by=${sort}&vote_count.gte=${voteFloor}&page=${page}${extra}`;
     reqs.push(
       fetch(url, { headers: { Authorization: `Bearer ${tmdbToken}` }, next: { revalidate: 3600 } })
         .then((r) => r.json())
@@ -326,17 +329,30 @@ async function computeTrending(cookie: string): Promise<{ movies: any[]; series:
   // Supplement with broader US/CA TMDB content the backend catalog lacks:
   // more popular movies + series, plus a dedicated animation pass (genre 16)
   // so adult-animation shows appear. Dedupe against what the backend returned.
-  const [supMovies, supSeries, supAnimation] = await Promise.all([
-    fetchDiscover("movie", "", 5),
-    fetchDiscover("tv", "", 5),
-    fetchDiscover("tv", "&with_genres=16", 3), // animation (Family Guy, Rick & Morty, …)
+  // These come straight from TMDB's US/CA popularity ranking (clean, English,
+  // bypass isUsCa by construction) and their detail pages resolve streams even
+  // when no backend catalog carries them — so widening them is the most direct
+  // way to surface more CURRENT popular titles. Two dedicated recency passes
+  // (date-sorted, capped at today so unreleased future rows don't leak) catch
+  // new hits that haven't yet climbed the all-time popularity board.
+  const today = new Date().toISOString().slice(0, 10);
+  const [supMovies, supSeries, supAnimation, recentMovies, recentSeries] = await Promise.all([
+    fetchDiscover("movie", "", 12),
+    fetchDiscover("tv", "", 15),
+    fetchDiscover("tv", "&with_genres=16", 4), // animation (Family Guy, Rick & Morty, …)
+    fetchDiscover("movie", `&primary_release_date.lte=${today}`, 4, "primary_release_date.desc", 40),
+    fetchDiscover("tv", `&first_air_date.lte=${today}`, 5, "first_air_date.desc", 25),
   ]);
-  for (const m of supMovies) {
+  for (const m of [...supMovies, ...recentMovies]) {
     if (!seenIds.has(m.tmdb_id)) { seenIds.add(m.tmdb_id); allMovies.push(m); }
   }
-  for (const s of [...supSeries, ...supAnimation]) {
+  for (const s of [...supSeries, ...supAnimation, ...recentSeries]) {
     if (!seenIds.has(s.tmdb_id)) { seenIds.add(s.tmdb_id); allSeries.push(s); }
   }
+  // The recency passes are date-sorted, so their titles often lack an all-time
+  // popularity score and would sink to the bottom. Remember them so we can float
+  // them into a "recent" band below the evergreen top after scoring.
+  const recentIds = new Set([...recentMovies, ...recentSeries].map((x) => x.tmdb_id));
 
   // Inject the global-megahit bypass titles (Squid Game, …) so they appear even
   // if no backend service catalog carries them. Deduped against the above.
@@ -358,6 +374,25 @@ async function computeTrending(cookie: string): Promise<{ movies: any[]; series:
   ]);
   applyRegionScores(allMovies, movieRegion.scores);
   applyRegionScores(allSeries, seriesRegion.scores);
+
+  // Float recent releases into a band just under the all-time top: a new hit
+  // that hasn't climbed the popularity board yet still surfaces, without
+  // displacing the evergreen leaders (~99k) or getting buried by them. Items
+  // already scored above the band (a recent title that's ALSO a top hit) keep
+  // their real rank. The client re-sorts by `popularity`, so setting the value
+  // is enough. `n` preserves the date order within the band.
+  const RECENT_BAND = 82000;
+  const bandRecent = (items: any[]) => {
+    let n = 0;
+    for (const it of items) {
+      if (recentIds.has(it.tmdb_id) && (Number(it.popularity) || 0) < RECENT_BAND) {
+        it.popularity = RECENT_BAND - n++;
+      }
+    }
+    items.sort((a, b) => (Number(b.popularity) || 0) - (Number(a.popularity) || 0));
+  };
+  bandRecent(allMovies);
+  bandRecent(allSeries);
 
   // USA/CANADA ONLY: the backend service catalogs mix in foreign dramas (K/J/
   // Thai/Indian) whose romanized titles pass a script check; drop anything TMDB
