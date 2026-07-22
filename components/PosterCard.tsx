@@ -16,9 +16,23 @@ interface Props {
   /** For a series, deep-link straight to a specific episode (Continue Watching). */
   season?: number;
   episode?: number;
+  /** 0-100: paints a resume bar along the bottom of the art (Continue Watching),
+   *  matching the TV card so both clients read the same way. */
+  progress?: number;
+  /** Small line under the card, e.g. "S2 E4" — what the art can't say. */
+  sublabel?: string;
 }
 
-export default function PosterCard({ tmdbId, title, poster, kind, season, episode }: Props) {
+export default function PosterCard({
+  tmdbId,
+  title,
+  poster,
+  kind,
+  season,
+  episode,
+  progress,
+  sublabel,
+}: Props) {
   const [imgError, setImgError] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -38,7 +52,11 @@ export default function PosterCard({ tmdbId, title, poster, kind, season, episod
   // Prewarm the clean-stream resolve the moment the user shows intent (press on
   // mobile, hover on desktop), so the 10-13s provider-a resolve is already running —
   // or done — by the time the detail page mounts. Fire-and-forget + deduped.
-  const prewarm = () => prewarmVod(kind, tmdbId);
+  // Warm the EXACT episode this card opens (Continue Watching deep-links to
+  // ?s=&e=), not the series default — the resolver is keyed per episode, so
+  // prewarming without them warmed S1E1 while the tap opened S2E4. Movies
+  // ignore both args.
+  const prewarm = () => prewarmVod(kind, tmdbId, season, episode);
 
   return (
     <Link
@@ -78,7 +96,22 @@ export default function PosterCard({ tmdbId, title, poster, kind, season, episod
             <Play className="w-4 h-4 text-white fill-white ml-0.5" />
           </div>
         </div>
+
+        {/* Resume bar — same treatment as the TV card. Sits above the hover
+            overlay so it stays readable while the overlay fades in. */}
+        {typeof progress === "number" && progress > 0 && (
+          <div className="absolute inset-x-0 bottom-0 h-1 bg-white/25">
+            <div
+              className="h-full bg-brand"
+              style={{ width: `${Math.min(100, Math.round(progress))}%` }}
+            />
+          </div>
+        )}
       </div>
+
+      {sublabel && (
+        <p className="mt-1.5 text-[11px] text-text-muted truncate">{sublabel}</p>
+      )}
     </Link>
   );
 }

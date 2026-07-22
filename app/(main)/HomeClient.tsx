@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { proxyFetch } from "@/lib/api";
 import HeroBanner, { type HeroEvent } from "@/components/HeroBanner";
 import PosterRail from "@/components/PosterRail";
+import ContinueWatchingRail from "@/components/ContinueWatchingRail";
 import { PageSkeleton } from "@/components/LoadingSkeleton";
 import { useEvents } from "@/hooks/useEvents";
 import { useChannels } from "@/hooks/useChannels";
@@ -179,6 +180,11 @@ export default function HomeClient({
   return (
     <div className="hud-grid-bg min-h-screen pb-4 animate-page-rise">
       <HeroBanner items={heroItems} events={heroEvents} />
+
+      {/* First rail, as on the TV home: what you were already watching beats
+          anything we could recommend. Renders nothing when nothing's in
+          progress, and reads localStorage, so it stays out of the SSR path. */}
+      <ContinueWatchingRail />
 
       {trendingMovies.length > 0 && (
         <PosterRail title="Trending Movies" items={trendingMovies} kind="movie" />

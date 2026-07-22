@@ -112,8 +112,12 @@ export default function TvPosterCard({
     "data-tv": true as const,
     ...(tvAutoFocus ? { "data-tv-autofocus": true } : {}),
     onFocus: () => {
-      // Never prewarm a stream we are about to delete.
-      if (!onSelect) prewarmVod(kind, tmdbId);
+      // Warm the EXACT episode this card opens, not the series default. A
+      // Continue Watching tile deep-links to ?s=&e=&play=1, and the resolver is
+      // keyed per episode — prewarming without them warmed S1E1 while the
+      // viewer pressed S2E4 and then waited out the full resolve. Movies ignore
+      // both args. Never prewarm a stream we are about to delete.
+      if (!onSelect) prewarmVod(kind, tmdbId, season, episode);
       onCardFocus?.();
     },
     className: `block focus:outline-none ${fluid ? "w-full" : "w-[200px] shrink-0"}`,
