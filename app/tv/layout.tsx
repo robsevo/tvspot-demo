@@ -65,10 +65,10 @@ export default function TvLayout({ children }: { children: React.ReactNode }) {
       <TvNavProvider>
         {showNav && <TvTopNav />}
         <main>{children}</main>
-        {/* Fixed bottom strip — one banner serves BOTH TV apps, since the
-            Samsung and Fire TV packages are wrappers on these same routes.
-            Never over a player page: a yellow bar across live video is worse
-            than the warning is useful, and the player owns the whole panel. */}
+        {/* Pinned just under TvTopNav (it positions itself). One banner serves
+            BOTH TV apps, since the Samsung and Fire TV packages are wrappers on
+            these same routes. Never over a player page — the player owns the
+            whole panel. */}
         {!isPlayerPage && <UpdateNotice variant="tv" />}
       </TvNavProvider>
     </div>

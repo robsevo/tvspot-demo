@@ -38,9 +38,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       {/* Match the TopBar's safe-area inset so page content clears the notch too
           (pages already pad for the 48px bar; this adds the inset on top). */}
       <main className="safe-area-top">
-        {/* Above the page content, below the fixed TopBar — warns before a
-            disruptive deploy without covering the nav controls. Self-clears.
-            Skipped on the fullscreen video page for the same reason. */}
+        {/* Pinned just under the fixed TopBar (it positions itself), so it stays
+            visible while scrolling. Self-clears; skipped on the fullscreen
+            video page, where a yellow bar over live video costs more than the
+            warning is worth. */}
         {showNav && <UpdateNotice />}
         {children}
       </main>
