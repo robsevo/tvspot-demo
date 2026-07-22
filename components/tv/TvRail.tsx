@@ -26,8 +26,8 @@ export default function TvRail({
   children: ReactNode;
 }) {
   return (
-    <section className="py-4">
-      <h2 className="px-16 text-2xl font-bold text-white mb-4">{title}</h2>
+    <section className="py-3">
+      <h2 className="px-16 text-2xl font-bold text-white mb-3">{title}</h2>
       <div data-tv-row className="flex gap-5 overflow-x-auto px-16 py-2">
         {children}
         {seeAllHref && (

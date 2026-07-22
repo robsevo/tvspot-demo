@@ -123,7 +123,7 @@ export default function TvLandscapeCard({
           responsive width. */}
       <div
         className={`tv-card-shadow relative rounded-lg bg-[#1a242f] ring-1 ring-white/10 ${
-          fluid ? "aspect-video overflow-hidden" : "h-[11.25rem]"
+          fluid ? "aspect-video overflow-hidden" : "h-[9.5rem]"
         }`}
       >
         {art && !imgError ? (
