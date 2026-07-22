@@ -39,7 +39,7 @@ export default function TvRail({
             data-tv
             /* Poster-shaped: seeAllHref is only ever set on VOD rails
                (TvProviderBrowse / TvCatalogTabPage), so this tile sits beside
-               176×264 TvPosterCards and must match their footprint. Channel/
+               200×300 TvPosterCards and must match their footprint. Channel/
                event rails use `trailing` instead and keep their own shape.
 
                Styled as a quiet end-cap rather than a card: at poster height the
@@ -48,7 +48,7 @@ export default function TvRail({
                chevron says "end of row, more this way" without competing with
                the posters. Explicit rgba — Tailwind /opacity utilities compile
                to color-mix(), which the TV's Chromium 63 drops. */
-            className="tv-card-shadow w-[176px] h-[264px] shrink-0 rounded-lg flex flex-col items-center justify-center gap-4 focus:outline-none"
+            className="tv-card-shadow w-[200px] h-[300px] shrink-0 rounded-lg flex flex-col items-center justify-center gap-4 focus:outline-none"
             style={{
               backgroundColor: "#121a24",
               border: "1px solid rgba(255,255,255,0.10)",

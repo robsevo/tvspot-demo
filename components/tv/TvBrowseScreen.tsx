@@ -196,7 +196,7 @@ export default function TvBrowseScreen({
           backdrop, so it renders its own themed hero (league wash + crests)
           instead of a blank void. */}
       {shown?.event ? (
-        <div key={`hero-art-${shown.key}`} className="tv-event-art absolute inset-x-0 top-0 h-[34%] animate-[fadeIn_0.5s_ease]">
+        <div key={`hero-art-${shown.key}`} className="tv-event-art absolute inset-x-0 top-0 h-[48%] animate-[fadeIn_0.5s_ease]">
           {shown.event.leagueLogo && (
             <img
               src={shown.event.leagueLogo}
@@ -222,7 +222,7 @@ export default function TvBrowseScreen({
           <div className="tv-fade-hero-b absolute inset-0" />
         </div>
       ) : art ? (
-        <div key={`hero-art-${art}`} className="absolute inset-x-0 top-0 h-[34%] animate-[fadeIn_0.5s_ease]">
+        <div key={`hero-art-${art}`} className="absolute inset-x-0 top-0 h-[48%] animate-[fadeIn_0.5s_ease]">
           <img
             src={art}
             alt=""
@@ -240,22 +240,22 @@ export default function TvBrowseScreen({
           Height is deliberately short: the hero pane and the rails pane split
           the screen, so every extra vh here costs a rail.
 
-          Budget @1080p, with the 176×264 portrait posters (TvPosterCard):
+          Budget @1080p, with the 200×300 portrait posters (TvPosterCard):
             pane      = 100vh − 76px topnav          = 1004px
-            hero      = 26vh                         =  281px
-            rails     = 1004 − 281                   =  723px
-            one rail  = 264 poster + 32 h2 + 8 mb
-                        + 16 inner py + 16 section py=  336px
-            two rails = 672 + 8 (pane pt-2)          =  680px  ✓ fits in 723
-          26vh not 28vh because the Continue Watching rail also carries an
-          "S2 E4" sublabel (+32px): that case totals 712px, which overflows a
-          28vh split by 10px and clips the second row. Hero content tops out at
-          253px (2-line title), so 281px still has headroom.
+            hero      = 40vh                         =  432px
+            rails     = 1004 − 432                   =  572px
+            one rail  = 300 poster + 32 h2 + 8 mb
+                        + 16 inner py + 16 section py=  372px
+            one rail + pane pt-2                     =  380px
 
-          Portrait art is ~110px taller than the 16:9 cards it replaced, so the
-          hero gave up 14vh and the title/overview stepped down a size to pay
-          for it. Change any of these numbers and re-check the sum. */}
-      <div className="relative z-10 flex-none h-[26vh] px-16 max-w-4xl flex flex-col justify-end pb-6">
+          This is DELIBERATELY a one-row split: a big hero and big poster art
+          together cost more than 1004px can show, and the choice was to keep
+          both. The second rail peeks ~190px below the fold and TvNav scrolls
+          it into view on the first Down press — the standard Prime/Netflix
+          portrait behaviour. (Two full rows needs hero ≤26vh and ~264px
+          posters; that trade was made and then reversed on purpose.)
+          Change any of these numbers and re-check the sum. */}
+      <div className="relative z-10 flex-none h-[40vh] px-16 max-w-4xl flex flex-col justify-end pb-6">
         {/* Keyed inner wrapper does the crossfade; the dots below sit OUTSIDE it
             so they persist and animate their width instead of remounting each
             rotation. */}
@@ -269,7 +269,7 @@ export default function TvBrowseScreen({
                 {shown.provider}
               </p>
             )}
-            <h1 className="text-5xl font-extrabold text-white leading-[1.05] line-clamp-2 mb-3 hero-text-shadow">
+            <h1 className="text-7xl font-extrabold text-white leading-[1.05] line-clamp-2 mb-3 hero-text-shadow">
               {shown.title}
             </h1>
             <div className="flex items-center gap-3 mb-2">
@@ -288,7 +288,7 @@ export default function TvBrowseScreen({
               )}
             </div>
             {shown.overview && (
-              <p className="text-base text-[#cfdae4] leading-relaxed line-clamp-1 max-w-2xl hero-text-shadow">
+              <p className="text-lg text-[#cfdae4] leading-relaxed line-clamp-2 max-w-2xl hero-text-shadow">
                 {shown.overview}
               </p>
             )}
@@ -301,7 +301,7 @@ export default function TvBrowseScreen({
         {/* Carousel dots — only while auto-rotating; the active one elongates in
             the brand cyan, matching the web hero. */}
         {showDots && (
-          <div className="flex items-center gap-2 mt-3">
+          <div className="flex items-center gap-2 mt-5">
             {heroRotation.map((_, i) => (
               <span
                 key={i}

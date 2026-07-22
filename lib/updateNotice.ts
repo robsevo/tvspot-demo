@@ -1,22 +1,27 @@
 /**
  * "Update in progress" notice.
  *
- * Standing rule: before shipping a deploy that can disrupt playback, put this
+ * Standing rule: before shipping a deploy that CAN DISRUPT PLAYBACK, put this
  * notice up FIRST (its own deploy), then ship the real update. Viewers get a
- * warning before the disruption instead of a silently broken app — every deploy
- * hard-reloads open clients, and a fresh deployment starts with cold trending /
- * catalog caches that take a while to warm.
+ * warning before the disruption instead of a silently broken app.
+ *
+ * Raise it for: backend/API changes, stream resolution or proxy changes,
+ * catalog/EPG pipeline work, anything that empties the trending or catalog
+ * caches a fresh deployment has to rebuild, or a batch of deploys in a row.
+ *
+ * Do NOT raise it for pure front-end work — layout, styling, card sizes, copy.
+ * Those ship without touching live TV or VOD, and a banner that cries wolf on
+ * cosmetic deploys is a banner nobody reads when it actually matters.
  *
  * The window is a DEADLINE, not a flag, on purpose: a boolean has to be turned
  * off by a third deploy, and if that deploy is forgotten or fails the banner
- * stays up forever, training everyone to ignore it. A timestamp self-clears — a
- * missed cleanup costs nothing, and leaving a stale past value in the repo is
- * inert (the notice simply never shows).
+ * stays up forever. A timestamp self-clears — a missed cleanup costs nothing,
+ * and leaving a stale past value here is inert (the notice simply never shows).
  *
- * To raise a notice: set this to ~25 minutes out (UTC), commit, deploy, THEN
- * deploy the real change. No cleanup deploy needed.
+ * To raise one: set this to ~25 minutes out (UTC), commit, deploy, THEN deploy
+ * the real change. Set it back to null when the work is cosmetic again.
  */
-export const UPDATE_NOTICE_UNTIL: string | null = "2026-07-22T18:25:00Z";
+export const UPDATE_NOTICE_UNTIL: string | null = null;
 
 /** Roughly how long viewers are told things may be rough. Kept next to the
  *  deadline so the copy and the window can't drift apart. */
