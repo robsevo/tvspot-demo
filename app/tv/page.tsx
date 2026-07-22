@@ -161,7 +161,9 @@ export default function TvHomePage() {
       {
         title: "Live TV",
         items: homeChannels.map(channelItem),
-        trailing: (
+        // Full guide leads the row here too, matching /tv/live — it is a
+        // primary destination, not something to hold Right to reach.
+        leading: (
           <Link
             href="/tv/live/guide"
             data-tv

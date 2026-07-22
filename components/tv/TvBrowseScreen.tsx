@@ -95,11 +95,16 @@ export default function TvBrowseScreen({
   rails,
   loading,
   loadingText = "Loading…",
+  sectionLogo,
   onChannelSelect,
 }: {
   rails: TvBrowseRail[];
   loading?: boolean;
   loadingText?: string;
+  /** Brand mark for the section you're inside (a provider), shown quietly in
+   *  the hero's empty top-left. Purely an orientation cue — not focusable, and
+   *  it never sits over the hero copy or the art's subject. */
+  sectionLogo?: { src: string | null; label: string };
   /** When set, channel tiles open the channel panel instead of tuning
    *  directly — the Live TV screen wants Watch Live / favorite / now-next. */
   onChannelSelect?: (channel: Channel) => void;
@@ -259,6 +264,28 @@ export default function TvBrowseScreen({
           portrait behaviour. (Two full rows needs hero ≤26vh and ~264px
           posters; that trade was made and then reversed on purpose.)
           Change any of these numbers and re-check the sum. */}
+      {/* Section mark. Top-left is the one reliably empty part of the hero: the
+          copy is bottom-aligned and the art's subject sits right. It also lands
+          on the left-to-right scrim, so a wordmark stays legible over any
+          backdrop. Decorative — no data-tv, so it never takes a D-pad stop. */}
+      {sectionLogo && (
+        <div className="absolute left-16 top-6 z-20 pointer-events-none">
+          {sectionLogo.src ? (
+            <img
+              src={sectionLogo.src}
+              alt={sectionLogo.label}
+              referrerPolicy="no-referrer"
+              className="h-10 max-w-[240px] object-contain object-left"
+              style={{ opacity: 0.9 }}
+            />
+          ) : (
+            <span className="text-2xl font-bold text-white hero-text-shadow">
+              {sectionLogo.label}
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="relative z-10 flex-none h-[40vh] px-16 max-w-4xl flex flex-col justify-end pb-6">
         {/* Keyed inner wrapper does the crossfade; the dots below sit OUTSIDE it
             so they persist and animate their width instead of remounting each

@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useServiceCatalog } from "@/hooks/useCatalog";
 import { trendingNow } from "@/lib/discovery";
+import { getServiceLogoUrl } from "@/lib/logos";
 import TvBrowseScreen, { type TvBrowseItem, type TvBrowseRail } from "@/components/tv/TvBrowseScreen";
 import type { CatalogItem } from "@/lib/types";
 
@@ -64,6 +65,9 @@ export default function TvProviderBrowse({ service }: { service: string }) {
       rails={rails}
       loading={loading && movies.length === 0 && series.length === 0}
       loadingText={`Loading ${label || service}…`}
+      // Which provider you're inside. Falls back to the name when we have no
+      // wordmark for the brand, so the cue is never simply absent.
+      sectionLogo={{ src: getServiceLogoUrl(service), label: label || service }}
     />
   );
 }
