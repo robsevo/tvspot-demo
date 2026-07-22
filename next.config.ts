@@ -1,7 +1,26 @@
 import type { NextConfig } from "next";
 
+/**
+ * The commit this build actually contains.
+ *
+ * DEPLOY_COMMIT_SHA first, and it is not optional decoration: GITHUB_SHA is the
+ * sha of the ref the WORKFLOW was dispatched on (main), while the deploy job
+ * checks out and builds the `deploy` branch. Every build was therefore stamped
+ * with main's sha, which never moves — so NEXT_PUBLIC_BUILD_ID and /api/version
+ * were identical across every deploy, DeployRefresh always concluded "same
+ * build, nothing to do", and an already-open app on a phone or TV never picked
+ * up a new deploy. It kept running old chunks until it was force-quit.
+ *
+ * The workflow now exports DEPLOY_COMMIT_SHA=$(git rev-parse HEAD) after the
+ * checkout, so this is the sha of the code being built. GITHUB_SHA stays as a
+ * fallback for any other CI path, and VERCEL_GIT_COMMIT_SHA for dashboard
+ * deploys.
+ */
 const commitSha =
-  process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA || "dev";
+  process.env.DEPLOY_COMMIT_SHA ||
+  process.env.GITHUB_SHA ||
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  "dev";
 
 const nextConfig: NextConfig = {
   // Run these through SWC so browserslist's chrome 63 floor (the 2019 Samsung
