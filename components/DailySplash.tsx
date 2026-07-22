@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { proxyFetch } from "@/lib/api";
 import { writeCache } from "@/lib/localCache";
@@ -98,16 +99,26 @@ async function prewarmLive(): Promise<void> {
 
 export default function DailySplash() {
   const { username } = useAuth();
+  const pathname = usePathname();
   const [show, setShow] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [reduced, setReduced] = useState(false);
   const [statusIdx, setStatusIdx] = useState(0);
   const decidedRef = useRef(false);
 
+  // The splash is a POST-sign-in loading screen — it must never paint over the
+  // login form. On web a returning visitor can hold a still-valid cookie (so
+  // `username` is already set from the server) while sitting on /login; without
+  // this the splash would flash before they've done anything. Skipping the login
+  // routes also covers the moment login() sets `username` a beat before
+  // router.push navigates away. The splash then fires correctly on the
+  // destination (/, /tv), which is "opened the page" / "actually logged in".
+  const onLoginRoute = pathname === "/login" || pathname === "/tv/login";
+
   // Decide once (per mount) whether this is the first sign-in since the last
   // 4 AM ET rollover, and claim it immediately so reloads don't re-show it.
   useEffect(() => {
-    if (!username || decidedRef.current || typeof window === "undefined") return;
+    if (onLoginRoute || !username || decidedRef.current || typeof window === "undefined") return;
     decidedRef.current = true;
 
     let epoch = 0;
@@ -127,7 +138,7 @@ export default function DailySplash() {
     } catch {}
     setReduced(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
     setShow(true);
-  }, [username]);
+  }, [username, onLoginRoute]);
 
   // Lifecycle: prewarm the caches and drive adaptive dismissal while shown.
   useEffect(() => {

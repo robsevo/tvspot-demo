@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import VideoPlayer, { type TvCcHandle } from "@/components/VideoPlayer";
 import type { SubtitleTrack } from "@/lib/subtitles";
+import { fetchJson, DEADLINE } from "@/lib/fetchDeadline";
 
 /**
  * VideoPlayer wrapped with VOD source-failure detection. Live TV has its own
@@ -118,6 +119,17 @@ export default function VodPlayer({
   const mountedAt = useRef(Date.now());
   const [started, setStarted] = useState(false);
 
+  // Remux seek (touch scrubber). A rolling remux can't be seeked natively — the
+  // playlist is a live window — so a scrub becomes "restart the relay at a new
+  // offset": `seekTarget` overrides the resume position and the changed &start=
+  // URL remounts playback there. `remuxDuration` is the file's real runtime,
+  // needed both to scale the bar and to clamp a target. Only fetched/used when
+  // the touch controls are visible (mobile/web); the TV shell has its own OSD
+  // seek in TvVodPlayback and passes hideControls, so this stays dormant there.
+  const [seekTarget, setSeekTarget] = useState<number | null>(null);
+  const [remuxDuration, setRemuxDuration] = useState<number | null>(null);
+  const durationFetchedFor = useRef<string | null>(null);
+
   const clear = () => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
@@ -152,6 +164,9 @@ export default function VodPlayer({
     failed.current = false;
     mountedAt.current = Date.now();
     setStarted(false);
+    // A new source is a different file: drop any in-progress remux seek so we
+    // don't carry one file's offset onto another.
+    setSeekTarget(null);
     if (autoPlay) arm();
     return () => {
       clear();
@@ -163,24 +178,68 @@ export default function VodPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
+  // Fetch the file's runtime for a remux source, which is what makes the touch
+  // scrubber seekable (the rolling playlist can't report a duration). Mobile/web
+  // only — gated on !hideControls so the TV never double-fetches (TvVodPlayback
+  // fetches its own for the OSD). The relay caches the probe, so this is cheap.
+  useEffect(() => {
+    if (hideControls || !src.includes("remux.m3u8")) {
+      setRemuxDuration(null);
+      return;
+    }
+    if (durationFetchedFor.current === src) return;
+    durationFetchedFor.current = src;
+    let cancelled = false;
+    fetchJson<{ duration: number | null }>(
+      `/api/vod-audio-tracks?src=${encodeURIComponent(src)}`,
+      { credentials: "include" },
+      DEADLINE.stream,
+    )
+      .then(({ ok, data }) => {
+        if (cancelled) return;
+        const d = Number(ok ? data?.duration : NaN);
+        setRemuxDuration(Number.isFinite(d) && d > 0 ? d : null);
+      })
+      .catch(() => {
+        if (!cancelled) setRemuxDuration(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [src, hideControls]);
+
   // Remux sources (relay live-style HLS) can't seek natively — position is
   // baked into the URL instead: the relay's ffmpeg starts reading the file at
   // &start=<sec>. That is the mechanism behind BOTH resume and seeking; the
   // shell moves `initialTime` and this remounts at the new offset.
   const isRemux = isRemuxSource(src);
+  // Where playback should begin: a touch seek (seekTarget) overrides the parent's
+  // resume position. For a remux this is baked into the URL as &start=; for a
+  // native file it's a normal seek via initialTime.
+  const effectiveInitial = seekTarget ?? initialTime;
   // The exact second the relay's ffmpeg begins reading the file. The remux then
   // clocks from 0 here, so this is also how far the media clock lags the
   // episode-absolute caption clock — passed to VideoPlayer as captionTimeOffset
   // so subtitles line up on a resumed remux instead of showing the opening.
-  const remuxStart = remuxStartFor(src, initialTime);
+  const remuxStart = remuxStartFor(src, effectiveInitial);
   const effectiveSrc = remuxStart ? `${src}&start=${remuxStart}` : src;
+  // Hand the scrubber a virtual timeline when this is a remux with a known
+  // runtime and the touch controls are live. Dragging sets seekTarget, which
+  // moves remuxStart, which rewrites effectiveSrc → VideoPlayer reloads at the
+  // new offset (its src-keyed watchdogs reset, so the ~few-second ffmpeg respawn
+  // reads as normal buffering, not a failover).
+  const virtualSeek =
+    isRemux && remuxDuration && !hideControls
+      ? { duration: remuxDuration, baseTime: remuxStart, onSeek: (abs: number) => setSeekTarget(Math.max(0, abs)) }
+      : undefined;
 
   return (
     <VideoPlayer
       src={effectiveSrc}
       poster={poster}
       title={title}
-      initialTime={isRemux ? undefined : initialTime}
+      initialTime={isRemux ? undefined : effectiveInitial}
+      virtualSeek={virtualSeek}
       captionTimeOffset={remuxStart}
       autoPlay={autoPlay}
       stallMs={STALL_MS}
@@ -197,7 +256,13 @@ export default function VodPlayer({
           // NOT initialTime: they differ by the 5s pre-roll, and below the 30s
           // threshold remuxStart is 0 while initialTime is not, so using
           // initialTime reported a position the media was never at.
-          onProgress(remuxStart + t, remuxStart + d);
+          //
+          // Duration: a rolling remux reports Infinity for `d`, which pins
+          // continue-watching to 0%. When we know the file's real runtime
+          // (mobile, where we fetched it) use it; otherwise fall back to the old
+          // relative-plus-offset (TV keeps its own onProgress anyway).
+          const absDuration = remuxDuration ?? remuxStart + d;
+          onProgress(remuxStart + t, absDuration);
         })
       }
       onTimeUpdate={(t) => {

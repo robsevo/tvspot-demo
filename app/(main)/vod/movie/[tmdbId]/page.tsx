@@ -15,7 +15,7 @@ import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import type { VodDetail } from "@/lib/types";
 
 /** Maximum sources to display. */
-const MAX_SOURCES = 6;
+const MAX_SOURCES = 10; // raised from 6 — more failover depth + manual picks; only the chosen source streams
 
 /** Sources that dropped DURING playback cool down before retry — VOD sources
  *  that die mid-file usually need a couple of minutes (relay slot, provider). */

@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, X, Loader2, RefreshCw, Info, ExternalLink } from "lucide-react";
 
 /** How many sources to probe / show at most. */
-const MAX_SOURCES = 6;
+const MAX_SOURCES = 10; // raised from 6 — more failover depth + manual picks; only the chosen source streams
 
 /** Small status indicator for a source button. */
 function StatusDot({ status }: { status: SourceStatus }) {

@@ -153,14 +153,16 @@ export interface PlayableSource {
  *  2. They're confirmed-working.
  * HD (clean, castable, ad-free) follow as one-tap alternatives; embeds last.
  * Previously HD led and `.slice(0, 6)` also dropped every Source once six HD
- * resolved — putting Source first fixes both. De-duped by URL, cap 8.
+ * resolved — putting Source first fixes both. De-duped by URL, cap 12 (raised
+ * from 8 alongside the resolver's total: more one-tap fallbacks, same play cost
+ * — only the chosen source ever streams).
  */
 export function mergeSources(
   resolved: string[],
   backendStreams: string[] | undefined | null,
   embedUrls: string[] | undefined | null,
 ): PlayableSource[] {
-  const CAP = 8;
+  const CAP = 12;
   const MAX_BACKEND = 4;
   const streams: PlayableSource[] = (backendStreams ?? []).slice(0, MAX_BACKEND).map((url, i) => ({
     url,

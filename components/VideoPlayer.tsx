@@ -238,6 +238,21 @@ interface Props {
   isLive?: boolean;
   /** Seek here once metadata loads (resume-where-you-left-off for VOD). */
   initialTime?: number;
+  /** For a rolling relay remux (VOD only): the stream reports no finite
+   *  duration, so the native scrubber can't seek it. Passing this makes the
+   *  progress bar seek by MOVING THE RELAY'S START OFFSET instead —
+   *    • `duration` is the file's real runtime (scales the bar),
+   *    • `baseTime` is the offset the current stream started at, so the on-screen
+   *      position is `baseTime + video.currentTime`,
+   *    • dragging the bar calls `onSeek(absoluteSeconds)`; the VOD wrapper
+   *      remounts the source at that offset (relay respawns ffmpeg there).
+   *  Absent (live, or a natively-seekable file) → the bar seeks natively as
+   *  before. Live must never pass this: a live stream has no seekable past. */
+  virtualSeek?: {
+    duration: number;
+    baseTime: number;
+    onSeek: (absoluteSeconds: number) => void;
+  };
   /** Stall-watchdog window (ms) before a recovery strike / failover. Live keeps
    *  the tight default (a stalled channel should fail over fast — another source
    *  has the same content); VOD passes a longer window because cold double-proxied
@@ -298,6 +313,7 @@ export default function VideoPlayer({
   title,
   isLive = false,
   initialTime,
+  virtualSeek,
   captionTimeOffset = 0,
   stallMs = 10000,
   subtitles,
@@ -324,6 +340,11 @@ export default function VideoPlayer({
   // the callback identity changes each render.
   const onProgressRef = useRef(onProgress);
   useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
+  // virtualSeek in a ref too: the timeupdate handler reads it to fill the bar
+  // against the file's real runtime, and that effect must not re-subscribe every
+  // render (baseTime changes on each seek).
+  const virtualSeekRef = useRef(virtualSeek);
+  useEffect(() => { virtualSeekRef.current = virtualSeek; }, [virtualSeek]);
   // onError/onStall likewise live in refs: they sit in the ATTACH and WATCHDOG
   // effects, and a parent re-creating these callbacks (probe verdicts landing,
   // playback state flips) must never re-run those — re-assigning video.src
@@ -762,6 +783,23 @@ export default function VideoPlayer({
     // after which FRAG_BUFFERED must stop resuming a paused element.
     const onPlayingHandler = () => { startedRef.current = true; };
     const onTimeHandler = () => {
+      // A rolling remux has no finite video.duration, so the bar would sit empty
+      // and never fill. With virtualSeek we know the file's real runtime and the
+      // offset this stream started at, so position = baseTime + currentTime over
+      // the true duration. onTimeUpdate/onProgress stay RELATIVE (video.currentTime):
+      // the VOD wrapper adds the offset itself, and double-adding it here would
+      // corrupt continue-watching.
+      const vs = virtualSeekRef.current;
+      if (vs && vs.duration > 0) {
+        setProgress(Math.min(1, Math.max(0, (vs.baseTime + video.currentTime) / vs.duration)));
+        onTimeUpdate?.(video.currentTime);
+        const now = Date.now();
+        if (onProgressRef.current && now - lastProgressSaveRef.current > 8000) {
+          lastProgressSaveRef.current = now;
+          onProgressRef.current(video.currentTime, video.duration);
+        }
+        return;
+      }
       if (video.duration) {
         setProgress(video.currentTime / video.duration);
         onTimeUpdate?.(video.currentTime);
@@ -1425,13 +1463,22 @@ export default function VideoPlayer({
   const seek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const video = videoRef.current;
     if (!video) return;
-    // Live streams report a non-finite duration (Infinity/NaN) — seeking by ratio
-    // would set currentTime to a non-finite value and throw. Only seek on a real
-    // (finite, seekable) duration; clamp the ratio to [0,1].
-    const d = video.duration;
-    if (!Number.isFinite(d) || d <= 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const pos = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    // Remux (rolling HLS): there is nothing to seek IN — hand the absolute target
+    // to the wrapper, which remounts the source at a new relay start offset.
+    const vs = virtualSeekRef.current;
+    if (vs && vs.duration > 0) {
+      // Leave a little headroom: starting the relay in the final seconds yields a
+      // stream that ends before it can play.
+      vs.onSeek(Math.min(vs.duration - 10, pos * vs.duration));
+      return;
+    }
+    // Native path: live reports a non-finite duration (Infinity/NaN) — seeking by
+    // ratio would set currentTime to a non-finite value and throw. Only seek on a
+    // real (finite, seekable) duration.
+    const d = video.duration;
+    if (!Number.isFinite(d) || d <= 0) return;
     video.currentTime = pos * d;
   }, []);
 

@@ -15,7 +15,7 @@ import { Check, X, Loader2, RefreshCw } from "lucide-react";
 import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 
 /** How many sources to surface in the overlay. */
-const MAX_SOURCES = 6;
+const MAX_SOURCES = 10; // raised from 6 — more failover depth + manual picks; only the chosen source streams
 /** Transient channel/source banner lifetime. */
 const BANNER_MS = 3500;
 /** Info overlay auto-closes after this much remote inactivity. */

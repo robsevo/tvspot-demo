@@ -18,7 +18,7 @@ import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import type { SeriesDetail, Episode } from "@/lib/types";
 
 /** Maximum sources to display per episode. */
-const MAX_SOURCES = 6;
+const MAX_SOURCES = 10; // raised from 6 — more failover depth + manual picks; only the chosen source streams
 
 /** Cooldown for sources that dropped during playback. */
 const FAIL_COOLDOWN_MS = 120000;

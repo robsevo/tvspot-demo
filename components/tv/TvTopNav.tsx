@@ -36,9 +36,17 @@ export default function TvTopNav() {
   const isActive = (href: string) =>
     href === "/tv" ? pathname === "/tv" : pathname.startsWith(href);
 
+  // Two DISTINCT signals, so they never fight for the same look:
+  //   focus  = solid white pill, black text — "the remote cursor is here".
+  //   active = translucent bright pill, WHITE text + accent ring — "this is the
+  //            section you're in" (holds while focus is down in the content).
+  // The old active style reused focus's white-pill/black-text, so an active-but-
+  // unfocused tab was dark text the user couldn't read against the header.
   const pillClass = (active: boolean) =>
     `tv-pill px-5 py-2 rounded-lg text-lg whitespace-nowrap focus:outline-none focus:bg-white focus:text-black ${
-      active ? "bg-white text-black font-bold" : "text-[#c7d5e0] font-semibold"
+      active
+        ? "bg-white/15 text-white font-bold ring-1 ring-[#22d3ee]/60"
+        : "text-[#c7d5e0] font-semibold"
     }`;
 
   return (
@@ -71,7 +79,9 @@ export default function TvTopNav() {
         href="/tv/vod"
         data-tv
         className={`tv-pill flex items-center gap-2.5 px-4 py-2 rounded-lg text-lg whitespace-nowrap focus:outline-none focus:bg-white focus:text-black ${
-          pathname === "/tv/vod" ? "bg-white text-black font-bold" : "text-[#c7d5e0] font-semibold"
+          pathname === "/tv/vod"
+            ? "bg-white/15 text-white font-bold ring-1 ring-[#22d3ee]/60"
+            : "text-[#c7d5e0] font-semibold"
         }`}
       >
         <LayoutGrid className="w-5 h-5" />
@@ -87,7 +97,9 @@ export default function TvTopNav() {
           data-tv
           aria-label={label}
           className={`tv-pill flex items-center gap-2.5 px-4 py-2 rounded-lg text-lg whitespace-nowrap focus:outline-none focus:bg-white focus:text-black ${
-            isActive(href) ? "bg-white text-black font-bold" : "text-[#c7d5e0] font-semibold"
+            isActive(href)
+              ? "bg-white/15 text-white font-bold ring-1 ring-[#22d3ee]/60"
+              : "text-[#c7d5e0] font-semibold"
           }`}
         >
           <Icon className="w-5 h-5" />
