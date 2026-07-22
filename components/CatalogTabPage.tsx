@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LayoutGrid } from "lucide-react";
+import { LayoutGrid, ChevronRight } from "lucide-react";
 import PosterRail from "@/components/PosterRail";
 import { PageSkeleton } from "@/components/LoadingSkeleton";
 import { useTrendingCatalog } from "@/hooks/useTrendingCatalog";
@@ -91,14 +91,20 @@ export default function CatalogTabPage({ kind }: { kind: "movie" | "series" }) {
           carries both right beside the browse tabs. These also keep the picker
           reachable at all: Movies/TV Shows replaced the old "VOD" bottom tab,
           which was the ONLY way into it. */}
-      <div className="flex gap-2 overflow-x-auto px-4 mb-4 poster-rail">
+      <div className="flex items-center gap-2 overflow-x-auto px-4 mb-4 poster-rail">
+        {/* The primary of the row, in the brand fill rather than the same muted
+            chip as its neighbours — as a glass chip it read as just another
+            provider and got lost among them. A divider after it separates "go
+            to the picker" from "jump to this provider". */}
         <Link
           href="/vod"
-          className="flex-shrink-0 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold glass-card text-white"
+          className="flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-bold brand-sheen text-white hud-glow"
         >
-          <LayoutGrid className="w-3.5 h-3.5" />
+          <LayoutGrid className="w-4 h-4" />
           All providers
+          <ChevronRight className="w-3.5 h-3.5 -mr-1" />
         </Link>
+        <span className="flex-shrink-0 w-px h-5 bg-white/20 mx-1" />
         {services.slice(0, HEADER_PROVIDERS).map((svc) => (
           <Link
             key={svc}
