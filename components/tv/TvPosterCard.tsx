@@ -40,16 +40,25 @@ interface Props {
 }
 
 /** Smallest TMDB size that still looks right in a 200×300 tile. The ladders
- *  differ by asset type and do NOT overlap: posters offer …/w342/w500/w780,
+ *  differ by asset type and do NOT overlap: posters offer w154/w185/w342/w500,
  *  backdrops offer w300/w780/w1280. Asking for a size the type lacks 404s,
  *  which is why this is chosen per type rather than globally.
  *
- *  w342 is a deliberate ceiling, not a guess: the TV's compositor paints cards
- *  WHITE once a screenful of full-size bitmaps blows its raster budget. Measured
- *  on prod, 38 of 73 card images once came down at 780×439 — ~52MB of the 59.7MB
- *  decoded on a cold home screen. A 342×513 poster decodes to ~700KB and still
- *  oversamples the 200×300 tile on a 1080p panel. */
-const CARD_POSTER_SIZE = "w342";
+ *  w185, NOT w342, and this is a stability constraint rather than a taste call.
+ *  A decoded bitmap costs w×h×4 bytes, so per card:
+ *      old 16:9 backdrop  w300 → 300×169 → ~203 KB
+ *      poster             w342 → 342×513 → ~702 KB   (3.5× the old card!)
+ *      poster             w185 → 185×278 → ~206 KB
+ *  Across the ~190 cards a full TV home mounts that is ~35 MB before the
+ *  portrait switch, ~133 MB at w342, ~39 MB at w185 — on a box with ≤1GB of
+ *  RAM. w342 froze the Samsung outright, and this codebase already documents
+ *  the same failure mode more gently (cards compositing WHITE once a screenful
+ *  of bitmaps blows the raster budget).
+ *
+ *  w185 into a 200px-wide tile is a 1.08× upscale — imperceptible from a couch,
+ *  and the only version of this that stays up. Do not raise it without redoing
+ *  the arithmetic above against the current rail count. */
+const CARD_POSTER_SIZE = "w185";
 const CARD_BACKDROP_SIZE = "w300";
 
 /** Rewrites ANY size segment — w<n> or "original", in both the encoded and the
