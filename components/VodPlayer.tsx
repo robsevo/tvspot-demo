@@ -129,6 +129,13 @@ export default function VodPlayer({
   const [seekTarget, setSeekTarget] = useState<number | null>(null);
   const [remuxDuration, setRemuxDuration] = useState<number | null>(null);
   const durationFetchedFor = useRef<string | null>(null);
+  // Audio-language choice (VOD remux). `audioTracks` is the switchable set;
+  // `audioUrl` is a chosen track's signed remux URL, played in place of the
+  // plain source. Same probe call as the runtime, so it costs no extra fetch.
+  const [audioTracks, setAudioTracks] = useState<
+    { rel: number; lang: string; label: string; url: string }[]
+  >([]);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
   const clear = () => {
     if (timer.current) clearTimeout(timer.current);
@@ -164,9 +171,11 @@ export default function VodPlayer({
     failed.current = false;
     mountedAt.current = Date.now();
     setStarted(false);
-    // A new source is a different file: drop any in-progress remux seek so we
-    // don't carry one file's offset onto another.
+    // A new source is a different file: drop any in-progress remux seek and the
+    // audio-track override so we don't carry one file's offset/track onto another.
     setSeekTarget(null);
+    setAudioUrl(null);
+    setAudioTracks([]);
     if (autoPlay) arm();
     return () => {
       clear();
@@ -190,7 +199,10 @@ export default function VodPlayer({
     if (durationFetchedFor.current === src) return;
     durationFetchedFor.current = src;
     let cancelled = false;
-    fetchJson<{ duration: number | null }>(
+    fetchJson<{
+      duration: number | null;
+      tracks?: { rel: number; lang: string; label: string; url: string }[];
+    }>(
       `/api/vod-audio-tracks?src=${encodeURIComponent(src)}`,
       { credentials: "include" },
       DEADLINE.stream,
@@ -199,20 +211,28 @@ export default function VodPlayer({
         if (cancelled) return;
         const d = Number(ok ? data?.duration : NaN);
         setRemuxDuration(Number.isFinite(d) && d > 0 ? d : null);
+        setAudioTracks(ok && Array.isArray(data?.tracks) ? data!.tracks : []);
       })
       .catch(() => {
-        if (!cancelled) setRemuxDuration(null);
+        if (!cancelled) {
+          setRemuxDuration(null);
+          setAudioTracks([]);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [src, hideControls]);
 
+  // What actually plays: a chosen audio track's remux URL overrides the plain
+  // source (both are the same file, different mapped audio). Everything below —
+  // remux detection, seek offset, caption clock — keys off this active URL.
+  const activeSrc = audioUrl ?? src;
   // Remux sources (relay live-style HLS) can't seek natively — position is
   // baked into the URL instead: the relay's ffmpeg starts reading the file at
   // &start=<sec>. That is the mechanism behind BOTH resume and seeking; the
   // shell moves `initialTime` and this remounts at the new offset.
-  const isRemux = isRemuxSource(src);
+  const isRemux = isRemuxSource(activeSrc);
   // Where playback should begin: a touch seek (seekTarget) overrides the parent's
   // resume position. For a remux this is baked into the URL as &start=; for a
   // native file it's a normal seek via initialTime.
@@ -221,8 +241,16 @@ export default function VodPlayer({
   // clocks from 0 here, so this is also how far the media clock lags the
   // episode-absolute caption clock — passed to VideoPlayer as captionTimeOffset
   // so subtitles line up on a resumed remux instead of showing the opening.
-  const remuxStart = remuxStartFor(src, effectiveInitial);
-  const effectiveSrc = remuxStart ? `${src}&start=${remuxStart}` : src;
+  const remuxStart = remuxStartFor(activeSrc, effectiveInitial);
+  const effectiveSrc = remuxStart ? `${activeSrc}&start=${remuxStart}` : activeSrc;
+  // Switch the audio language: capture the current absolute position so the new
+  // track resumes in place (not from the top), then swap. lastTime tracks the
+  // absolute position (remuxStart + media time), maintained in onTimeUpdate.
+  const selectAudio = useCallback((url: string) => {
+    const at = lastTime.current;
+    setSeekTarget(at > 5 ? at : 0);
+    setAudioUrl(url);
+  }, []);
   // Hand the scrubber a virtual timeline when this is a remux with a known
   // runtime and the touch controls are live. Dragging sets seekTarget, which
   // moves remuxStart, which rewrites effectiveSrc → VideoPlayer reloads at the
@@ -240,6 +268,9 @@ export default function VodPlayer({
       title={title}
       initialTime={isRemux ? undefined : effectiveInitial}
       virtualSeek={virtualSeek}
+      audioTracks={hideControls ? undefined : audioTracks}
+      currentAudioUrl={audioUrl}
+      onSelectAudio={selectAudio}
       captionTimeOffset={remuxStart}
       autoPlay={autoPlay}
       stallMs={STALL_MS}

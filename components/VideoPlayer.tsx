@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import type Hls from "hls.js"; // type only — the library is imported lazily below
-import { Play, Pause, Maximize, Minimize, SkipBack, SkipForward, Monitor, Cast, Volume2, VolumeX, Volume1, PictureInPicture2, Captions } from "lucide-react";
+import { Play, Pause, Maximize, Minimize, SkipBack, SkipForward, Monitor, Cast, Volume2, VolumeX, Volume1, PictureInPicture2, Captions, Languages } from "lucide-react";
 import { castMedia, loadCastSDK, endCastSession } from "@/lib/cast";
 import { setPlaybackActive } from "@/lib/playbackState";
 import type { SubtitleTrack } from "@/lib/subtitles";
@@ -253,6 +253,15 @@ interface Props {
     baseTime: number;
     onSeek: (absoluteSeconds: number) => void;
   };
+  /** Selectable audio-language tracks (VOD remux only). When there's more than
+   *  one, an audio button + menu appears in the control bar; picking one calls
+   *  onSelectAudio with that track's playable (signed remux) URL, and the VOD
+   *  wrapper swaps to it. Live and single-audio VOD pass nothing → no button. */
+  audioTracks?: { rel: number; lang: string; label: string; url: string }[];
+  /** The audio URL currently playing (a track's url, or null = default English),
+   *  so the menu can check the active one. */
+  currentAudioUrl?: string | null;
+  onSelectAudio?: (url: string) => void;
   /** Stall-watchdog window (ms) before a recovery strike / failover. Live keeps
    *  the tight default (a stalled channel should fail over fast — another source
    *  has the same content); VOD passes a longer window because cold double-proxied
@@ -314,6 +323,9 @@ export default function VideoPlayer({
   isLive = false,
   initialTime,
   virtualSeek,
+  audioTracks,
+  currentAudioUrl,
+  onSelectAudio,
   captionTimeOffset = 0,
   stallMs = 10000,
   subtitles,
@@ -390,6 +402,15 @@ export default function VideoPlayer({
   /** Key of the chosen CcOption, or null for off. */
   const [ccSel, setCcSel] = useState<string | null>(null);
   const [ccMenuOpen, setCcMenuOpen] = useState(false);
+  const [audioMenuOpen, setAudioMenuOpen] = useState(false);
+  const hasAudioChoice = (audioTracks?.length ?? 0) > 1;
+  // Which row the menu shows as active. With no explicit pick yet, the relay
+  // auto-plays English, so mark the English track rather than leaving the menu
+  // with nothing checked while English is clearly playing.
+  const activeAudioUrl =
+    currentAudioUrl ??
+    audioTracks?.find((t) => /^en/.test(t.lang) || /english/i.test(t.label))?.url ??
+    null;
   // Captions are drawn by US, not the browser: the selected track runs in
   // `hidden` mode (cues parse and fire cuechange, nothing renders natively) and
   // these are the lines currently on screen. Native ::cue rendering placed
@@ -1441,24 +1462,24 @@ export default function VideoPlayer({
   const showControls = useCallback(() => {
     setControlsVisible(true);
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
-    // The CC menu lives inside the controls overlay — auto-hiding while the user
-    // is picking a track would snatch it away mid-read.
-    if (ccMenuOpen) return;
+    // The CC / audio menus live inside the controls overlay — auto-hiding while
+    // the user is picking a track would snatch it away mid-read.
+    if (ccMenuOpen || audioMenuOpen) return;
     controlsTimer.current = setTimeout(() => setControlsVisible(false), 4000);
-  }, [ccMenuOpen]);
+  }, [ccMenuOpen, audioMenuOpen]);
 
   // Auto-hide the controls a few seconds after playback starts/resumes (they used
   // to stay up forever until the first tap). While paused, keep them visible.
   useEffect(() => {
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
-    if (playing && !ccMenuOpen) {
+    if (playing && !ccMenuOpen && !audioMenuOpen) {
       controlsTimer.current = setTimeout(() => setControlsVisible(false), 4000);
     } else {
-      // Paused, or the CC menu is open and needs its container to stay put.
+      // Paused, or a menu is open and needs its container to stay put.
       setControlsVisible(true);
     }
     return () => { if (controlsTimer.current) clearTimeout(controlsTimer.current); };
-  }, [playing, ccMenuOpen]);
+  }, [playing, ccMenuOpen, audioMenuOpen]);
 
   const seek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const video = videoRef.current;
@@ -1744,6 +1765,54 @@ export default function VideoPlayer({
                 With no track yet, the menu explains instead of doing nothing.
                 VOD keeps the offer-gated button: its subtitle list arrives
                 up-front from the API, so absence genuinely means none exist. */}
+            {/* Audio-language menu — VOD remux with more than one track. Mirrors
+                the CC menu; picking a language swaps the source to that track's
+                remux (the wrapper keeps the playback position). */}
+            {hasAudioChoice && (
+              <div className="relative">
+                {audioMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setAudioMenuOpen(false)}
+                      aria-hidden="true"
+                    />
+                    <div
+                      role="menu"
+                      aria-label="Audio language"
+                      className="absolute bottom-full right-0 mb-2 z-50 min-w-[10rem] max-h-56 overflow-y-auto rounded-xl bg-black/95 backdrop-blur-sm border border-white/10 py-1 shadow-xl"
+                    >
+                      <p className="px-4 pt-2 pb-1 text-[11px] uppercase tracking-wide text-white/40">Audio</p>
+                      {audioTracks!.map((t) => {
+                        const active = activeAudioUrl === t.url;
+                        return (
+                          <button
+                            key={t.rel}
+                            role="menuitemradio"
+                            aria-checked={active}
+                            onClick={() => { onSelectAudio?.(t.url); setAudioMenuOpen(false); }}
+                            className={`w-full text-left px-4 py-2 min-h-[44px] text-sm transition-colors ${
+                              active ? "text-brand font-medium" : "text-white/80 hover:bg-white/10"
+                            }`}
+                          >
+                            {t.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+                <button
+                  onClick={() => setAudioMenuOpen((o) => !o)}
+                  className="min-w-[40px] min-h-[44px] sm:min-w-[44px] flex items-center justify-center text-white/80 hover:text-white"
+                  aria-label="Audio language"
+                  aria-haspopup="menu"
+                  aria-expanded={audioMenuOpen}
+                >
+                  <Languages className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             {(ccOptions.length > 0 || isLive) && (
               <div className="relative">
                 {ccMenuOpen && (
