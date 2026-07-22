@@ -1,12 +1,19 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { LayoutGrid } from "lucide-react";
 import PosterRail from "@/components/PosterRail";
 import { PageSkeleton } from "@/components/LoadingSkeleton";
 import { useTrendingCatalog } from "@/hooks/useTrendingCatalog";
+import { useCatalog } from "@/hooks/useCatalog";
 import { curate, trendingNow, topRated, hasGenre } from "@/lib/discovery";
 import type { CatalogItem } from "@/lib/types";
+
+/** Provider chips carried at the top of the browse tabs, mirroring the TV
+ *  header's quick links. The full list lives behind "All providers". */
+const HEADER_PROVIDERS = 6;
 
 /** Per-provider rails shown under Trending/Top rated (largest first) — same
  *  shape and caps as the TV's TvCatalogTabPage, so both clients present a
@@ -34,6 +41,7 @@ const MOVIE_GENRES = [
 export default function CatalogTabPage({ kind }: { kind: "movie" | "series" }) {
   const router = useRouter();
   const { movies, series, loading } = useTrendingCatalog();
+  const { services } = useCatalog();
 
   // Same curation as the home rails: current US/CA popularity, English,
   // no holiday filler.
@@ -78,6 +86,29 @@ export default function CatalogTabPage({ kind }: { kind: "movie" | "series" }) {
   return (
     <div className="hud-grid-bg pt-14 min-h-screen pb-20 animate-page-rise">
       <h1 className="text-white text-lg font-bold px-4 mb-3">{label}</h1>
+
+      {/* Provider quick links + "All providers", mirroring the TV header, which
+          carries both right beside the browse tabs. These also keep the picker
+          reachable at all: Movies/TV Shows replaced the old "VOD" bottom tab,
+          which was the ONLY way into it. */}
+      <div className="flex gap-2 overflow-x-auto px-4 mb-4 poster-rail">
+        <Link
+          href="/vod"
+          className="flex-shrink-0 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold glass-card text-white"
+        >
+          <LayoutGrid className="w-3.5 h-3.5" />
+          All providers
+        </Link>
+        {services.slice(0, HEADER_PROVIDERS).map((svc) => (
+          <Link
+            key={svc}
+            href={`/vod?service=${encodeURIComponent(svc)}`}
+            className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium glass-card text-text-secondary hover:text-white transition-colors"
+          >
+            {svc}
+          </Link>
+        ))}
+      </div>
 
       <PosterRail
         title={kind === "movie" ? "Trending Movies" : "Trending TV Shows"}
