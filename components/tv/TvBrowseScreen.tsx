@@ -351,6 +351,7 @@ export default function TvBrowseScreen({
                       badge={item.badge}
                       provider={item.provider}
                       showTitle={false}
+                      captionTitle
                       {...focusProps}
                     />
                   );

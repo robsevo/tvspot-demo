@@ -28,6 +28,10 @@ interface Props {
   /** Etch the title into the art (grids with no hero). Browse rails pass
    *  false — there the pinned hero carries the title. */
   showTitle?: boolean;
+  /** Render the title as a caption line UNDER the card (rail carousels), like a
+   *  standard Prime/Netflix rail. Distinct from showTitle, which overlays the
+   *  art; this sits below so the poster stays clean. */
+  captionTitle?: boolean;
   /** Fill the parent's column (grids) instead of the fixed rail width. */
   fluid?: boolean;
   /** Hero-follows-focus: the browse screen listens here. */
@@ -81,6 +85,7 @@ export default function TvLandscapeCard({
   badge,
   provider,
   showTitle = true,
+  captionTitle = false,
   fluid,
   onCardFocus,
   tvAutoFocus,
@@ -167,7 +172,16 @@ export default function TvLandscapeCard({
           </div>
         )}
       </div>
-      {sublabel && <p className="mt-2 text-base text-[#8197a4] truncate">{sublabel}</p>}
+      {captionTitle && (
+        <p className={`mt-2 text-base font-semibold text-white truncate ${fluid ? "" : "w-80"}`}>
+          {title}
+        </p>
+      )}
+      {sublabel && (
+        <p className={`text-base text-[#8197a4] truncate ${captionTitle ? "mt-0.5 text-sm" : "mt-2"}`}>
+          {sublabel}
+        </p>
+      )}
     </Link>
   );
 }
