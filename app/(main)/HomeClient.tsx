@@ -10,7 +10,7 @@ import { useEvents } from "@/hooks/useEvents";
 import { useChannels } from "@/hooks/useChannels";
 import { channelSlug } from "@/lib/sources";
 import { broadcastersForLeague } from "@/lib/leagues";
-import { curate, trendingScore, trendingNow, topRated, adultAnimation, hasGenre } from "@/lib/discovery";
+import { curate, trendingScore, trendingNow, topRated, adultAnimation, hasGenre, newReleases } from "@/lib/discovery";
 import { prewarmVod } from "@/lib/vodPrewarm";
 import { readCache, writeCache } from "@/lib/localCache";
 import type { CatalogItem } from "@/lib/types";
@@ -160,6 +160,23 @@ export default function HomeClient({
   // series, so the row routes as series.
   const adultCartoons = useMemo(() => adultAnimation(series).slice(0, 18), [series]);
 
+  // "New on TVSpot" — newest across BOTH kinds, ranked by how watched they are
+  // so the row leads with recent titles people want rather than the most
+  // obscure thing carrying this year's date. Release-recency, not date-added:
+  // the catalog has no added-at field (see newReleases).
+  // media_type carries the kind through the rail, which otherwise renders one
+  // kind for the whole row.
+  const newOnTVSpot = useMemo(
+    () =>
+      [
+        ...newReleases(movies).slice(0, 12).map((it) => ({ ...it, media_type: "movie" })),
+        ...newReleases(series).slice(0, 12).map((it) => ({ ...it, media_type: "tv" })),
+      ]
+        .sort((a, b) => trendingScore(b) - trendingScore(a))
+        .slice(0, 18),
+    [movies, series],
+  );
+
   const actionMovies = useMemo(
     () => movies.filter((m) => hasGenre(m, "Action", 28)).slice(0, 18),
     [movies],
@@ -191,6 +208,14 @@ export default function HomeClient({
       )}
       {trendingSeries.length > 0 && (
         <PosterRail title="Trending Series" items={trendingSeries} kind="series" />
+      )}
+
+      {newOnTVSpot.length > 0 && (
+        <PosterRail
+          title="New on TVSpot"
+          items={newOnTVSpot}
+          kind={(it) => (it.media_type === "tv" ? "series" : "movie")}
+        />
       )}
 
       {adultCartoons.length > 0 && (

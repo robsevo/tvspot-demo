@@ -7,7 +7,7 @@ import { useChannels } from "@/hooks/useChannels";
 import { useEvents } from "@/hooks/useEvents";
 import { useTrendingCatalog } from "@/hooks/useTrendingCatalog";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
-import { trendingNow, topRated, adultAnimation, hasGenre } from "@/lib/discovery";
+import { trendingNow, topRated, adultAnimation, hasGenre, newReleases, trendingScore } from "@/lib/discovery";
 import { carriersForLeague } from "@/lib/leagues";
 import { channelSlug } from "@/lib/sources";
 import { nowAndNext } from "@/lib/tvEpg";
@@ -173,6 +173,20 @@ export default function TvHomePage() {
             <span className="text-base font-medium">Full guide</span>
           </Link>
         ),
+      },
+      // Newest titles across BOTH kinds, popular first — see newReleases for
+      // why "new" is release-recency and not date-added. Merged and ranked on
+      // the raw items before mapping, so the two kinds interleave by how
+      // watched they are rather than movies-then-series.
+      {
+        title: "New on TVSpot",
+        items: [
+          ...newReleases(movies).slice(0, 12).map((it) => ({ it, kind: "movie" as const })),
+          ...newReleases(series).slice(0, 12).map((it) => ({ it, kind: "series" as const })),
+        ]
+          .sort((a, b) => trendingScore(b.it) - trendingScore(a.it))
+          .slice(0, 18)
+          .map(({ it, kind }) => vodItem(it, kind, "NEW")),
       },
       // Adult animation is a series-only row (matched by curated title stems,
       // since the catalog carries no maturity sub-genre) — same as the web home.

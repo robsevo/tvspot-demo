@@ -5,10 +5,14 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import PosterCard from "./PosterCard";
 import type { CatalogItem } from "@/lib/types";
 
+type Kind = "movie" | "series";
+
 interface Props {
   title: string;
   items: CatalogItem[];
-  kind: "movie" | "series";
+  /** One kind for the whole row, or a resolver for rows that mix them (the
+   *  "New on TVSpot" row carries both, tagged via media_type). */
+  kind: Kind | ((item: CatalogItem) => Kind);
   children?: ReactNode;
   /** When set, render a "See all" button in the header that opens the full grid. */
   onSeeAll?: () => void;
@@ -57,9 +61,11 @@ export default function PosterRail({ title, items, kind, children, onSeeAll }: P
           ref={scrollRef}
           className="poster-rail flex gap-2.5 overflow-x-auto px-4 pb-1"
         >
-          {items.map((item, i) => (
+          {items.map((item, i) => {
+            const itemKind = typeof kind === "function" ? kind(item) : kind;
+            return (
             <div
-              key={`${item.tmdb_id}-${kind}`}
+              key={`${item.tmdb_id}-${itemKind}`}
               className="animate-fade-in-up flex-shrink-0 w-[40vw] sm:w-[180px] md:w-[200px] lg:w-[220px]"
               style={{ animationDelay: `${Math.min(i * 0.03, 0.3)}s` }}
             >
@@ -67,13 +73,14 @@ export default function PosterRail({ title, items, kind, children, onSeeAll }: P
                 tmdbId={item.tmdb_id}
                 title={item.title}
                 poster={item.poster}
-                kind={kind}
+                kind={itemKind}
                 service={item.service}
                 rating={item.vote_average || (item.rating ? Number(item.rating) : undefined)}
                 year={item.year || undefined}
               />
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Right arrow */}

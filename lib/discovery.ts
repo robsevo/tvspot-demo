@@ -86,6 +86,30 @@ export function topRated(items: CatalogItem[], sinceYear = 2010): CatalogItem[] 
 }
 
 /**
+ * "New on TVSpot" — the newest titles we carry, most popular first.
+ *
+ * NB this is newest by RELEASE year, not by when a title appeared in our
+ * catalog: the backend items carry no date-added field (see CatalogItem), so
+ * genuine "recently added" is not derivable. Release-recency is the honest
+ * approximation, and it is what a viewer scanning the row actually reads it as.
+ *
+ * Sorted by trendingScore rather than year alone, so the row leads with recent
+ * titles people are actually watching instead of the most obscure thing that
+ * happens to carry this year's date. Shared by the web and TV homes.
+ */
+export function newReleases(items: CatalogItem[], withinYears = 2): CatalogItem[] {
+  const nowYear = 2026;
+  const cutoff = nowYear - (withinYears - 1);
+  return curate(items)
+    .filter((it) => {
+      const y = Number(it.year) || 0;
+      // `nowYear + 1` mirrors topRated: catalogs list next year's titles early.
+      return y >= cutoff && y <= nowYear + 1;
+    })
+    .sort((a, b) => trendingScore(b) - trendingScore(a));
+}
+
+/**
  * Genre membership by TMDB genre_id or by the enriched genre name — the
  * catalog carries whichever the enrichment step managed to attach. Shared by
  * the web home and the TV home so both build the same genre rows.
