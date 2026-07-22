@@ -473,10 +473,10 @@ export default function TvSeriesPage() {
         )}
       </div>
 
-      {/* More like this */}
+      {/* You might also like */}
       {related.length > 0 && (
         <div className="relative bg-[#00050d] pb-16 pt-2">
-          <TvRail title="Customers also watched">
+          <TvRail title="You might also like">
             {related.map((s) => (
               <TvPosterCard
                 key={s.tmdb_id}
