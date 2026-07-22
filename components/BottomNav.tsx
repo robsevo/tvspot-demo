@@ -2,13 +2,24 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Tv, Film, Search, Library } from "lucide-react";
+import { Home, Tv, Film, MonitorPlay, Library } from "lucide-react";
 
+/**
+ * Mirrors the TV header's sections: Home / Live TV / Movies / TV Shows.
+ *
+ * Movies and TV Shows replace the single "VOD" tab, which opened a provider
+ * picker — you had to choose a provider before seeing a single title. The
+ * picker still exists at /vod and is where a provider rail's "See all" lands.
+ *
+ * Search left the bar rather than being squeezed in: there are only five
+ * comfortable slots at 375px, and the TopBar already carries a Search button on
+ * every page, so nothing became unreachable.
+ */
 const tabs = [
   { href: "/", label: "Home", icon: Home },
   { href: "/live", label: "Live", icon: Tv },
-  { href: "/vod", label: "VOD", icon: Film },
-  { href: "/search", label: "Search", icon: Search },
+  { href: "/movies", label: "Movies", icon: Film },
+  { href: "/shows", label: "TV Shows", icon: MonitorPlay },
   { href: "/my-list", label: "My List", icon: Library },
 ];
 

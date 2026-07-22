@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { Suspense, useState, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { useCatalog, useServiceCatalog } from "@/hooks/useCatalog";
 import ServicePicker from "@/components/ServicePicker";
 import PosterRail from "@/components/PosterRail";
@@ -29,9 +30,15 @@ function getItemGenres(item: CatalogItem): string[] {
   return genres;
 }
 
-export default function VodPage() {
+function VodPageInner() {
   const { services } = useCatalog();
-  const [selectedService, setSelectedService] = useState<string | null>(null);
+  const params = useSearchParams();
+  // ?service= opens straight into that provider — the target of a "See all" on
+  // a provider rail in Movies/TV Shows. Initial state only, so the in-page
+  // back-to-picker control still works without fighting the URL.
+  const [selectedService, setSelectedService] = useState<string | null>(
+    () => params.get("service"),
+  );
   const [selectedGenre, setSelectedGenre] = useState("All");
   // "See all" full-catalog view for one kind within the selected provider.
   const [seeAll, setSeeAll] = useState<"movie" | "series" | null>(null);
@@ -203,5 +210,14 @@ export default function VodPage() {
         </div>
       )}
     </div>
+  );
+}
+/** useSearchParams needs a Suspense boundary in the App Router — same wrapper
+ *  pattern as the TV's /tv/vod/all. */
+export default function VodPage() {
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <VodPageInner />
+    </Suspense>
   );
 }

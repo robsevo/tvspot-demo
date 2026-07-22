@@ -202,7 +202,7 @@ export default function TvMoviePage() {
             </p>
           )}
 
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-5 w-max">
             <button
               data-tv
               data-tv-autofocus
@@ -211,7 +211,7 @@ export default function TvMoviePage() {
                 setFromStart(false);
                 setPlaying(true);
               }}
-              className="flex items-center gap-3 bg-white text-black text-xl font-bold px-8 py-3.5 rounded-lg disabled:opacity-50"
+              className="flex items-center gap-3 shrink-0 whitespace-nowrap bg-white text-black text-lg font-bold px-6 py-3.5 rounded-lg disabled:opacity-50"
             >
               <Play className="w-6 h-6 fill-black" />
               {sources.length === 0
@@ -228,7 +228,7 @@ export default function TvMoviePage() {
                   setFromStart(true);
                   setPlaying(true);
                 }}
-                className="flex items-center gap-3 bg-white/15 text-white text-xl font-semibold px-8 py-3.5 rounded-lg"
+                className="flex items-center gap-3 shrink-0 whitespace-nowrap bg-white/15 text-white text-lg font-semibold px-6 py-3.5 rounded-lg"
               >
                 <RotateCcw className="w-5 h-5" />
                 From beginning
@@ -239,7 +239,7 @@ export default function TvMoviePage() {
               data-tv
               onClick={toggleList}
               aria-label={listed ? "Remove from My Stuff" : "Add to My Stuff"}
-              className="tv-pill group flex items-center gap-3 bg-white/15 text-white text-lg font-semibold px-6 py-3.5 rounded-lg focus:outline-none focus:bg-white focus:text-black"
+              className="tv-pill group flex items-center gap-3 shrink-0 whitespace-nowrap bg-white/15 text-white text-lg font-semibold px-6 py-3.5 rounded-lg focus:outline-none focus:bg-white focus:text-black"
             >
               {listed ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
               My Stuff
