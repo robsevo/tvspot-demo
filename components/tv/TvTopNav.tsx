@@ -56,65 +56,84 @@ export default function TvTopNav() {
     }`;
 
   return (
+    /*
+     * THREE GROUPS, not one long row with a spacer.
+     *
+     * The utilities used to be pushed right by an `ml-auto` spacer, which only
+     * works while there is FREE SPACE left to absorb — and the Samsung's system
+     * font is wider than the Fire TV's, so at 1920 (both TVs get the same fixed
+     * viewport) the row overflowed, the auto margin collapsed to zero, and
+     * Search/My Stuff/Settings bunched up against the browse tabs.
+     *
+     * Right-alignment is now structural: left and right groups never shrink,
+     * and the middle (provider shortcuts) is the only flexible part, so it
+     * absorbs the squeeze and clips instead of shoving the utilities around.
+     */
     <nav className="flex items-center gap-3 px-16 pt-5 pb-3 overflow-x-hidden">
-      {/* Brand mark, top-left. Decorative (no data-tv), so it never steals a
-          D-pad stop — the leftmost focusable stays the Home tab. */}
-      <img
-        src="/tvspot-logo.svg"
-        alt="TVSpot"
-        className="w-10 h-10 mr-2 shrink-0 rounded-lg"
-      />
-      {TABS.map(({ href, label }) => (
-        <Link key={href} href={href} data-tv className={pillClass(isActive(href))}>
-          {label}
-        </Link>
-      ))}
+      <div className="flex items-center gap-3 shrink-0">
+        {/* Brand mark, top-left. Decorative (no data-tv), so it never steals a
+            D-pad stop — the leftmost focusable stays the Home tab. */}
+        <img
+          src="/tvspot-logo.svg"
+          alt="TVSpot"
+          className="w-10 h-10 mr-2 shrink-0 rounded-lg"
+        />
+        {TABS.map(({ href, label }) => (
+          <Link key={href} href={href} data-tv className={pillClass(isActive(href))}>
+            {label}
+          </Link>
+        ))}
+      </div>
 
-      {services.length > 0 && (
-        <>
-          <span className="w-px h-7 bg-white/25 mx-3 shrink-0" />
-          {services.slice(0, HEADER_PROVIDERS).map((svc) => (
-            <Link
-              key={svc}
-              href={`/tv/vod?service=${encodeURIComponent(svc)}`}
-              data-tv
-              onFocus={() => prewarmService(svc)}
-              className="tv-pill px-4 py-2 rounded-lg text-lg font-bold tracking-wide text-white/90 whitespace-nowrap focus:outline-none focus:bg-white focus:text-black"
-            >
-              {svc}
-            </Link>
-          ))}
-        </>
-      )}
+      {/* The give in the layout. min-w-0 is what actually lets a flex item
+          shrink below its content width. */}
+      <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden">
+        {services.length > 0 && (
+          <>
+            <span className="w-px h-7 bg-white/25 mx-3 shrink-0" />
+            {services.slice(0, HEADER_PROVIDERS).map((svc) => (
+              <Link
+                key={svc}
+                href={`/tv/vod?service=${encodeURIComponent(svc)}`}
+                data-tv
+                onFocus={() => prewarmService(svc)}
+                className="tv-pill px-4 py-2 rounded-lg text-lg font-bold tracking-wide text-white/90 whitespace-nowrap shrink-0 focus:outline-none focus:bg-white focus:text-black"
+              >
+                {svc}
+              </Link>
+            ))}
+          </>
+        )}
 
-      <span className="w-px h-7 bg-white/25 mx-3 shrink-0" />
-      <Link
-        href="/tv/vod"
-        data-tv
-        className={`tv-pill flex items-center gap-2.5 px-4 py-2 rounded-lg text-lg whitespace-nowrap focus:outline-none focus:bg-white focus:text-black ${
-          pathname === "/tv/vod" ? ACTIVE_PILL : IDLE_PILL
-        }`}
-      >
-        <LayoutGrid className="w-5 h-5" />
-        All providers
-      </Link>
-
-      {/* Pushed to the far right so the browse tabs keep the natural left edge. */}
-      <span className="ml-auto" />
-      {UTILITY.map(({ href, label, Icon }) => (
+        <span className="w-px h-7 bg-white/25 mx-3 shrink-0" />
         <Link
-          key={href}
-          href={href}
+          href="/tv/vod"
           data-tv
-          aria-label={label}
-          className={`tv-pill flex items-center gap-2.5 px-4 py-2 rounded-lg text-lg whitespace-nowrap focus:outline-none focus:bg-white focus:text-black ${
-            isActive(href) ? ACTIVE_PILL : IDLE_PILL
+          className={`tv-pill flex items-center gap-2.5 px-4 py-2 rounded-lg text-lg whitespace-nowrap shrink-0 focus:outline-none focus:bg-white focus:text-black ${
+            pathname === "/tv/vod" ? ACTIVE_PILL : IDLE_PILL
           }`}
         >
-          <Icon className="w-5 h-5" />
-          {label}
+          <LayoutGrid className="w-5 h-5" />
+          All providers
         </Link>
-      ))}
+      </div>
+
+      <div className="flex items-center gap-3 shrink-0">
+        {UTILITY.map(({ href, label, Icon }) => (
+          <Link
+            key={href}
+            href={href}
+            data-tv
+            aria-label={label}
+            className={`tv-pill flex items-center gap-2.5 px-4 py-2 rounded-lg text-lg whitespace-nowrap focus:outline-none focus:bg-white focus:text-black ${
+              isActive(href) ? ACTIVE_PILL : IDLE_PILL
+            }`}
+          >
+            <Icon className="w-5 h-5" />
+            {label}
+          </Link>
+        ))}
+      </div>
     </nav>
   );
 }

@@ -588,6 +588,55 @@ video::cue {
   border-radius: 9999px !important;
 }
 
+/* Tailwind v4 drives borders, rings and shadows through `--tw-*` custom
+   properties, and seeds their defaults in TWO places, NEITHER of which this
+   engine gets:
+     1. `@property { initial-value: … }` — Chromium 85+.
+     2. a `*` block gated behind a Safari/Firefox-only @supports probe
+        (`-webkit-hyphens` / `-moz-orient`), which Chromium fails.
+
+   An unset custom property makes its consumer "invalid at computed-value
+   time", so the declaration resolves to `unset` and the property falls back to
+   its INITIAL value — it does not fall back to an earlier rule. So:
+
+     border-t  -> border-top-style: var(--tw-border-style)  -> none  (no line)
+     ring-1    -> box-shadow: var(--tw-ring-shadow), …      -> nothing
+
+   which is why the Samsung lost the seam under the hero and the hairline ring
+   around every poster/channel/event card and the active nav pill, while the
+   Fire TV's Chromium 108 draws them all. Seed the defaults ourselves, mirroring
+   Tailwind's own values. Modern engines already have them and never see this. */
+@supports not (translate: 0) {
+  *,
+  ::before,
+  ::after {
+    --tw-border-style: solid;
+    --tw-outline-style: solid;
+    --tw-ring-inset: initial;
+    --tw-ring-color: initial;
+    --tw-ring-offset-width: 0px;
+    --tw-ring-offset-color: #fff;
+    --tw-ring-shadow: 0 0 #0000;
+    --tw-ring-offset-shadow: 0 0 #0000;
+    --tw-inset-ring-color: initial;
+    --tw-inset-ring-shadow: 0 0 #0000;
+    --tw-inset-shadow: 0 0 #0000;
+    --tw-shadow: 0 0 #0000;
+    --tw-shadow-color: initial;
+  }
+
+  /* Chromium only began following border-radius when painting OUTLINES in 94,
+     so the D-pad focus cursor was a hard rectangle around rounded cards here
+     while the Fire TV drew it rounded. box-shadow has always followed the
+     radius: the first (background-coloured) ring reproduces outline-offset,
+     the second is the cursor itself. The focus rule already sets a radius on
+     the focused element, so both follow it. */
+  .tv-root [data-tv]:focus {
+    outline: none;
+    box-shadow: 0 0 0 4px #00050d, 0 0 0 7px #ffffff;
+  }
+}
+
 /* Tailwind v4 builds transforms from the STANDALONE `translate` / `scale` /
    `rotate` properties (Chromium 104+), not `transform` — and seeds their
    custom properties with `@property` (Chromium 85+). On Chromium 63 both are
