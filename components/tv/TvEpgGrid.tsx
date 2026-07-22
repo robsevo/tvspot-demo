@@ -130,8 +130,8 @@ export default function TvEpgGrid({
     <div className="overflow-auto h-full">
       <div style={{ width: width + CHAN_W }} className="relative">
         {/* Time ruler */}
-        <div className="sticky top-0 z-30 flex bg-[#00050d]" style={{ height: RULER_H }}>
-          <div className="sticky left-0 z-10 shrink-0 bg-[#00050d]" style={{ width: CHAN_W }} />
+        <div className="sticky top-0 z-30 flex bg-[#0b1524]" style={{ height: RULER_H }}>
+          <div className="sticky left-0 z-10 shrink-0 bg-[#0b1524]" style={{ width: CHAN_W }} />
           <div className="relative" style={{ width }}>
             {ticks.map((t) => (
               <span
@@ -157,7 +157,7 @@ export default function TvEpgGrid({
           <div key={c.name} className="flex" style={{ height: ROW_H }}>
             {/* Sticky channel cell */}
             <div
-              className="sticky left-0 z-10 shrink-0 bg-[#00050d] flex items-center gap-2 pr-3"
+              className="sticky left-0 z-10 shrink-0 bg-[#0b1524] flex items-center gap-2 pr-3"
               style={{ width: CHAN_W }}
             >
               <div className="w-24 h-16 shrink-0 flex items-center justify-center rounded bg-[#121a24] ring-1 ring-white/10">

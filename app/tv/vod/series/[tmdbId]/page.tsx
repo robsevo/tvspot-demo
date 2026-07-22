@@ -381,7 +381,7 @@ export default function TvSeriesPage() {
       </div>
 
       {/* Episodes */}
-      <div className="relative bg-[#00050d] px-16 pb-4">
+      <div className="relative bg-[#0b1524] px-16 pb-4">
         {!detail && <p className="text-xl text-[#8197a4] mb-6">Loading episodes…</p>}
 
         {detail && detail.seasons.length > 1 && (
@@ -482,7 +482,7 @@ export default function TvSeriesPage() {
 
       {/* You might also like */}
       {related.length > 0 && (
-        <div className="relative bg-[#00050d] pb-16 pt-2">
+        <div className="relative bg-[#0b1524] pb-16 pt-2">
           <TvRail title="You might also like">
             {related.map((s) => (
               <TvPosterCard

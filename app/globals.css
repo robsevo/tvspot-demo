@@ -424,31 +424,49 @@ video::cue {
   font-family: var(--font-tv), Arial, Helvetica, sans-serif;
   cursor: none;
   scrollbar-width: none;
-  --tv-bg: #00050d;
+  --tv-bg: #0b1524;
   --tv-card: #1a242f;
   --tv-accent: #1399ff;
   --tv-live: #c7040c;
   background-color: var(--tv-bg);
-  /* Signature blue ambience — deliberately SUBTLE (Google-TV-calm), not a
-     "blue header band". The old top-left radial was strong enough (0.62) that
-     on pages without a full-bleed hero (Live TV) it read as a weird blue bar
-     across the top vs. the near-black body. Pulled higher, smaller, and much
-     fainter so it's just a whisper of the app's blue identity over a near-black
-     base. Handwritten rgba layers — they must paint on Chromium 63. Fixed, so
-     content scrolls over them. */
+  /* Signature blue ambience. Lifted from the old near-black (#00050d) to a
+     lighter blue base with a SILVER sheen through the gradient — the app reads
+     as a lit blue-steel surface rather than a black void.
+
+     Still deliberately restrained (Google-TV-calm), not a "blue header band":
+     an earlier version ran the top-left radial at 0.62 and on pages without a
+     full-bleed hero (Live TV) it read as a weird blue bar across the top. The
+     blue stays high and soft; the silver layer is what does the lightening,
+     spread wide and low-alpha so it never becomes a visible blob.
+
+     Every stop fades to rgba(11,21,36,0) — the base as transparent — so the
+     layers dissolve into it instead of into black. Handwritten rgba throughout:
+     these must paint on Chromium 63, which drops color-mix. Fixed attachment on
+     BOTH engines (see the note in the legacy block — do not diverge it). */
   background-image:
+    /* blue, top-left */
     radial-gradient(
       110% 85% at 12% -20%,
-      rgba(37, 84, 162, 0.30) 0%,
-      rgba(19, 46, 92, 0.16) 42%,
-      rgba(0, 5, 13, 0) 66%
+      rgba(52, 104, 190, 0.32) 0%,
+      rgba(30, 62, 112, 0.17) 42%,
+      rgba(11, 21, 36, 0) 66%
     ),
+    /* silver sheen, upper-right — the lightening pass */
+    radial-gradient(
+      85% 65% at 82% -12%,
+      rgba(196, 212, 234, 0.10) 0%,
+      rgba(150, 172, 200, 0.05) 45%,
+      rgba(11, 21, 36, 0) 70%
+    ),
+    /* cool steel wash along the bottom, keeps the lower half from going flat */
     radial-gradient(
       80% 60% at 100% 100%,
-      rgba(21, 94, 130, 0.16) 0%,
-      rgba(0, 5, 13, 0) 58%
+      rgba(58, 128, 166, 0.15) 0%,
+      rgba(11, 21, 36, 0) 58%
     ),
-    linear-gradient(to bottom, rgba(0, 5, 13, 0) 60%, rgba(0, 0, 0, 0.45) 100%);
+    /* gentler than before: the base is lighter now, so the old 0.45 black
+       bottom fought the lift instead of grounding it */
+    linear-gradient(to bottom, rgba(11, 21, 36, 0) 62%, rgba(0, 0, 0, 0.30) 100%);
   background-attachment: fixed;
 }
 .tv-root ::-webkit-scrollbar {
@@ -507,7 +525,7 @@ video::cue {
 
 /* ── TV gradients, handwritten ──────────────────────────────────────────────
    Tailwind v4 gradient utilities route their color stops through --tw-*
-   custom properties, and opacity-modified stops (via-[#00050d]/40) compile
+   custom properties, and opacity-modified stops (via-[#0b1524]/40) compile
    to color-mix() INSIDE those variables. postcss-preset-env can only lower
    color-mix it sees in a plain property value — not one that appears after
    var() substitution — so on the TV's Chromium 63 the substituted
@@ -517,13 +535,13 @@ video::cue {
    them fine. Every TV surface uses these rgba classes instead — same
    technique as the .tv-root radial glow, which always painted. */
 .tv-fade-hero-l {
-  background: linear-gradient(to right, #00050d 0%, rgba(0, 5, 13, 0.72) 34%, rgba(0, 5, 13, 0) 72%);
+  background: linear-gradient(to right, #0b1524 0%, rgba(11, 21, 36, 0.72) 34%, rgba(11, 21, 36, 0) 72%);
 }
 .tv-fade-hero-b {
-  background: linear-gradient(to top, #00050d 0%, rgba(0, 5, 13, 0.82) 34%, rgba(0, 5, 13, 0) 72%);
+  background: linear-gradient(to top, #0b1524 0%, rgba(11, 21, 36, 0.82) 34%, rgba(11, 21, 36, 0) 72%);
 }
 .tv-fade-rails {
-  background: linear-gradient(to bottom, rgba(0, 5, 13, 0) 0%, rgba(0, 5, 13, 0.92) 20%, #00050d 52%);
+  background: linear-gradient(to bottom, rgba(11, 21, 36, 0) 0%, rgba(11, 21, 36, 0.92) 20%, #0b1524 52%);
 }
 .tv-fade-card-title {
   background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
@@ -639,7 +657,7 @@ video::cue {
      the focused element, so both follow it. */
   .tv-root [data-tv]:focus {
     outline: none;
-    box-shadow: 0 0 0 4px #00050d, 0 0 0 7px #ffffff;
+    box-shadow: 0 0 0 4px #0b1524, 0 0 0 7px #ffffff;
   }
 
   /* NOTE: do NOT override background-attachment here.

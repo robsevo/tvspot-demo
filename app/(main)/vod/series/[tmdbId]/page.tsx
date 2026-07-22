@@ -328,7 +328,7 @@ export default function VodSeriesPage() {
 
   if (loading) {
     return (
-      <div className="pt-3 min-h-screen pb-20 animate-pulse">
+      <div className="pt-14 min-h-screen pb-20 animate-pulse">
         <div className="aspect-[16/9] bg-card mb-4" />
         <div className="px-4 space-y-3">
           <div className="h-6 bg-card rounded w-2/3" />
@@ -341,7 +341,7 @@ export default function VodSeriesPage() {
 
   if (!detail) {
     return (
-      <div className="pt-3 min-h-screen pb-20 px-4 text-center pt-20">
+      <div className="min-h-screen pb-20 px-4 text-center pt-20">
         {fetchFailed ? (
           <>
             <p className="text-text-secondary">Couldn&apos;t load this title</p>
@@ -367,8 +367,8 @@ export default function VodSeriesPage() {
   }
 
   return (
-    <div className="pt-3 min-h-screen pb-20 animate-page-rise">
-      <Link href="/vod" className="absolute top-14 left-3 z-10 w-9 h-9 rounded-full glass-card flex items-center justify-center">
+    <div className="relative pt-14 min-h-screen pb-20 animate-page-rise">
+      <Link href="/vod" className="absolute top-16 left-3 z-10 w-9 h-9 rounded-full glass-card flex items-center justify-center">
         <ChevronLeft className="w-5 h-5 text-white" />
       </Link>
 

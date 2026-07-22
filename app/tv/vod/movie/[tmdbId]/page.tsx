@@ -250,7 +250,7 @@ export default function TvMoviePage() {
 
       {/* More like this — scrolls up over the solid page bg, Prime-style. */}
       {related.length > 0 && (
-        <div className="relative bg-[#00050d] pb-16 -mt-8">
+        <div className="relative bg-[#0b1524] pb-16 -mt-8">
           <TvRail title="More like this">
             {related.map((m) => (
               <TvPosterCard
