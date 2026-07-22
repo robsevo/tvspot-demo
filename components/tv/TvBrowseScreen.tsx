@@ -58,9 +58,11 @@ export interface TvBrowseRail {
   trailing?: ReactNode;
   /** Extra tile at the START of the row (e.g. the "Full guide" link). */
   leading?: ReactNode;
-  /** Opens a full grid of this row's category — renders a "See all" tile at
-   *  the end of the row (see TvRail). */
+  /** Opens a full grid of this row's category — renders a "See all" tile in
+   *  the row (see TvRail). */
   seeAllHref?: string;
+  /** Put that tile at the START of the row instead of the end. */
+  seeAllFirst?: boolean;
 }
 
 /** Rails painted on the very first frame — the hero plus one rail is a complete
@@ -332,6 +334,7 @@ export default function TvBrowseScreen({
                 key={rail.title}
                 title={rail.title}
                 seeAllHref={rail.seeAllHref}
+                seeAllFirst={rail.seeAllFirst}
                 leading={rail.leading}
               >
                 {rail.items.map((item, i) => {

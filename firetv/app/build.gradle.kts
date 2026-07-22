@@ -11,8 +11,13 @@ android {
         applicationId = "com.tvspot.tv"
         minSdk = 22            // Fire OS 5 / older Fire TV Sticks
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        // BUMP THIS whenever the launcher icon or banner changes. Fire OS caches
+        // app artwork keyed by package + versionCode, so reinstalling with the
+        // same code leaves the OLD icon on the home row no matter what the APK
+        // contains — which burned several reinstall+reboot cycles before it was
+        // spotted.
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildTypes {

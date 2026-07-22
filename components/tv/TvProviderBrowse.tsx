@@ -45,11 +45,16 @@ export default function TvProviderBrowse({ service }: { service: string }) {
         items: movies.slice(0, RAIL_MAX).map((m) => toItem(m, "movie")),
         // Only offer "See all" when the rail is actually truncated.
         seeAllHref: movies.length > RAIL_MAX ? allHref("movie") : undefined,
+        // Start of the row: these rails are a truncated slice of a much
+        // larger provider catalog, so "see everything" is a primary action,
+        // not an afterthought behind 18 posters.
+        seeAllFirst: true,
       },
       {
         title: "Series",
         items: series.slice(0, RAIL_MAX).map((s) => toItem(s, "series")),
         seeAllHref: series.length > RAIL_MAX ? allHref("series") : undefined,
+        seeAllFirst: true,
       },
     ];
   }, [movies, series, label, service]);
