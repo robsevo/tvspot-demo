@@ -22,15 +22,33 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
+    <!--
+      Icon + banner both follow Google's TV app-icon spec, which is what Fire OS
+      implements:
+        banner  16:9, mipmap-*  — 160x90 / 240x135 / 320x180 / 480x270 / 640x360
+        icon     1:1, mipmap-*  —  80    / 120     / 160     / 240     / 320
+      https://developer.android.com/design/ui/tv/guides/system/tv-app-icon-guidelines
+
+      Two things were wrong before and both produced the grey plate seen on the
+      AFTT stick: the banner lived in drawable/ at 1280x720 (so at this xhdpi
+      device it was not the 320x180 the row expects and got pillarboxed), and the
+      icons were phone sizes (96-384) rather than the TV ladder.
+
+      The "Your apps"/"Recently used" row draws the 1:1 ICON, not the banner —
+      which is why a wide banner alone could never fill it. Both assets are now
+      FULL-BLEED brand gradient with no alpha and no rounded corners, so whichever
+      one a given surface picks, no grey shows through.
+
+      roundIcon is deliberately gone: deprecated for TV per the same guidelines.
+    -->
     <application
         android:allowBackup="false"
-        android:banner="@drawable/banner"
+        android:banner="@mipmap/banner"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:largeHeap="true"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.TVSpot"
         android:usesCleartextTraffic="false"
@@ -38,6 +56,7 @@
 
         <activity
             android:name=".MainActivity"
+            android:banner="@mipmap/banner"
             android:configChanges="orientation|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode"
             android:exported="true"
             android:launchMode="singleTask"
