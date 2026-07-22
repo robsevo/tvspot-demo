@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useMyList } from "@/hooks/useMyList";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
 import TvRail from "@/components/tv/TvRail";
-import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
+import TvPosterCard from "@/components/tv/TvPosterCard";
 
 /** The side menu's "My Stuff": the watchlist and continue-watching, the two
  *  things a TV user saves. Empty until they add something. */
@@ -33,15 +33,17 @@ export default function TvMyStuffPage() {
           {continueWatching.length > 0 && (
             <TvRail title="Continue watching">
               {continueWatching.map((i) => (
-                <TvLandscapeCard
+                <TvPosterCard
                   key={`cw-${i.kind}-${i.tmdbId}-${i.season ?? 0}-${i.episode ?? 0}`}
                   tmdbId={i.tmdbId}
                   title={i.title}
-                  backdrop={i.poster}
+                  // Continue-watching stores a POSTER url; it was previously
+                  // passed as `backdrop`, which sent it down the w300 backdrop
+                  // ladder that posters don't publish.
+                  poster={i.poster}
                   kind={i.kind}
                   progress={i.progress}
                   sublabel={i.kind === "series" && i.episode ? `S${i.season ?? 1} E${i.episode}` : undefined}
-                  showTitle
                   tvAutoFocus
                 />
               ))}
@@ -51,14 +53,13 @@ export default function TvMyStuffPage() {
           {listed.length > 0 && (
             <TvRail title="Your watchlist">
               {listed.map((i, idx) => (
-                <TvLandscapeCard
+                <TvPosterCard
                   key={`ml-${i.kind}-${i.tmdbId}`}
                   tmdbId={i.tmdbId}
                   title={i.title}
                   poster={i.poster}
                   kind={i.kind}
                   provider={i.service}
-                  showTitle
                   tvAutoFocus={continueWatching.length === 0 && idx === 0}
                 />
               ))}

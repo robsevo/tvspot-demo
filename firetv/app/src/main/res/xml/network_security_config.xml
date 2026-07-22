@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        Trust the system CA store AND a bundled ISRG Root X1.
+
+        Fire OS 5 (Android 5.1, API 22) ships a CA store from ~2014. Vercel/
+        Let's Encrypt certs chain to ISRG Root X1, which post-dates that store,
+        so we bundle the PEM to let old Fire TV sticks validate the chain.
+
+        Cleartext stays disabled: the WebView loads over HTTPS and the /tv app
+        proxies any mixed-content streams the same way the browser does.
+    -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/isrgrootx1" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

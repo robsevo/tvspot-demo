@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TVSpot</string>
+
+    <string name="status_starting">Starting TVSpot…</string>
+    <string name="status_loading">Loading TVSpot…</string>
+    <string name="status_retrying">Still loading — retrying…</string>
+    <string name="error_unreachable">Can’t reach TVSpot — check the TV’s network, then press OK to retry.</string>
+    <string name="error_stalled">TVSpot isn’t responding. Press OK to try again.</string>
+</resources>

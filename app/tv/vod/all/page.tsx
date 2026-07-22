@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useServiceCatalog } from "@/hooks/useCatalog";
 import { useTvBack } from "@/components/tv/TvNav";
-import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
+import TvPosterCard from "@/components/tv/TvPosterCard";
 
 /** Cards painted on the first frame, then how many to add per step and how long
  *  to leave the renderer alone between steps. Same reasoning as the browse
@@ -57,9 +57,9 @@ function TvVodAllInner() {
           {loading ? "Loading catalog…" : "No titles in this category."}
         </p>
       ) : (
-        <div className="grid grid-cols-4 gap-6">
+        <div className="grid grid-cols-6 gap-6">
           {items.slice(0, budget).map((item, i) => (
-            <TvLandscapeCard
+            <TvPosterCard
               key={`${kind}-${item.tmdb_id}`}
               tmdbId={item.tmdb_id}
               title={item.title}
@@ -67,7 +67,6 @@ function TvVodAllInner() {
               poster={item.poster}
               kind={kind}
               provider={item.service}
-              showTitle
               fluid
               tvAutoFocus={i === 0}
             />

@@ -15,7 +15,7 @@ import { useSubtitles } from "@/hooks/useSubtitles";
 import TvVodPlayback from "@/components/tv/TvVodPlayback";
 import { findNextEpisode } from "@/lib/episodeMarkers";
 import TvRail from "@/components/tv/TvRail";
-import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
+import TvPosterCard from "@/components/tv/TvPosterCard";
 import { useTvBack } from "@/components/tv/TvNav";
 import type { SeriesDetail, Episode } from "@/lib/types";
 
@@ -440,7 +440,7 @@ export default function TvSeriesPage() {
                   className="w-72 shrink-0 text-left focus:outline-none"
                 >
                   {/* Explicit height + img-level rounding — same Tizen white-tile
-                      workaround as TvLandscapeCard (w-72 → 162px at 16:9). */}
+                      workaround as the poster cards (w-72 → 162px at 16:9). */}
                   <div className="relative h-[10.125rem] rounded-lg bg-[#1a242f] ring-1 ring-white/10">
                     {ep.still_url ? (
                       <img
@@ -478,14 +478,13 @@ export default function TvSeriesPage() {
         <div className="relative bg-[#00050d] pb-16 pt-2">
           <TvRail title="Customers also watched">
             {related.map((s) => (
-              <TvLandscapeCard
+              <TvPosterCard
                 key={s.tmdb_id}
                 tmdbId={s.tmdb_id}
                 title={s.title}
                 backdrop={s.backdrop}
                 poster={s.poster}
                 kind="series"
-                showTitle
               />
             ))}
           </TvRail>
