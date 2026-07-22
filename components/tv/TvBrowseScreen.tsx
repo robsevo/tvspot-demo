@@ -268,23 +268,7 @@ export default function TvBrowseScreen({
           copy is bottom-aligned and the art's subject sits right. It also lands
           on the left-to-right scrim, so a wordmark stays legible over any
           backdrop. Decorative — no data-tv, so it never takes a D-pad stop. */}
-      {sectionLogo && (
-        <div className="absolute left-16 top-6 z-20 pointer-events-none">
-          {sectionLogo.src ? (
-            <img
-              src={sectionLogo.src}
-              alt={sectionLogo.label}
-              referrerPolicy="no-referrer"
-              className="h-10 max-w-[240px] object-contain object-left"
-              style={{ opacity: 0.9 }}
-            />
-          ) : (
-            <span className="text-2xl font-bold text-white hero-text-shadow">
-              {sectionLogo.label}
-            </span>
-          )}
-        </div>
-      )}
+      {sectionLogo && <SectionMark src={sectionLogo.src} label={sectionLogo.label} />}
 
       <div className="relative z-10 flex-none h-[40vh] px-16 max-w-4xl flex flex-col justify-end pb-6">
         {/* Keyed inner wrapper does the crossfade; the dots below sit OUTSIDE it
@@ -525,6 +509,40 @@ function HeroCrest({
         <span className="text-4xl font-black text-white tabular-nums hero-text-shadow">
           {team.score}
         </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The provider mark in the hero's top-left.
+ *
+ * Forced WHITE, exactly as the web's ServicePicker does it: brightness-0
+ * flattens the artwork to a black silhouette and invert turns it white, which
+ * is idempotent for marks that are already white. Without it the brand
+ * wordmarks arrive in their own colors — several of them dark navy or black —
+ * and effectively vanish against the hero.
+ *
+ * Falls back to the provider's NAME on a 404 as well as on a missing URL. The
+ * wordmarks are remote (Wikimedia) and some do rot, and a broken <img> in the
+ * corner of the hero is worse than plain text.
+ */
+function SectionMark({ src, label }: { src: string | null; label: string }) {
+  const [failed, setFailed] = useState(false);
+
+  return (
+    <div className="absolute left-16 top-6 z-20 pointer-events-none">
+      {src && !failed ? (
+        <img
+          src={src}
+          alt={label}
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+          className="h-10 max-w-[240px] object-contain object-left brightness-0 invert"
+          style={{ opacity: 0.92 }}
+        />
+      ) : (
+        <span className="text-2xl font-bold text-white hero-text-shadow">{label}</span>
       )}
     </div>
   );
