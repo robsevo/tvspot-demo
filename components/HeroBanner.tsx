@@ -173,7 +173,14 @@ function CatalogContent({ item }: { item: CatalogItem }) {
           {item.service}
         </span>
       </div>
-      <p className="text-text-secondary text-xs line-clamp-2 mb-3 max-w-[85%]">{item.overview}</p>
+      {/* Was text-text-secondary (#b3b3b3): a mid grey with no shadow of its
+          own, sitting on bright backdrop art under the hero scrim — it muddied
+          into the shadow instead of reading against it. Same treatment as the
+          TV hero's overview (a light blue-grey plus the hero shadow), which
+          also brings the two clients closer. */}
+      <p className="text-[#cfdae4] text-xs line-clamp-2 mb-3 max-w-[85%] hero-text-shadow">
+        {item.overview}
+      </p>
       <div className="flex gap-3">
         <a href={href} className="flex items-center gap-1.5 bg-white text-black px-6 py-2.5 rounded-full text-sm font-semibold hover:bg-white/90 transition-all hover:scale-105 active:scale-95">
           <Play className="w-4 h-4 fill-black" /> Play

@@ -1,4 +1,5 @@
 import type { Viewport } from "next";
+import { Roboto } from "next/font/google";
 import { cookies, headers } from "next/headers";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -51,6 +52,31 @@ const tvPolyfills = readFileSync(
   "utf8",
 );
 
+/**
+ * One typeface for the TVs, shipped by us.
+ *
+ * The app never loaded a webfont — `--font-geist-sans` is a dead reference from
+ * the Next starter (next/font was never wired up), so the real rule is
+ * `body { font-family: Arial, Helvetica, sans-serif }`. Neither TV HAS Arial or
+ * Helvetica, so each fell back to its own system sans: Roboto/Ember on Fire OS,
+ * SamsungOne/Tizen Sans on the Samsung. Two different typefaces, every glyph
+ * different — and the Samsung's wider metrics are what overflowed the header.
+ *
+ * Roboto specifically, because it is what the Fire TV was already resolving to:
+ * this brings the Samsung TO the Fire TV rather than moving both somewhere new.
+ * next/font self-hosts the file at build time, so there is no third-party
+ * request for the TV to make. Variable weights (Chromium 62+) so the 500/600/
+ * 700/800 the TV UI uses all render true instead of being synthesised.
+ *
+ * Scoped to .tv-root in globals.css — mobile keeps its current system stack,
+ * since only the TVs were asked to match.
+ */
+const tvFont = Roboto({
+  subsets: ["latin"],
+  variable: "--font-tv",
+  display: "swap",
+});
+
 export default async function RootLayout({
   children,
 }: {
@@ -65,7 +91,7 @@ export default async function RootLayout({
 
 
   return (
-    <html lang="en">
+    <html lang="en" className={tvFont.variable}>
       <head>
         {/* viewport + theme-color come from generateViewport() above — Next
             emits those tags itself, and a hand-written one is overridden. */}

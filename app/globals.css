@@ -416,6 +416,12 @@ video::cue {
    Look: Prime-Video-inspired — deep navy surface, white focus ring with a
    subtle grow, sky-blue progress/badge accents. */
 .tv-root {
+  /* The TVs render in OUR font, not each panel's system sans. Without this the
+     Fire TV fell back to Roboto/Ember and the Samsung to SamsungOne/Tizen Sans
+     — two different typefaces, and the Samsung's wider metrics are what pushed
+     the header past 1920. Arial/Helvetica stay as the fallback chain for the
+     moment before the webfont lands (display: swap). Mobile is untouched. */
+  font-family: var(--font-tv), Arial, Helvetica, sans-serif;
   cursor: none;
   scrollbar-width: none;
   --tv-bg: #00050d;
@@ -634,6 +640,17 @@ video::cue {
   .tv-root [data-tv]:focus {
     outline: none;
     box-shadow: 0 0 0 4px #00050d, 0 0 0 7px #ffffff;
+  }
+
+  /* `background-attachment: fixed` is widely ignored or mis-composited on
+     embedded TV webviews, and when it fails the whole layered background can
+     go with it — leaving the flat #00050d base and a visibly DARKER app than
+     the Fire TV, which is what "it seems darker on the Samsung" describes.
+     `scroll` is universally supported and identical here in practice: .tv-root
+     itself barely scrolls, since the rails and grids each scroll in their own
+     inner pane. */
+  .tv-root {
+    background-attachment: scroll;
   }
 }
 
