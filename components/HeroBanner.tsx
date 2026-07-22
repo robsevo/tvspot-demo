@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Play, Info, Star, Sparkles, Clock } from "lucide-react";
 import { getServiceColor } from "@/lib/logos";
 import type { CatalogItem } from "@/lib/types";
-import type { EventTeam } from "@/lib/leagues";
+import { etTime, type EventTeam } from "@/lib/leagues";
 
 /** An event surfaced in the hero (built by HomePage from /api/events). */
 export interface HeroCarrier {
@@ -32,18 +32,6 @@ interface Props {
 }
 
 type Slide = { type: "catalog"; item: CatalogItem } | { type: "event"; ev: HeroEvent };
-
-/** Kickoff time in Eastern, e.g. "7:00 PM ET". */
-function etTime(iso: string): string {
-  try {
-    return (
-      new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }) +
-      " ET"
-    );
-  } catch {
-    return "";
-  }
-}
 
 export default function HeroBanner({ items, events = [] }: Props) {
   // Events lead the rotation (max 2), then the trending catalog backdrops.

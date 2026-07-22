@@ -96,12 +96,13 @@ export default function TvLivePage() {
           key,
           title: game.shortName,
           metaLine: [lg.name, game.detail].filter(Boolean).join(" · "),
-          overview: `Watch on ${carriers.slice(0, 4).map((c) => c.name).join(" · ")}`,
           live: game.state === "in",
           event: {
             game,
+            leagueKey: lg.key,
             leagueName: lg.name,
             leagueLogo: lg.logo,
+            carriers: carriers.slice(0, 4).map((c) => c.name),
             onOpen: () =>
               setPicked({
                 channel: carriers[0],

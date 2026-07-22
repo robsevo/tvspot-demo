@@ -7,7 +7,7 @@ import { useChannels } from "@/hooks/useChannels";
 import { useEvents } from "@/hooks/useEvents";
 import { useTrendingCatalog } from "@/hooks/useTrendingCatalog";
 import { useContinueWatching } from "@/hooks/useContinueWatching";
-import { trendingNow, topRated } from "@/lib/discovery";
+import { trendingNow, topRated, adultAnimation, hasGenre } from "@/lib/discovery";
 import { carriersForLeague } from "@/lib/leagues";
 import { channelSlug } from "@/lib/sources";
 import { nowAndNext } from "@/lib/tvEpg";
@@ -16,6 +16,13 @@ import TvChannelPanel from "@/components/tv/TvChannelPanel";
 import type { CatalogItem, Channel } from "@/lib/types";
 
 const CHANNELS_ON_HOME = 12;
+
+/** Genre rows the TV home shares with the web home (TMDB genre ids). */
+const GENRE_RAILS = [
+  { title: "Action", id: 28 },
+  { title: "Comedy", id: 35 },
+  { title: "Drama", id: 18 },
+] as const;
 
 function vodItem(
   it: CatalogItem,
@@ -90,12 +97,13 @@ export default function TvHomePage() {
           key: `ev-${lg.key}-${game.id}`,
           title: game.shortName,
           metaLine: [lg.name, game.detail].filter(Boolean).join(" · "),
-          overview: `Watch on ${carriers.slice(0, 4).map((c) => c.name).join(" · ")}`,
           live: game.state === "in",
           event: {
             game,
+            leagueKey: lg.key,
             leagueName: lg.name,
             leagueLogo: lg.logo,
+            carriers: carriers.slice(0, 4).map((c) => c.name),
             onOpen: () =>
               setPicked({
                 channel: carriers[0],
@@ -161,6 +169,9 @@ export default function TvHomePage() {
           </Link>
         ),
       },
+      // Adult animation is a series-only row (matched by curated title stems,
+      // since the catalog carries no maturity sub-genre) — same as the web home.
+      { title: "Adult Animation", items: adultAnimation(series).slice(0, 18).map((s) => vodItem(s, "series")) },
       {
         title: "Top rated movies",
         items: topRated(movies)
@@ -173,6 +184,13 @@ export default function TvHomePage() {
           .slice(0, 18)
           .map((s, i) => vodItem(s, "series", i < 10 ? "TOP 10" : undefined)),
       },
+      // Genre rows, matching the web home (same genres, same order). A row with
+      // too few matches is dropped rather than shown near-empty; TvBrowseScreen
+      // already skips rails with no items.
+      ...GENRE_RAILS.map(({ title, id }): TvBrowseRail => {
+        const items = movies.filter((m) => hasGenre(m, title, id)).slice(0, 18);
+        return { title, items: items.length >= 3 ? items.map((m) => vodItem(m, "movie")) : [] };
+      }),
     ];
   }, [cwItems, sportItems, homeChannels, movies, series]);
 

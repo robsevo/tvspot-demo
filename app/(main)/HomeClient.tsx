@@ -9,7 +9,7 @@ import { useEvents } from "@/hooks/useEvents";
 import { useChannels } from "@/hooks/useChannels";
 import { channelSlug } from "@/lib/sources";
 import { broadcastersForLeague } from "@/lib/leagues";
-import { curate, trendingScore, trendingNow, topRated, adultAnimation } from "@/lib/discovery";
+import { curate, trendingScore, trendingNow, topRated, adultAnimation, hasGenre } from "@/lib/discovery";
 import { prewarmVod } from "@/lib/vodPrewarm";
 import { readCache, writeCache } from "@/lib/localCache";
 import type { CatalogItem } from "@/lib/types";
@@ -29,13 +29,6 @@ const cacheTrending = (movies: CatalogItem[], series: CatalogItem[]) =>
     movies: movies.slice(0, TRENDING_CACHE_MAX),
     series: series.slice(0, TRENDING_CACHE_MAX),
   });
-
-/** Check whether a catalog item belongs to a genre by name or TMDB genre_id. */
-function hasGenre(item: CatalogItem, name: string, id: number): boolean {
-  if (item.genre_ids?.includes(id)) return true;
-  if (item.genres?.includes(name)) return true;
-  return false;
-}
 
 /**
  * Interactive Home. The catalog is fetched on the SERVER (see page.tsx) and passed

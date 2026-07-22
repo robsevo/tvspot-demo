@@ -7,17 +7,21 @@ import type { GameEvent } from "@/lib/leagues";
  *  Plain-CSS art/shadow classes on purpose (Tizen: Tailwind gradients drop). */
 export default function TvEventCard({
   game,
+  leagueKey,
   leagueName,
   leagueLogo,
   onOpen,
   onCardFocus,
 }: {
   game: GameEvent;
+  /** "ufc" → the crests are fighter photos, not club logos. */
+  leagueKey?: string;
   leagueName: string;
   leagueLogo?: string;
   onOpen: () => void;
   onCardFocus?: () => void;
 }) {
+  const portrait = leagueKey === "ufc";
   return (
     <button
       data-tv
@@ -55,9 +59,9 @@ export default function TvEventCard({
           {game.state === "in" ? "LIVE" : "UPCOMING"}
         </span>
         <div className="absolute inset-0 flex items-center justify-center gap-10 px-8">
-          <TeamCrest logo={game.away.logo} name={game.away.name} />
+          <TeamCrest logo={game.away.logo} name={game.away.name} portrait={portrait} />
           <span className="text-2xl font-black text-white/40">VS</span>
-          <TeamCrest logo={game.home.logo} name={game.home.name} />
+          <TeamCrest logo={game.home.logo} name={game.home.name} portrait={portrait} />
         </div>
       </div>
       <div className="flex items-center gap-3 px-5 py-3">
@@ -71,7 +75,7 @@ export default function TvEventCard({
   );
 }
 
-function TeamCrest({ logo, name }: { logo?: string; name: string }) {
+function TeamCrest({ logo, name, portrait }: { logo?: string; name: string; portrait?: boolean }) {
   return (
     <div className="flex flex-col items-center gap-2 min-w-0">
       {logo ? (
@@ -79,7 +83,11 @@ function TeamCrest({ logo, name }: { logo?: string; name: string }) {
           src={logo}
           alt=""
           referrerPolicy="no-referrer"
-          className="w-20 h-20 object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.6)]"
+          className={
+            portrait
+              ? "w-20 h-20 rounded-full object-cover bg-white/5 drop-shadow-[0_2px_6px_rgba(0,0,0,0.6)]"
+              : "w-20 h-20 object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.6)]"
+          }
         />
       ) : (
         <div className="w-20 h-20 rounded-full bg-white/10" />

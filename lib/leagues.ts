@@ -63,6 +63,22 @@ export interface GameEvent {
   broadcasts: string[];
 }
 
+/** Kickoff time in Eastern, e.g. "7:00 PM ET". Shared by the web hero and the
+ *  10-foot hero so a game reads the same on both. */
+export function etTime(iso: string): string {
+  try {
+    return (
+      new Date(iso).toLocaleTimeString("en-US", {
+        timeZone: "America/New_York",
+        hour: "numeric",
+        minute: "2-digit",
+      }) + " ET"
+    );
+  } catch {
+    return "";
+  }
+}
+
 export interface LeagueEvents {
   key: string;
   name: string;

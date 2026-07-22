@@ -35,10 +35,22 @@ export default function TvProviderBrowse({ service }: { service: string }) {
       ...trendingNow(series).slice(0, 6).map((s) => toItem(s, "series", "FEATURED")),
     ].slice(0, 12);
 
+    const allHref = (kind: "movie" | "series") =>
+      `/tv/vod/all?service=${encodeURIComponent(service)}&kind=${kind}`;
+
     return [
       { title: "Featured", items: featured },
-      { title: "Movies", items: movies.slice(0, RAIL_MAX).map((m) => toItem(m, "movie")) },
-      { title: "Series", items: series.slice(0, RAIL_MAX).map((s) => toItem(s, "series")) },
+      {
+        title: "Movies",
+        items: movies.slice(0, RAIL_MAX).map((m) => toItem(m, "movie")),
+        // Only offer "See all" when the rail is actually truncated.
+        seeAllHref: movies.length > RAIL_MAX ? allHref("movie") : undefined,
+      },
+      {
+        title: "Series",
+        items: series.slice(0, RAIL_MAX).map((s) => toItem(s, "series")),
+        seeAllHref: series.length > RAIL_MAX ? allHref("series") : undefined,
+      },
     ];
   }, [movies, series, label, service]);
 

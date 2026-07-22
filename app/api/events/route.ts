@@ -41,8 +41,117 @@ function team(c: EspnCompetitor | undefined) {
   };
 }
 
+/* ── MMA / UFC ────────────────────────────────────────────────────────────
+ * MMA is shaped differently from every other league we track, and reading it
+ * with the team code above is what produced "TBA vs TBA" cards wearing the UFC
+ * league logo:
+ *   - competitors carry `athlete`, and `team` is null — so team() fell through
+ *     to its "TBD" default and to no logo.
+ *   - ONE ESPN event is a whole fight card: `competitions` held 13 bouts for
+ *     UFC Fight Night: Ankalaev vs. Guskov. Reading competitions[0] showed a
+ *     curtain-jerker prelim, never the fight the card is named after.
+ * Verified against the live scoreboard on 2026-07-22.
+ */
+
+/** Bouts are listed prelims-first with the MAIN EVENT LAST (confirmed: the last
+ *  competition matched the event's own "… : Ankalaev vs. Guskov" title). */
+function mainEventLast<T>(comps: T[]): T | undefined {
+  return comps[comps.length - 1];
+}
+
+/** The bout's weight class — the only division/gender signal in the payload
+ *  (there is no gender field on the athlete, and `type.text` is always null;
+ *  `type.abbreviation` is what's actually populated). */
+function weightClass(comp: any): string {
+  return String(comp?.type?.abbreviation || comp?.type?.text || "");
+}
+
+/** Women's divisions come through abbreviated as "W Strawweight" /
+ *  "W Bantamweight" / "W Flyweight" — NOT "Women's …" (verified across all 23
+ *  UFC cards in 2026). Matching on a leading "W " token is what actually works;
+ *  it can't catch "Welterweight", which has no space after the W. */
+function isWomensBout(comp: any): boolean {
+  return /^w\s|women/i.test(weightClass(comp));
+}
+
+/** "W Strawweight" → "Women's Strawweight" for display; other classes as-is. */
+function weightClassLabel(comp: any): string {
+  const wc = weightClass(comp);
+  return /^w\s/i.test(wc) ? `Women's ${wc.slice(2)}` : wc;
+}
+
+/** ESPN athlete id, recovered from the fighter's player-card link — the
+ *  scoreboard payload has no id field of its own. */
+function athleteId(a: any): string | null {
+  for (const l of a?.links || []) {
+    const m = /\/id\/(\d+)\//.exec(String(l?.href || ""));
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** Fighters go by surname on a fight card ("Ankalaev vs Guskov"). The payload
+ *  has fullName/displayName/shortName but no lastName, so take the last token. */
+function lastName(full?: string): string {
+  const parts = String(full || "").trim().split(/\s+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "TBD";
+}
+
+/** A fighter as an EventTeam: surname + headshot instead of club + crest. The
+ *  headshot CDN is keyed by the athlete id (verified 200/real images; an
+ *  unknown id returns an empty file, which just renders as no portrait). */
+function fighter(c: any) {
+  const a = c?.athlete || {};
+  const id = athleteId(a);
+  return {
+    name: lastName(a.fullName || a.displayName),
+    abbrev: a.shortName as string | undefined,
+    logo: id ? `https://a.espncdn.com/i/headshots/mma/players/full/${id}.png` : undefined,
+    score: c?.score as string | undefined,
+  };
+}
+
+/**
+ * A fight card reduced to the fights people tune in for: the main event, plus
+ * the women's main event when the card has one. Each is emitted as its OWN
+ * GameEvent so it gets its own card and its own hero, rather than the whole
+ * card collapsing into a single row. Undercard and prelims are dropped.
+ */
+function mmaGames(ev: any): GameEvent[] {
+  const comps: any[] = ev?.competitions || [];
+  if (!comps.length) return [];
+
+  const main = mainEventLast(comps);
+  // The co-main women's bout, if any — skipped when the main event already is
+  // one, so a women's headliner isn't listed twice.
+  const womensMain = [...comps].reverse().find((c) => isWomensBout(c) && c !== main);
+
+  return [main, ...(womensMain ? [womensMain] : [])]
+    .filter(Boolean)
+    .map((comp: any) => {
+      const cs: any[] = comp.competitors || [];
+      const a = fighter(cs[0]);
+      const b = fighter(cs[1]);
+      const st = comp?.status?.type || ev?.status?.type || {};
+      const weight = weightClassLabel(comp);
+      const status = st.shortDetail || st.detail || "";
+      return {
+        id: String(comp.id || ev.id),
+        shortName: `${a.name} vs ${b.name}`,
+        // No home/away in a cage; competitor order is ESPN's billing order.
+        home: a,
+        away: b,
+        dateUtc: comp.date || ev.date,
+        state: (st.state as GameEvent["state"]) || "pre",
+        detail: [weight, status].filter(Boolean).join(" · "),
+        broadcasts: pickBroadcasts(comp),
+      };
+    });
+}
+
 async function fetchLeague(date: string, espnPath: string): Promise<{ logo?: string; games: GameEvent[] } | null> {
   const url = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${date}`;
+  const isMma = espnPath.startsWith("mma/");
   try {
     const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12000) });
     if (!res.ok) return null;
@@ -50,6 +159,12 @@ async function fetchLeague(date: string, espnPath: string): Promise<{ logo?: str
     const leagueLogo = data?.leagues?.[0]?.logos?.[0]?.href as string | undefined;
     const games: GameEvent[] = [];
     for (const ev of data?.events || []) {
+      // A fight card is one event holding every bout — normalized separately to
+      // the headline fights (see mmaGames).
+      if (isMma) {
+        games.push(...mmaGames(ev));
+        continue;
+      }
       const comp = (ev.competitions || [])[0] || {};
       const competitors: EspnCompetitor[] = comp.competitors || [];
       const home = competitors.find((c) => c.homeAway === "home") || competitors[0];

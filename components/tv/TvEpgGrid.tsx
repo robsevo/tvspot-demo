@@ -6,16 +6,22 @@ import { LogoImage } from "@/components/LogoImage";
 import { channelSlug } from "@/lib/sources";
 import type { Channel, EpgProgram } from "@/lib/types";
 
-/** Pixels per minute — 6 → 360px per hour, a 5h window ≈ 1800px wide. */
-const PX_PER_MIN = 6;
+/** Pixels per minute — 8 → 480px per hour, a 5h window ≈ 2400px wide. */
+const PX_PER_MIN = 8;
 /** Guide window: previous half-hour → +5h. */
 const WINDOW_HOURS = 5;
-const ROW_H = 76;
+const ROW_H = 112;
 /** Horizontal gap between adjacent program blocks (2px inset each side). */
 const BLOCK_GAP = 4;
 /** Floor so a 2-minute program is still readable/focusable — never applied past
  *  the next block's edge (see the layout pass). */
-const MIN_BLOCK_W = 48;
+const MIN_BLOCK_W = 64;
+/** Sticky channel column width. The ruler spacer, the per-row channel cell and
+ *  the NOW line's offset all have to agree on this, so it's one number rather
+ *  than a `w-44` class and two hardcoded pixel offsets that can drift apart. */
+const CHAN_W = 208;
+/** Sticky time-ruler height — likewise shared with the NOW line's top offset. */
+const RULER_H = 48;
 
 function fmtTick(d: Date): string {
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -122,15 +128,15 @@ export default function TvEpgGrid({
 
   return (
     <div className="overflow-auto h-full">
-      <div style={{ width: width + 176 }} className="relative">
+      <div style={{ width: width + CHAN_W }} className="relative">
         {/* Time ruler */}
-        <div className="sticky top-0 z-30 flex h-10 bg-[#00050d]">
-          <div className="sticky left-0 z-10 w-44 shrink-0 bg-[#00050d]" />
+        <div className="sticky top-0 z-30 flex bg-[#00050d]" style={{ height: RULER_H }}>
+          <div className="sticky left-0 z-10 shrink-0 bg-[#00050d]" style={{ width: CHAN_W }} />
           <div className="relative" style={{ width }}>
             {ticks.map((t) => (
               <span
                 key={t.left}
-                className="absolute top-2 text-sm font-medium text-[#8197a4]"
+                className="absolute top-3 text-base font-medium text-[#8197a4]"
                 style={{ left: t.left + 8 }}
               >
                 {t.label}
@@ -142,25 +148,28 @@ export default function TvEpgGrid({
         {/* NOW line across all rows */}
         {nowLeft >= 0 && nowLeft <= width && (
           <div
-            className="absolute top-10 bottom-0 z-20 w-0.5 bg-[#1399ff] pointer-events-none"
-            style={{ left: 176 + nowLeft }}
+            className="absolute bottom-0 z-20 w-0.5 bg-[#1399ff] pointer-events-none"
+            style={{ top: RULER_H, left: CHAN_W + nowLeft }}
           />
         )}
 
         {rows.map(({ channel: c, programs }, rowIdx) => (
           <div key={c.name} className="flex" style={{ height: ROW_H }}>
             {/* Sticky channel cell */}
-            <div className="sticky left-0 z-10 w-44 shrink-0 bg-[#00050d] flex items-center gap-2 pr-3">
-              <div className="w-20 h-12 shrink-0 flex items-center justify-center rounded bg-[#121a24] ring-1 ring-white/10">
+            <div
+              className="sticky left-0 z-10 shrink-0 bg-[#00050d] flex items-center gap-2 pr-3"
+              style={{ width: CHAN_W }}
+            >
+              <div className="w-24 h-16 shrink-0 flex items-center justify-center rounded bg-[#121a24] ring-1 ring-white/10">
                 <LogoImage
                   name={c.name}
                   logoUrl={c.logo_url || c.logo}
                   className="w-full h-full p-1"
-                  fallbackClassName="text-sm font-bold text-white/80"
+                  fallbackClassName="text-base font-bold text-white/80"
                   eager
                 />
               </div>
-              <span className="text-sm text-[#8197a4] truncate">{c.name}</span>
+              <span className="text-base text-[#8197a4] truncate">{c.name}</span>
             </div>
 
             {/* Program blocks */}
@@ -181,8 +190,8 @@ export default function TvEpgGrid({
                       }`}
                       style={{ left: left + 2, width: blockW }}
                     >
-                      <p className="text-base font-semibold text-white truncate mt-2">{p.title}</p>
-                      <p className="text-sm text-[#8197a4] truncate">
+                      <p className="text-lg font-semibold text-white truncate mt-3">{p.title}</p>
+                      <p className="text-base text-[#8197a4] truncate">
                         {fmtTick(new Date(from))}
                         {onNow ? " · On now" : ""}
                       </p>
@@ -196,10 +205,10 @@ export default function TvEpgGrid({
                   className="absolute top-1 bottom-1 rounded-lg px-4 text-left ring-1 ring-white/10 bg-[#121a24] focus:outline-none"
                   style={{ left: 2, width: width - 4 }}
                 >
-                  <p className="text-base font-semibold text-white mt-2">
+                  <p className="text-lg font-semibold text-white mt-3">
                     {c.online ? "Live programming" : "Offline"}
                   </p>
-                  <p className="text-sm text-[#8197a4]">No guide data</p>
+                  <p className="text-base text-[#8197a4]">No guide data</p>
                 </button>
               )}
             </div>

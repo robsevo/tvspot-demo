@@ -47,6 +47,11 @@ export default function TvCatalogTabPage({ kind }: { kind: "movie" | "series" })
         ([svc, list]): TvBrowseRail => ({
           title: svc,
           items: list.slice(0, RAIL_MAX).map((it) => toItem(it)),
+          // A provider rail maps exactly onto the provider's full grid.
+          seeAllHref:
+            list.length > RAIL_MAX
+              ? `/tv/vod/all?service=${encodeURIComponent(svc)}&kind=${kind}`
+              : undefined,
         }),
       );
 

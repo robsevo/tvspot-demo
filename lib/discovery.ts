@@ -85,6 +85,17 @@ export function topRated(items: CatalogItem[], sinceYear = 2010): CatalogItem[] 
     });
 }
 
+/**
+ * Genre membership by TMDB genre_id or by the enriched genre name — the
+ * catalog carries whichever the enrichment step managed to attach. Shared by
+ * the web home and the TV home so both build the same genre rows.
+ */
+export function hasGenre(item: CatalogItem, name: string, id: number): boolean {
+  if (item.genre_ids?.includes(id)) return true;
+  if (item.genres?.includes(name)) return true;
+  return false;
+}
+
 /** Normalize a title for matching: lowercase, drop non-alphanumerics. */
 function titleKey(s: string): string {
   return norm(s).replace(/[^a-z0-9]+/g, " ").trim();

@@ -68,6 +68,32 @@ const FAIL_DWELL_MS = 1_500;
 // false failover restarts the movie on another source.
 const STALL_MS = 15_000;
 
+/** A relay remux source? Its playlist is rolling/live-style, so the media
+ *  element reports no usable duration and native seeking no-ops. */
+export function isRemuxSource(src: string | undefined): boolean {
+  return !!src && src.includes("remux.m3u8");
+}
+
+/**
+ * Second the relay's ffmpeg is told to start reading the file at, for a remux
+ * source resuming/seeking to `at`.
+ *
+ * Exported because the TV shell has to agree with the player EXACTLY: the
+ * remux clocks from 0 at this offset, so absolute position is
+ * `remuxStartFor(...) + video.currentTime`. When the shell computed its own
+ * idea of the offset the two drifted and continue-watching recorded a position
+ * playback was never at.
+ *
+ * Below the threshold there's no point paying a respawn, so it starts at 0.
+ */
+export function remuxStartFor(src: string | undefined, at: number | undefined): number {
+  if (!isRemuxSource(src) || !at || at <= REMUX_SEEK_MIN_S) return 0;
+  return Math.max(0, Math.floor(at));
+}
+
+/** Below this, "resume" is just "start from the beginning". */
+export const REMUX_SEEK_MIN_S = 5;
+
 export default function VodPlayer({
   src,
   poster,
@@ -137,15 +163,16 @@ export default function VodPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
-  // Remux sources (relay live-style HLS) can't seek — resume is baked into the
-  // URL instead: the relay's ffmpeg starts reading the file at &start=<sec>.
-  const isRemux = src.includes("remux.m3u8");
+  // Remux sources (relay live-style HLS) can't seek natively — position is
+  // baked into the URL instead: the relay's ffmpeg starts reading the file at
+  // &start=<sec>. That is the mechanism behind BOTH resume and seeking; the
+  // shell moves `initialTime` and this remounts at the new offset.
+  const isRemux = isRemuxSource(src);
   // The exact second the relay's ffmpeg begins reading the file. The remux then
   // clocks from 0 here, so this is also how far the media clock lags the
   // episode-absolute caption clock — passed to VideoPlayer as captionTimeOffset
   // so subtitles line up on a resumed remux instead of showing the opening.
-  const remuxStart =
-    isRemux && initialTime && initialTime > 30 ? Math.max(0, Math.floor(initialTime) - 5) : 0;
+  const remuxStart = remuxStartFor(src, initialTime);
   const effectiveSrc = remuxStart ? `${src}&start=${remuxStart}` : src;
 
   return (
@@ -166,14 +193,17 @@ export default function VodPlayer({
         ((t, d) => {
           // Remux playback clocks from 0 at the baked offset — report ABSOLUTE
           // position/duration or continue-watching regresses to ~0% on resume.
-          const off = isRemux && initialTime ? initialTime : 0;
-          onProgress(off + t, off + d);
+          // The offset is remuxStart (what ffmpeg was actually told to seek to),
+          // NOT initialTime: they differ by the 5s pre-roll, and below the 30s
+          // threshold remuxStart is 0 while initialTime is not, so using
+          // initialTime reported a position the media was never at.
+          onProgress(remuxStart + t, remuxStart + d);
         })
       }
       onTimeUpdate={(t) => {
         // Remux playback clocks from 0 at the baked offset — track absolute
         // position so a further failover resumes at the right spot.
-        lastTime.current = isRemux && initialTime ? initialTime + t : t;
+        lastTime.current = remuxStart + t;
       }}
       onPlayIntent={arm}
       onPlay={() => {

@@ -6,7 +6,7 @@ import TvLandscapeCard from "@/components/tv/TvLandscapeCard";
 import TvChannelCard from "@/components/tv/TvChannelCard";
 import TvEventCard from "@/components/tv/TvEventCard";
 import type { Channel } from "@/lib/types";
-import type { GameEvent } from "@/lib/leagues";
+import { etTime, type EventTeam, type GameEvent } from "@/lib/leagues";
 
 export interface TvBrowseItem {
   key: string;
@@ -36,8 +36,15 @@ export interface TvBrowseItem {
   /** Present → renders as a live-event tile; onOpen decides what happens. */
   event?: {
     game: GameEvent;
+    /** League key from lib/leagues — "ufc" switches crests to fighter
+     *  portraits (round, cropped) instead of square club logos. */
+    leagueKey?: string;
     leagueName: string;
     leagueLogo?: string;
+    /** OUR channel names carrying it, brand-deduped, best first. Rendered as
+     *  static chips — the hero is display-only; Enter on the card opens the
+     *  channel panel that actually tunes. */
+    carriers?: string[];
     onOpen: () => void;
   };
 }
@@ -47,6 +54,9 @@ export interface TvBrowseRail {
   items: TvBrowseItem[];
   /** Extra tile at the end of the row (e.g. a "Full guide" link). */
   trailing?: ReactNode;
+  /** Opens a full grid of this row's category — renders a "See all" tile at
+   *  the end of the row (see TvRail). */
+  seeAllHref?: string;
 }
 
 /** Rails painted on the very first frame — the hero plus one rail is a complete
@@ -126,7 +136,7 @@ export default function TvBrowseScreen({
           backdrop, so it renders its own themed hero (league wash + crests)
           instead of a blank void. */}
       {shown?.event ? (
-        <div key={`hero-art-${shown.key}`} className="tv-event-art absolute inset-x-0 top-0 h-[72%] animate-[fadeIn_0.5s_ease]">
+        <div key={`hero-art-${shown.key}`} className="tv-event-art absolute inset-x-0 top-0 h-[48%] animate-[fadeIn_0.5s_ease]">
           {shown.event.leagueLogo && (
             <img
               src={shown.event.leagueLogo}
@@ -136,15 +146,23 @@ export default function TvBrowseScreen({
             />
           )}
           <div className="absolute right-[9%] top-[42%] -translate-y-1/2 flex items-center gap-14">
-            <HeroCrest logo={shown.event.game.away.logo} name={shown.event.game.away.name} />
+            <HeroCrest
+              team={shown.event.game.away}
+              portrait={shown.event.leagueKey === "ufc"}
+              showScore={shown.event.game.state !== "pre"}
+            />
             <span className="text-4xl font-black text-white/35">VS</span>
-            <HeroCrest logo={shown.event.game.home.logo} name={shown.event.game.home.name} />
+            <HeroCrest
+              team={shown.event.game.home}
+              portrait={shown.event.leagueKey === "ufc"}
+              showScore={shown.event.game.state !== "pre"}
+            />
           </div>
           <div className="tv-fade-hero-l absolute inset-0" />
           <div className="tv-fade-hero-b absolute inset-0" />
         </div>
       ) : art ? (
-        <div key={`hero-art-${art}`} className="absolute inset-x-0 top-0 h-[72%] animate-[fadeIn_0.5s_ease]">
+        <div key={`hero-art-${art}`} className="absolute inset-x-0 top-0 h-[48%] animate-[fadeIn_0.5s_ease]">
           <img
             src={art}
             alt=""
@@ -158,12 +176,17 @@ export default function TvBrowseScreen({
 
       {/* Hero copy, BOTTOM-anchored low in the art (like the reference) so the
           rails can tuck directly under it. Keyed by the focused item so each
-          focus move crossfades the text instead of hard-swapping it. */}
+          focus move crossfades the text instead of hard-swapping it.
+          Height is deliberately short: the hero pane and the rails pane split
+          the screen, so every extra vh here costs a rail. At 40vh the rails
+          pane keeps ~570px @1080p — two full card rows, on every menu. */}
       <div
         key={`hero-copy-${shown?.key ?? "empty"}`}
-        className="relative z-10 flex-none h-[52vh] px-16 max-w-4xl flex flex-col justify-end pb-6 animate-[fadeIn_0.35s_ease]"
+        className="relative z-10 flex-none h-[40vh] px-16 max-w-4xl flex flex-col justify-end pb-6 animate-[fadeIn_0.35s_ease]"
       >
-        {shown ? (
+        {shown?.event ? (
+          <EventHeroCopy item={shown} />
+        ) : shown ? (
           <>
             {shown.provider && (
               <p className="text-lg font-bold tracking-wide text-white/90 mb-2 hero-text-shadow">
@@ -207,7 +230,7 @@ export default function TvBrowseScreen({
         {rails.slice(0, railBudget).map(
           (rail, railIdx) =>
             (rail.items.length > 0 || rail.trailing) && (
-              <TvRail key={rail.title} title={rail.title}>
+              <TvRail key={rail.title} title={rail.title} seeAllHref={rail.seeAllHref}>
                 {rail.items.map((item, i) => {
                   const focusProps = {
                     onCardFocus: () => setFocused(item),
@@ -217,6 +240,7 @@ export default function TvBrowseScreen({
                     <TvEventCard
                       key={item.key}
                       game={item.event.game}
+                      leagueKey={item.event.leagueKey}
                       leagueName={item.event.leagueName}
                       leagueLogo={item.event.leagueLogo}
                       onOpen={item.event.onOpen}
@@ -259,23 +283,117 @@ export default function TvBrowseScreen({
   );
 }
 
-/** Big team crest for the event hero (larger than the card's). */
-function HeroCrest({ logo, name }: { logo?: string; name: string }) {
+/**
+ * Hero copy for a live/upcoming event, scaled up from the website's event hero
+ * (components/HeroBanner.tsx → EventContent): league eyebrow, LIVE dot, the
+ * matchup, the kickoff time, and which of OUR channels carry it.
+ *
+ * Display-only by design — nothing here is focusable. On the TV the hero
+ * describes whatever card the remote is sitting on, and Enter on that card
+ * opens the channel panel that does the tuning; making the hero focusable too
+ * would put a second, competing target in TvNav's geometry.
+ */
+function EventHeroCopy({ item }: { item: TvBrowseItem }) {
+  const ev = item.event!;
+  const { game } = ev;
+  const live = game.state === "in";
+  const final = game.state === "post";
+  const carriers = ev.carriers ?? [];
+  const [primary, ...also] = carriers;
+
+  return (
+    <>
+      <div className="flex items-center gap-3 mb-3">
+        {ev.leagueLogo && (
+          <img
+            src={ev.leagueLogo}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="w-9 h-9 object-contain"
+          />
+        )}
+        <span className="text-lg font-bold uppercase tracking-wide text-white/85 hero-text-shadow">
+          {ev.leagueName}
+        </span>
+        {live && (
+          <span className="flex items-center gap-2 text-base font-bold text-white bg-[#c7040c] rounded px-2 py-0.5">
+            <span className="w-2 h-2 rounded-full bg-white" />
+            LIVE
+          </span>
+        )}
+      </div>
+
+      <h1 className="text-6xl font-extrabold text-white leading-[1.05] line-clamp-2 mb-3 hero-text-shadow">
+        {game.shortName || item.title}
+      </h1>
+
+      <p className="text-xl font-medium text-[#c7d5e0] mb-2 hero-text-shadow">
+        {live || final ? game.detail || (final ? "Final" : "") : etTime(game.dateUtc)}
+      </p>
+
+      {primary ? (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-lg font-semibold text-black bg-white rounded-full px-5 py-1.5">
+            {live ? `Watch live on ${primary}` : `Watch on ${primary}`}
+          </span>
+          {also.length > 0 && (
+            <>
+              <span className="text-base text-white/50">Also on</span>
+              {also.slice(0, 3).map((c) => (
+                <span
+                  key={c}
+                  className="text-base font-medium text-white/85 bg-white/10 rounded-full px-4 py-1.5"
+                >
+                  {c}
+                </span>
+              ))}
+            </>
+          )}
+        </div>
+      ) : (
+        <p className="text-lg text-white/60 hero-text-shadow">Not on your channels</p>
+      )}
+    </>
+  );
+}
+
+/** Big team crest for the event hero (larger than the card's). UFC passes
+ *  `portrait`: fighter headshots are photos, so they're cropped to a circle
+ *  rather than letterboxed like a club crest. */
+function HeroCrest({
+  team,
+  portrait,
+  showScore,
+}: {
+  team: EventTeam;
+  portrait?: boolean;
+  showScore?: boolean;
+}) {
+  const hasScore = showScore && team.score !== undefined && team.score !== "";
   return (
     <div className="flex flex-col items-center gap-3 min-w-0">
-      {logo ? (
+      {team.logo ? (
         <img
-          src={logo}
+          src={team.logo}
           alt=""
           referrerPolicy="no-referrer"
-          className="w-32 h-32 object-contain drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]"
+          className={
+            portrait
+              ? "w-32 h-32 rounded-full object-cover bg-white/5 drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]"
+              : "w-32 h-32 object-contain drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]"
+          }
         />
       ) : (
         <div className="w-32 h-32 rounded-full bg-white/10" />
       )}
       <span className="text-xl font-semibold text-white/90 truncate max-w-40 text-center hero-text-shadow">
-        {name}
+        {team.name}
       </span>
+      {hasScore && (
+        <span className="text-4xl font-black text-white tabular-nums hero-text-shadow">
+          {team.score}
+        </span>
+      )}
     </div>
   );
 }

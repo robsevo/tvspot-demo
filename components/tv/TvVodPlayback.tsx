@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Pause, SkipForward, RefreshCw, ListVideo, Languages } from "lucide-react";
 import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
-import VodPlayer from "@/components/VodPlayer";
+import VodPlayer, { isRemuxSource, remuxStartFor, REMUX_SEEK_MIN_S } from "@/components/VodPlayer";
 import type { TvCcHandle } from "@/components/VideoPlayer";
 import { useTvBack } from "@/components/tv/TvNav";
 import { TVKEY } from "@/lib/tv";
@@ -109,6 +109,59 @@ export default function TvVodPlayback({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const audioFetchedFor = useRef<string | null>(null);
+  // Runtime of the underlying file, for remux sources only. The rolling remux
+  // playlist never ends, so the <video> reports no usable duration — this is
+  // what gives the OSD a real scale and bounds a seek. null → seeking stays off.
+  const [remuxDuration, setRemuxDuration] = useState<number | null>(null);
+  // A remux seek respawns the relay's ffmpeg at the new offset, which takes a
+  // few seconds; without a marker the screen just freezes and looks broken.
+  const [seeking, setSeeking] = useState(false);
+
+  const source = sources[index];
+  // What actually plays: a chosen audio track's URL overrides the plain source.
+  const activeUrl = audioUrl ?? source?.url ?? "";
+  const isRemux = isRemuxSource(source?.url);
+  // The second the relay's ffmpeg was told to start reading at. Playback clocks
+  // from 0 there, so absolute position is remuxBase + video.currentTime.
+  // Computed with the SAME helper VodPlayer uses to build the URL, so the two
+  // can never disagree about where we are in the file.
+  const remuxBase = remuxStartFor(activeUrl, resumeAt);
+
+  /**
+   * Where we actually are in the FILE, in seconds.
+   *
+   * A remux clocks from 0 at its baked offset, so the element's own currentTime
+   * is NOT the position — reading it directly is what made switching away from a
+   * remux mid-film restart near the beginning.
+   */
+  const absolutePosition = useCallback(
+    () => (isRemux ? remuxBase : 0) + (videoElRef.current?.currentTime ?? 0),
+    [isRemux, remuxBase],
+  );
+
+  /**
+   * Seek a remux source. There is nothing to seek IN — the playlist is a
+   * rolling live window — so instead we move the offset the relay starts its
+   * ffmpeg at and let the player remount there. That respawn costs a few
+   * seconds, which is why it announces itself rather than looking frozen.
+   *
+   * This is the whole reason VOD can be English AND seekable: the remux is the
+   * only source whose audio track we control, and &start= gives it the one
+   * thing it was missing.
+   */
+  const seekRemux = useCallback(
+    (deltaS: number) => {
+      if (!remuxDuration) return; // no runtime → no scale to seek against
+      const abs = absolutePosition();
+      // Leave a little headroom at the end: starting ffmpeg in the last seconds
+      // produces a stream that ends before it can play.
+      const target = Math.max(0, Math.min(remuxDuration - 10, abs + deltaS));
+      if (Math.abs(target - abs) < 1) return;
+      setSeeking(true);
+      setResumeAt(target);
+    },
+    [absolutePosition, remuxDuration],
+  );
 
   const refresh = useCallback(async () => {
     if (!onRefreshSources || refreshing) return;
@@ -131,24 +184,30 @@ export default function TvVodPlayback({
   }, [onRefreshSources, refreshing]);
 
   /** Jump straight to a source the user picked, keeping their place. */
-  const pickSource = useCallback((i: number) => {
-    const v = videoElRef.current;
-    setResumeAt(v && v.currentTime > 5 ? v.currentTime : 0);
-    setExhausted(false);
-    setAudioUrl(null); // a different source has its own audio; forget the override
-    setIndex(i);
-    setPickerOpen(false);
-  }, []);
+  const pickSource = useCallback(
+    (i: number) => {
+      const at = absolutePosition();
+      setResumeAt(at > REMUX_SEEK_MIN_S ? at : 0);
+      setExhausted(false);
+      setAudioUrl(null); // a different source has its own audio; forget the override
+      setIndex(i);
+      setPickerOpen(false);
+    },
+    [absolutePosition],
+  );
 
   /** Switch the audio language: play the chosen track's remux, keeping position.
    *  Only offered for remux sources (a direct mp4 is one baked-in track). */
-  const pickAudio = useCallback((track: { url: string }) => {
-    const v = videoElRef.current;
-    setResumeAt(v && v.currentTime > 5 ? v.currentTime : 0);
-    setExhausted(false);
-    setAudioUrl(track.url);
-    setPickerOpen(false);
-  }, []);
+  const pickAudio = useCallback(
+    (track: { url: string }) => {
+      const at = absolutePosition();
+      setResumeAt(at > REMUX_SEEK_MIN_S ? at : 0);
+      setExhausted(false);
+      setAudioUrl(track.url);
+      setPickerOpen(false);
+    },
+    [absolutePosition],
+  );
 
   const raiseOsd = useCallback((holdOpen?: boolean) => {
     setOsdVisible(true);
@@ -165,13 +224,22 @@ export default function TvVodPlayback({
     if (!osdVisible) return;
     const tick = () => {
       const v = videoElRef.current;
-      if (v) setClock({ t: v.currentTime, d: v.duration });
+      if (v) {
+        // A remux clocks from 0 at the baked offset and its playlist never ends,
+        // so the element's own currentTime/duration describe the WINDOW, not the
+        // film. Report absolute position against the file's real runtime instead.
+        setClock(
+          isRemux
+            ? { t: remuxBase + v.currentTime, d: remuxDuration ?? NaN }
+            : { t: v.currentTime, d: v.duration },
+        );
+      }
       if (ccRef.current) setCc(ccRef.current.state());
     };
     tick();
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [osdVisible]);
+  }, [osdVisible, isRemux, remuxBase, remuxDuration]);
 
   // ── Skip intro / Next up ──────────────────────────────────────────────────
   // Timing, dismissal and auto-advance live in the shared hook so the TV and
@@ -282,8 +350,14 @@ export default function TvVodPlayback({
         case TVKEY.right:
         case TVKEY.fastForward: {
           e.preventDefault();
-          if (!v || !isFinite(v.duration) || v.duration <= 0) return; // remux: unseekable
           const back = code === TVKEY.left || code === TVKEY.rewind;
+          if (isRemux) {
+            // Rolling playlist — seek by respawning the relay at a new offset.
+            seekRemux(back ? -SEEK_STEP_S : SEEK_STEP_S);
+            raiseOsd(true); // hold the OSD up across the respawn
+            return;
+          }
+          if (!v || !isFinite(v.duration) || v.duration <= 0) return;
           v.currentTime = Math.max(
             0,
             Math.min(v.duration, v.currentTime + (back ? -SEEK_STEP_S : SEEK_STEP_S)),
@@ -317,20 +391,20 @@ export default function TvVodPlayback({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [raiseOsd, paused, pickerOpen]);
+  }, [raiseOsd, paused, pickerOpen, isRemux, seekRemux]);
 
-  const source = sources[index];
-  // What actually plays: a chosen audio track's URL overrides the plain source.
-  const activeUrl = audioUrl ?? source?.url ?? "";
-  const isRemux = /remux\.m3u8/.test(source?.url ?? "");
   const pct = clock.d > 0 && isFinite(clock.d) ? (clock.t / clock.d) * 100 : 0;
 
-  // Load the language list the first time the picker opens on a remux source.
-  // Lazy on purpose — most titles are single-audio and never need it, and it's
-  // a relay probe we shouldn't spend on every play. Keyed to the source URL so
-  // switching sources refetches.
+  // Probe a remux source once per URL: the language list AND the file's runtime
+  // come back from the same relay call. Eager rather than lazy-on-picker,
+  // because the runtime is what makes Left/Right seek work at all — it has to be
+  // loaded before the user reaches for the remote. The relay caches the probe,
+  // so replaying the same file doesn't pay for it again.
   useEffect(() => {
-    if (!pickerOpen || !isRemux || !source) return;
+    if (!isRemux || !source) {
+      setRemuxDuration(null);
+      return;
+    }
     if (audioFetchedFor.current === source.url) return;
     audioFetchedFor.current = source.url;
     setAudioLoading(true);
@@ -339,11 +413,18 @@ export default function TvVodPlayback({
       { credentials: "include" },
       DEADLINE.stream,
     )
-      .then((r) => (r.ok ? r.json() : { tracks: [] }))
-      .then((d) => setAudioTracks(Array.isArray(d.tracks) ? d.tracks : []))
-      .catch(() => setAudioTracks([]))
+      .then((r) => (r.ok ? r.json() : { tracks: [], duration: null }))
+      .then((d) => {
+        setAudioTracks(Array.isArray(d.tracks) ? d.tracks : []);
+        const dur = Number(d?.duration);
+        setRemuxDuration(Number.isFinite(dur) && dur > 0 ? dur : null);
+      })
+      .catch(() => {
+        setAudioTracks([]);
+        setRemuxDuration(null);
+      })
       .finally(() => setAudioLoading(false));
-  }, [pickerOpen, isRemux, source]);
+  }, [isRemux, source]);
 
   return (
     <div data-tv-trap className="fixed inset-0 z-50 bg-black">
@@ -353,18 +434,23 @@ export default function TvVodPlayback({
             // Remount when the audio track changes too, not just the source
             // index — a new src needs a fresh <video>/hls.js (resume is carried
             // by initialTime).
-            key={`${index}:${audioUrl ?? ""}`}
+            // Remount when the baked remux offset changes too: a seek rewrites
+            // the src (&start=), and that needs a fresh <video>/hls.js.
+            key={`${index}:${audioUrl ?? ""}:${remuxBase}`}
             src={activeUrl}
             poster={poster}
             title={title}
             autoPlay
             hideControls
-            initialTime={resumeAt > 5 ? resumeAt : undefined}
+            initialTime={resumeAt > REMUX_SEEK_MIN_S ? resumeAt : undefined}
             subtitles={subtitles}
             ccRef={ccRef}
             videoElRef={videoElRef}
             onSourceFail={fail}
-            onPlay={() => setPaused(false)}
+            onPlay={() => {
+              setPaused(false);
+              setSeeking(false);
+            }}
             onEnded={nextUp ? playNext : undefined}
             onProgress={onProgress}
           />
@@ -518,6 +604,17 @@ export default function TvVodPlayback({
       {notice && (
         <div className="absolute top-10 left-12 bg-[#0f171e]/90 ring-1 ring-white/10 rounded-xl px-6 py-4 animate-fade-in">
           <p className="text-xl font-semibold text-white">{notice}</p>
+        </div>
+      )}
+
+      {/* Seeking a remux restarts the relay's encoder at the new position, so
+          there are a few seconds with no picture. Say so — otherwise it reads
+          as the stream having died. */}
+      {seeking && !notice && (
+        <div className="absolute top-10 left-12 bg-[#0f171e]/90 ring-1 ring-white/10 rounded-xl px-6 py-4 animate-fade-in">
+          <p className="text-xl font-semibold text-white">
+            Seeking to {fmtClock(remuxBase)}…
+          </p>
         </div>
       )}
 
