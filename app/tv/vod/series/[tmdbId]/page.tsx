@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useReducer, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Play, RotateCcw, Plus, Check } from "lucide-react";
-import { proxyFetch } from "@/lib/api";
+import { proxyFetchRetry } from "@/lib/api";
 import { mergeSources } from "@/lib/sources";
 import { heroArt } from "@/lib/tmdbImage";
 import { resolveVod, prewarmVod, getPrewarmed } from "@/lib/vodPrewarm";
@@ -85,17 +85,21 @@ export default function TvSeriesPage() {
       ? heroArt((detail?.poster || catItem?.poster)!, false)
       : undefined;
 
-  // Fetch series details
+  // Fetch series details. Auto-retries the backend cold-start window
+  // (503/504/timeout while the box bounces) with backoff so the page heals
+  // itself instead of dead-ending; only a 404 or exhausted budget fails.
   useEffect(() => {
     let active = true;
-    proxyFetch<SeriesDetail>(`/api/lounge/vod/series/${tmdbId}`)
+    const ctl = new AbortController();
+    proxyFetchRetry<SeriesDetail>(`/api/lounge/vod/series/${tmdbId}`, { signal: ctl.signal })
       .then((d) => {
         if (active) dispatch({ type: "SUCCESS", detail: d });
       })
-      .catch(() => {
-        if (active) dispatch({ type: "FAILURE" });
+      .catch((err) => {
+        if (!active || err?.name === "AbortError") return;
+        dispatch({ type: "FAILURE" });
       });
-    return () => { active = false; };
+    return () => { active = false; ctl.abort(); };
   }, [tmdbId]);
 
   const season = detail?.seasons?.[seasonIdx];

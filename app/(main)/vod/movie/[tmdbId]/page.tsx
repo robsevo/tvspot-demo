@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { proxyFetch, HttpError } from "@/lib/api";
+import { proxyFetchRetry, HttpError } from "@/lib/api";
 import Link from "next/link";
 import { ChevronLeft, Check, X, Loader2, RefreshCw, ExternalLink, Info } from "lucide-react";
 import { mergeSources, type PlayableSource } from "@/lib/sources";
@@ -68,18 +68,29 @@ export default function VodMoviePage() {
   }
   const resumeTime = resumeRef.current ?? 0;
 
-  // Fetch movie details
+  // Fetch movie details. Auto-retries the cold-start window (backend bouncing →
+  // 503 vod_warming / 504 / timeout) with backoff so the page keeps its loading
+  // skeleton and resolves the moment the box answers, instead of dead-ending on
+  // the first miss. Only a 404 (or an exhausted ~60s retry budget) surfaces the
+  // manual Retry screen.
   useEffect(() => {
     if (!tmdbId) return;
+    const ctl = new AbortController();
     setLoading(true);
     setFetchFailed(false);
-    proxyFetch<VodDetail>(`/api/lounge/vod/details/${tmdbId}`)
-      .then((d) => setDetail(d))
+    proxyFetchRetry<VodDetail>(`/api/lounge/vod/details/${tmdbId}`, { signal: ctl.signal })
+      .then((d) => {
+        if (!ctl.signal.aborted) setDetail(d);
+      })
       .catch((err) => {
+        if (ctl.signal.aborted || err?.name === "AbortError") return;
         console.error("Movie detail fetch failed:", err);
         setFetchFailed(!(err instanceof HttpError && err.status === 404));
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!ctl.signal.aborted) setLoading(false);
+      });
+    return () => ctl.abort();
   }, [tmdbId, retryTick]);
 
   // Resolve direct streams with prewarm caching

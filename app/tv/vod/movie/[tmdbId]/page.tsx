@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { Play, RotateCcw, Plus, Check } from "lucide-react";
-import { proxyFetch } from "@/lib/api";
+import { proxyFetchRetry } from "@/lib/api";
 import { mergeSources } from "@/lib/sources";
 import { heroArt } from "@/lib/tmdbImage";
 import { resolveVod, getPrewarmed } from "@/lib/vodPrewarm";
@@ -67,18 +67,24 @@ export default function TvMoviePage() {
 
   useEffect(() => {
     let cancelled = false;
-    proxyFetch<VodDetail>(`/api/lounge/vod/details/${tmdbId}`)
+    const ctl = new AbortController();
+    // Auto-retry the backend cold-start window (box mid-bounce → 503/504/
+    // timeout) with backoff so the detail heals itself instead of parking on
+    // "isn't available right now". Only a 404 or an exhausted ~60s budget fails.
+    proxyFetchRetry<VodDetail>(`/api/lounge/vod/details/${tmdbId}`, { signal: ctl.signal })
       .then((d) => {
         if (!cancelled) setDetail(d);
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((err) => {
+        if (cancelled || err?.name === "AbortError") return;
+        setFailed(true);
       });
     resolveVod("movie", tmdbId).then((urls) => {
       if (!cancelled && urls.length > 0) setResolved(urls);
     });
     return () => {
       cancelled = true;
+      ctl.abort();
     };
   }, [tmdbId]);
 

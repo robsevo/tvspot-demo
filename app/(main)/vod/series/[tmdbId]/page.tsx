@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { proxyFetch, HttpError } from "@/lib/api";
+import { proxyFetchRetry, HttpError } from "@/lib/api";
 import Link from "next/link";
 import { ChevronLeft, ChevronDown, Check, X, Loader2, RefreshCw, ExternalLink, Info } from "lucide-react";
 import { mergeSources, type PlayableSource } from "@/lib/sources";
@@ -161,17 +161,27 @@ export default function VodSeriesPage() {
     [items, seriesId, setEpStateField, getEpState, resolveEpisode],
   );
 
+  // Auto-retries the backend cold-start window (see the movie detail page) so a
+  // box mid-bounce keeps the loading skeleton and resolves once it answers,
+  // rather than dead-ending on the first 503/504/timeout.
   useEffect(() => {
     if (!tmdbId) return;
+    const ctl = new AbortController();
     setLoading(true);
     setFetchFailed(false);
-    proxyFetch<SeriesDetail>(`/api/lounge/vod/series/${tmdbId}`)
-      .then((d) => setDetail(d))
+    proxyFetchRetry<SeriesDetail>(`/api/lounge/vod/series/${tmdbId}`, { signal: ctl.signal })
+      .then((d) => {
+        if (!ctl.signal.aborted) setDetail(d);
+      })
       .catch((err) => {
+        if (ctl.signal.aborted || err?.name === "AbortError") return;
         console.error("Series detail fetch failed:", err);
         setFetchFailed(!(err instanceof HttpError && err.status === 404));
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!ctl.signal.aborted) setLoading(false);
+      });
+    return () => ctl.abort();
   }, [tmdbId, retryTick]);
 
   // Pure source list for an episode (no side effects — verification is driven
