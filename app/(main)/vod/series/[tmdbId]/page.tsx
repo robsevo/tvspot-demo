@@ -19,6 +19,11 @@ import type { SeriesDetail, Episode } from "@/lib/types";
 
 /** Maximum sources to display per episode. */
 const MAX_SOURCES = 10; // raised from 6 — more failover depth + manual picks; only the chosen source streams
+/** Opening probe round size — see the movie page for the reasoning: failover is
+ *  frozen while a round is in flight, and remux (mkv) probes each start a relay
+ *  ffmpeg session, so probing all ~10 rows is dead time before an episode plays.
+ *  Unprobed sources are never judged dead, so nothing disappears from the list. */
+const MAX_PROBE_SOURCES = 5;
 
 /** Cooldown for sources that dropped during playback. */
 const FAIL_COOLDOWN_MS = 120000;
@@ -209,7 +214,12 @@ export default function VodSeriesPage() {
     return ep ? getEpisodeSources(playingEpisode, ep) : [];
   }, [playingEpisode, episodeByKey, getEpisodeSources]);
   const probeUrls = useMemo(
-    () => playingSources.slice(0, MAX_SOURCES).map((s) => s.url),
+    () => {
+      const cheap = playingSources.filter((s) => !s.url.includes("remux"));
+      return (cheap.length > 0 ? cheap : playingSources)
+        .slice(0, MAX_PROBE_SOURCES)
+        .map((s) => s.url);
+    },
     [playingSources]
   );
   const { statusOf, workingCount, busyCount, loading: checking, recheck } = useStreamCheck(probeUrls, { mode: "vod" });

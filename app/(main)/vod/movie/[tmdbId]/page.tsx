@@ -17,6 +17,16 @@ import type { VodDetail } from "@/lib/types";
 /** Maximum sources to display. */
 const MAX_SOURCES = 10; // raised from 6 — more failover depth + manual picks; only the chosen source streams
 
+/** How many sources the OPENING probe round covers. Deliberately lower than
+ *  MAX_SOURCES: auto-failover is frozen while a probe round is in flight, so the
+ *  round's length is dead time before playback starts. Once the VOD index grew to
+ *  ~9 sources/title (2026-07-25) probing all of them took seconds — and worse, a
+ *  title's first rows are often mkv, whose probe goes through the relay's ffmpeg
+ *  remux (one session each). Unprobed sources are NOT penalised: isDead() only
+ *  excludes an EXPLICIT "dead" verdict, so everything stays listed and selectable,
+ *  and `recheck` covers the rest on demand. */
+const MAX_PROBE_SOURCES = 5;
+
 /** Sources that dropped DURING playback cool down before retry — VOD sources
  *  that die mid-file usually need a couple of minutes (relay slot, provider). */
 const FAIL_COOLDOWN_MS = 120000;
@@ -125,7 +135,16 @@ export default function VodMoviePage() {
 
   // Server-side reachability probe (same machinery as live channels, VOD mode:
   // HEAD / range-GET — these are files and embed pages, not HLS playlists).
-  const probeUrls = useMemo(() => sources.slice(0, MAX_SOURCES).map((s) => s.url), [sources]);
+  // Probe the CHEAP sources first and cap the round. A remux source is proxied as
+  // /api/vod-stream?url=<relay>/remux.m3u8… and each probe of one starts a relay
+  // ffmpeg session, so a title whose leading rows are all mkv would spend the whole
+  // opening round waiting on transcoders. Direct files/embeds answer in ms; remux
+  // sources stay in the list, just unprobed (⇒ never judged dead) until a recheck.
+  const probeUrls = useMemo(() => {
+    const isRemux = (u: string) => u.includes("remux");
+    const cheap = sources.filter((s) => !isRemux(s.url));
+    return (cheap.length > 0 ? cheap : sources).slice(0, MAX_PROBE_SOURCES).map((s) => s.url);
+  }, [sources]);
   const { statusOf, workingCount, busyCount, loading: checking, recheck } = useStreamCheck(probeUrls, { mode: "vod" });
 
   // Ensure source index is valid
