@@ -136,6 +136,19 @@ const CHANNEL_DOMAINS: Record<string, string> = {
   "LaLiga TV": "laliga.com",
   "Peacock Premier League": "premierleague.com",
   "Sky Sport Bundesliga": "bundesliga.com",
+  // ── Adds 2026-07-25. TBS / CNBC / Paramount Network were already mapped above. ──
+  "Nat Geo Wild": "nationalgeographic.com",
+  // Regional sports networks. MSG/MSG Plus share one brand domain; the Bally and
+  // NBC Sports regionals likewise resolve off their parent brand, which is the
+  // best a favicon lookup can do for an RSN (they have no per-region logo asset).
+  "MSG": "msg.com",
+  "MSG Plus": "msg.com",
+  "NBC Sports Boston": "nbcsports.com",
+  "NBC Sports Chicago": "nbcsports.com",
+  "AT&T SportsNet Pittsburgh": "sportsnetpittsburgh.com",
+  "Bally Sports North": "ballysports.com",
+  "Bally Sports Detroit": "ballysports.com",
+  "Sky Sports Premier League": "skysports.com",
 };
 
 /**
@@ -388,6 +401,15 @@ export function getChannelAbbr(name: string): string {
     "Fox Sports 1": "FS1",
     "Fox Sports 2": "FS2",
     "MSNBC": "MSN",
+    "Game Show Network": "GSN",
+    "MSG Plus": "MSG+",
+    "NBC Sports Boston": "NBCB",
+    "NBC Sports Chicago": "NBCC",
+    "AT&T SportsNet Pittsburgh": "ATTP",
+    "Bally Sports North": "BSN",
+    "Bally Sports Detroit": "BSD",
+    "Sky Sports Premier League": "SKY",
+    "Nat Geo Wild": "WILD",
     "NBA TV": "NBA",
     "NFL Network": "NFL",
     "NHL Network": "NHL",
