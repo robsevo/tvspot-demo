@@ -222,7 +222,7 @@ export default function VodSeriesPage() {
     },
     [playingSources]
   );
-  const { statusOf, workingCount, busyCount, loading: checking, recheck } = useStreamCheck(probeUrls, { mode: "vod" });
+  const { statusOf, workingCount, busyCount, loading: checking, recheck, revalidating } = useStreamCheck(probeUrls, { mode: "vod" });
   // Ref mirror for handleSourceFailure, which reads it inside a state updater.
   const checkingRef = useRef(checking);
   useEffect(() => { checkingRef.current = checking; }, [checking]);
@@ -243,6 +243,32 @@ export default function VodSeriesPage() {
       return epKey === playingEpisode && statusOf(src.url) === "dead";
     },
     [getEpState, confirmedUrl, playingEpisode, statusOf]
+  );
+
+  // Rank sources for display: Online first, then Busy, then unprobed, then dead.
+  // Membership NEVER changes (a vanishing row is what made sources look like they
+  // disappear), and the sort is stable within a tier so nothing jitters between
+  // probe rounds. The source actually playing is pinned first — reality outranks
+  // any probe verdict.
+  const rankSources = useCallback(
+    (list: PlayableSource[], epKey: string): PlayableSource[] => {
+      const tier = (s: PlayableSource) => {
+        if (s.url === confirmedUrl) return 0;
+        if (isEpSourceDead(epKey, s)) return 4;
+        switch (statusOf(s.url)) {
+          case "working": return 1;
+          case "busy": return 2;
+          case "dead": return 4;
+          default: return 3;
+        }
+      };
+      return list
+        .map((s, i) => ({ s, i, t: tier(s) }))
+        .sort((a, b) => a.t - b.t || a.i - b.i)
+        .map((x) => x.s)
+        .slice(0, MAX_SOURCES);
+    },
+    [statusOf, confirmedUrl, isEpSourceDead],
   );
 
   // Auto failover for the playing episode: current source judged dead before
@@ -553,17 +579,17 @@ export default function VodSeriesPage() {
                                 </span>
                                 <button
                                   onClick={recheckPlaying}
-                                  disabled={checking}
+                                  disabled={checking || revalidating}
                                   className="flex items-center gap-1 text-text-secondary hover:text-white transition-colors disabled:opacity-50 min-h-[32px]"
                                   aria-label="Re-check sources"
                                 >
-                                  <RefreshCw className={`w-3 h-3 ${checking ? "animate-spin" : ""}`} />
+                                  <RefreshCw className={`w-3 h-3 ${checking || revalidating ? "animate-spin" : ""}`} />
                                   <span>Recheck</span>
                                 </button>
                               </div>
 
                               <div className="flex gap-2 overflow-x-auto px-1">
-                                {sources.slice(0, MAX_SOURCES).map((src, idx) => {
+                                {rankSources(sources, epKey).map((src) => {
                                   const isCurrent = src.url === currentSource?.url;
                                   const srcStatus: SourceStatus = isEpSourceDead(epKey, src) ? "dead" : statusOf(src.url);
                                   return (
@@ -579,7 +605,10 @@ export default function VodSeriesPage() {
                                       }`}
                                     >
                                       <StatusDot status={srcStatus} />
-                                      {idx + 1}. {src.label}
+                                      {revalidating && probeUrls.includes(src.url) && (
+                                        <Loader2 className="w-3 h-3 animate-spin text-text-muted" />
+                                      )}
+                                      {src.label}
                                     </button>
                                   );
                                 })}

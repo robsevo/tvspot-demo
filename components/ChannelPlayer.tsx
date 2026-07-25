@@ -54,7 +54,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     [probedUrls, extraUrls],
   );
 
-  const { statusOf, workingCount, busyCount, loading, recheck } = useStreamCheck(allUrls);
+  const { statusOf, workingCount, busyCount, loading, recheck, revalidating } = useStreamCheck(allUrls);
 
   // Reset expansion when the channel changes.
   const channelSlugValue = channel ? channelSlug(channel.name) : "";
@@ -148,18 +148,30 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // didn't verify it, still count it — so we never say "0 online" while it's playing.
   const shownWorking = workingCount + (confirmedUrl && statusOf(confirmedUrl) !== "working" ? 1 : 0);
 
-  // Buttons: keep usable + still-checking sources (order preserved), hide dead/
-  // failed ones, cap the list. If everything is gone, show them anyway so the user
-  // can still try. A manual pick stays visible even if it died.
+  // Buttons: EVERY source stays listed — hiding a source because one probe round
+  // said "dead" is what made sources vanish and reappear on their own, on panels
+  // that demonstrably flap probe-to-probe. Verdicts drive the badge and the ORDER
+  // (Online → Busy → unprobed → dead), never the membership, and the sort is
+  // stable within a tier so nothing jitters. What's playing is pinned first.
   const displayUrls = useMemo(() => {
-    const alive = allUrls.filter((u) => !isDead(u));
-    const base = (alive.length > 0 ? alive : allUrls).slice(0, MAX_SOURCES);
-    if (pickedUrl && allUrls.includes(pickedUrl) && !base.includes(pickedUrl)) {
-      return [pickedUrl, ...base].slice(0, MAX_SOURCES);
-    }
-    return base;
+    const tier = (u: string) => {
+      if (u === confirmedUrl) return 0;   // on screen → reality outranks any probe
+      if (u === pickedUrl) return 0;      // the user's explicit choice stays put
+      if (isDead(u)) return 4;
+      switch (statusOf(u)) {
+        case "working": return 1;
+        case "busy": return 2;
+        case "dead": return 4;
+        default: return 3;                // unknown / still checking
+      }
+    };
+    return allUrls
+      .map((u, i) => ({ u, i, t: tier(u) }))
+      .sort((a, b) => a.t - b.t || a.i - b.i)
+      .map((x) => x.u)
+      .slice(0, MAX_SOURCES);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allUrls, statusOf, pickedUrl, failedAt]);
+  }, [allUrls, statusOf, pickedUrl, confirmedUrl, failedAt]);
 
   // Playback: honor a manual pick (unless it has since dropped); otherwise the
   // BEST auto source. Preference cycles past busy (connection-limited) accounts to
@@ -285,20 +297,24 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
             </span>
             <button
               onClick={recheckAll}
-              disabled={loading}
+              disabled={loading || revalidating}
               className="flex items-center gap-1 text-text-secondary hover:text-white transition-colors disabled:opacity-50 min-h-[32px]"
               aria-label="Re-check sources"
             >
-              <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+              <RefreshCw className={`w-3 h-3 ${loading || revalidating ? "animate-spin" : ""}`} />
               <span>Recheck</span>
             </button>
           </div>
 
           <div className="flex gap-2 overflow-x-auto px-1">
-            {displayUrls.map((url, i) => {
+            {displayUrls.map((url) => {
               // Show a failed/cooling source as dead (✗).
               const status = isDead(url) ? "dead" : statusOf(url);
               const isCurrent = url === src;
+              // Number from the source's ORIGINAL position, never the display
+              // position: the list re-orders as verdicts land, and a label that
+              // renumbers means "Source 3" becomes "Source 1" underneath the user.
+              const num = allUrls.indexOf(url) + 1;
               return (
                 <button
                   key={url}
@@ -312,7 +328,8 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
                   }`}
                 >
                   <StatusDot status={status} />
-                  Source {i + 1}
+                  {revalidating && <Loader2 className="w-3 h-3 animate-spin text-text-muted" />}
+                  Source {num}
                 </button>
               );
             })}

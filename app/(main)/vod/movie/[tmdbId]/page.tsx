@@ -145,7 +145,7 @@ export default function VodMoviePage() {
     const cheap = sources.filter((s) => !isRemux(s.url));
     return (cheap.length > 0 ? cheap : sources).slice(0, MAX_PROBE_SOURCES).map((s) => s.url);
   }, [sources]);
-  const { statusOf, workingCount, busyCount, loading: checking, recheck } = useStreamCheck(probeUrls, { mode: "vod" });
+  const { statusOf, workingCount, busyCount, loading: checking, recheck, revalidating } = useStreamCheck(probeUrls, { mode: "vod" });
 
   // Ensure source index is valid
   const validIndex = Math.min(sourceIndex, Math.max(0, sources.length - 1));
@@ -174,10 +174,27 @@ export default function VodMoviePage() {
 
   // Display sources: usable first; if everything is judged dead show them all
   // anyway so the user can still try (probes can be wrong for embeds).
+  // Every source stays listed, always — a row vanishing because one probe round
+  // flapped is what made sources "disappear and come back". Verdicts change the
+  // BADGE and the RANK, never the membership. Sort is stable within a tier, and
+  // the source actually playing is pinned first so it can't slide away underfoot.
   const displaySources = useMemo(() => {
-    const alive = sources.filter((s) => !isDead(s));
-    return (alive.length > 0 ? alive : sources).slice(0, MAX_SOURCES);
-  }, [sources, isDead]);
+    const tier = (s: PlayableSource) => {
+      if (s.url === confirmedUrl) return 0;      // playing — reality beats any probe
+      if (failedAt[s.url] && Date.now() - failedAt[s.url] < FAIL_COOLDOWN_MS) return 4;
+      switch (statusOf(s.url)) {
+        case "working": return 1;
+        case "busy": return 2;
+        case "dead": return 4;
+        default: return 3;                        // unknown / unprobed / checking
+      }
+    };
+    return sources
+      .map((s, i) => ({ s, i, t: tier(s) }))
+      .sort((a, b) => a.t - b.t || a.i - b.i)     // stable within tier
+      .map((x) => x.s)
+      .slice(0, MAX_SOURCES);
+  }, [sources, statusOf, confirmedUrl, failedAt]);
 
   // Auto failover: if the current source is judged dead before it ever played,
   // advance to the first usable one. (Once playing, confirmedUrl shields it.)
@@ -379,11 +396,11 @@ export default function VodMoviePage() {
                   </span>
                   <button
                     onClick={recheckAll}
-                    disabled={checking}
+                    disabled={checking || revalidating}
                     className="flex items-center gap-1 text-text-secondary hover:text-white transition-colors disabled:opacity-50 min-h-[32px]"
                     aria-label="Re-check sources"
                   >
-                    <RefreshCw className={`w-3 h-3 ${checking ? "animate-spin" : ""}`} />
+                    <RefreshCw className={`w-3 h-3 ${checking || revalidating ? "animate-spin" : ""}`} />
                     <span>Recheck</span>
                   </button>
                 </div>
@@ -408,7 +425,10 @@ export default function VodMoviePage() {
                         }`}
                       >
                         <StatusDot status={srcStatus} />
-                        {idx + 1}. {src.label}
+                        {revalidating && probeUrls.includes(src.url) && (
+                          <Loader2 className="w-3 h-3 animate-spin text-text-muted" />
+                        )}
+                        {src.label}
                       </button>
                     );
                   })}

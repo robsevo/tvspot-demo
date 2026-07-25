@@ -9,6 +9,24 @@ const TARGET_WORKING = 3;
 const WATCH_POLL_MS = 20000;
 const WATCH_MAX_ROUNDS = 15; // ~5 min, then stop to bound background load
 
+/**
+ * Consecutive failed probes before a source is reported "dead".
+ *
+ * These panels are connection-limited and demonstrably flap probe-to-probe (see
+ * lib/vod-resolve — the resolver already refuses to trust a single verdict). With
+ * no hysteresis, one unlucky probe flipped a source that was actively playing to
+ * "dead", which is what made sources appear to vanish and come back on their own.
+ * A source that has EVER verified is reported "busy" (try later) rather than dead
+ * until it has failed this many rounds in a row.
+ */
+const DEAD_STREAK = 2;
+
+/** Per-URL probe history, so a verdict is a trend rather than a coin flip. */
+interface UrlMeta {
+  failStreak: number;
+  everOk: boolean;
+}
+
 export type SourceStatus = "checking" | "working" | "dead" | "busy" | "unknown";
 
 interface UseStreamCheck {
@@ -24,6 +42,26 @@ interface UseStreamCheck {
   busyCount: number;
   /** Re-run the probe (e.g. a manual "recheck" button). */
   recheck: () => void;
+  /** True while a MANUAL recheck round is in flight. Distinct from `loading`:
+   *  previous verdicts stay on screen throughout, so the UI can show a per-row
+   *  spinner instead of blanking every badge to "checking". */
+  revalidating: boolean;
+}
+
+/** Update per-URL history from one probe round: reset the streak on success,
+ *  extend it on failure, and remember that a URL has ever verified. */
+function foldMeta(
+  prev: Record<string, UrlMeta>,
+  round: Record<string, StreamCheck>,
+): Record<string, UrlMeta> {
+  const next = { ...prev };
+  for (const [url, r] of Object.entries(round)) {
+    const cur = next[url] ?? { failStreak: 0, everOk: false };
+    next[url] = r.ok
+      ? { failStreak: 0, everOk: true }
+      : { failStreak: cur.failStreak + 1, everOk: cur.everOk };
+  }
+  return next;
 }
 
 /**
@@ -40,11 +78,18 @@ interface UseStreamCheck {
 export function useStreamCheck(urls: string[], opts?: { mode?: "live" | "vod" }): UseStreamCheck {
   const mode = opts?.mode ?? "live";
   const [results, setResults] = useState<Record<string, StreamCheck>>({});
+  // Probe history per URL — what makes a verdict a trend instead of a coin flip.
+  const [meta, setMeta] = useState<Record<string, UrlMeta>>({});
   // The URL-set key that `results` were produced for. "" = nothing probed yet.
   const [checkedKey, setCheckedKey] = useState("");
   const [nonce, setNonce] = useState(0);
+  // A manual recheck keeps the old verdicts visible; this flags the round instead.
+  const [revalidating, setRevalidating] = useState(false);
 
   const key = urls.join("|");
+  // `loading` = the FIRST round for this URL set only. A recheck must NOT set it:
+  // callers freeze auto-failover while loading, and blanking every badge on every
+  // recheck is exactly the flicker this hook used to cause.
   const loading = key !== "" && checkedKey !== key;
 
   useEffect(() => {
@@ -61,14 +106,19 @@ export function useStreamCheck(urls: string[], opts?: { mode?: "live" | "vod" })
         if (!active) return;
         const map: Record<string, StreamCheck> = {};
         for (const r of data.results || []) map[r.url] = r;
-        setResults(map);
+        // MERGE, never replace: a URL absent from this round keeps its last known
+        // verdict rather than reverting to "unknown" and churning the list.
+        setResults((prev) => ({ ...prev, ...map }));
+        setMeta((prev) => foldMeta(prev, map));
         setCheckedKey(key);
+        setRevalidating(false);
       } catch {
         if (!active) return;
-        // Probe failed — record the attempt so we stop showing "checking",
-        // but surface no verdicts rather than false negatives.
-        setResults({});
+        // Probe failed — record the attempt so we stop showing "checking", but
+        // KEEP prior verdicts: a failed round is our problem, not evidence that
+        // every source died.
         setCheckedKey(key);
+        setRevalidating(false);
       }
     })();
     return () => {
@@ -103,6 +153,7 @@ export function useStreamCheck(urls: string[], opts?: { mode?: "live" | "vod" })
       const map: Record<string, StreamCheck> = {};
       for (const r of data.results || []) map[r.url] = r;
       setResults((prev) => ({ ...prev, ...map }));
+      setMeta((prev) => foldMeta(prev, map));
     } catch {}
   }, [mode]);
 
@@ -123,12 +174,17 @@ export function useStreamCheck(urls: string[], opts?: { mode?: "live" | "vod" })
 
   const statusOf = useCallback(
     (url: string): SourceStatus => {
-      if (!current) return "checking";
       const r = results[url];
-      // "busy" (connection-limited) is distinct from dead — kept as a candidate,
-      // but de-prioritized vs a working non-busy source when auto-picking.
-      if (r) return r.ok ? "working" : r.busy ? "busy" : "dead";
-      return "unknown";
+      // Only claim "checking" when we have NOTHING to show for this URL yet —
+      // otherwise the previous verdict stays visible while a round runs.
+      if (!r) return current ? "unknown" : "checking";
+      if (r.ok) return "working";
+      if (r.busy) return "busy";
+      // Failed — but hold the line until it fails consistently. A source that has
+      // verified before is "busy" (come back to it) until DEAD_STREAK rounds agree.
+      const m = meta[url];
+      if (m && m.everOk && m.failStreak < DEAD_STREAK) return "busy";
+      return "dead";
     },
     [results, current]
   );
@@ -140,10 +196,12 @@ export function useStreamCheck(urls: string[], opts?: { mode?: "live" | "vod" })
     : 0;
 
   const recheck = useCallback(() => {
-    setResults({});
-    setCheckedKey(""); // force the loading state until the new probe resolves
+    // Deliberately does NOT clear results/checkedKey. Old verdicts stay on screen
+    // (and the list keeps its membership) while the new round runs; `revalidating`
+    // drives a per-row spinner instead of a blanket "checking" flash.
+    setRevalidating(true);
     setNonce((n) => n + 1);
   }, []);
 
-  return { results, loading, statusOf, workingCount, busyCount, recheck };
+  return { results, loading, statusOf, workingCount, busyCount, recheck, revalidating };
 }
