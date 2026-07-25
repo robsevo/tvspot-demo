@@ -187,9 +187,22 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     if (s === "busy") return 2;                // connection-limited → last resort
     return 3;                                   // dead
   };
-  const firstAlive = allUrls
+  // STICKY auto-pick. Re-sorting on every verdict meant a channel that was
+  // connecting fine on Source 1 got yanked to Source 2 the instant that one
+  // verified — a needless reload (black frame, audio restart) mid-tune, which is
+  // the opposite of fluid. Once an auto source is chosen we keep it until it is
+  // actually judged dead / drops, so verdicts refine the ORDER for failover
+  // without interrupting a healthy connect.
+  const ranked = allUrls
     .filter((u) => !isDead(u))
-    .sort((a, b) => pickRank(a) - pickRank(b))[0];
+    .sort((a, b) => pickRank(a) - pickRank(b));
+  const autoRef = useRef<string | null>(null);
+  const stick = autoRef.current;
+  const firstAlive =
+    stick && allUrls.includes(stick) && !isDead(stick) ? stick : ranked[0];
+  useEffect(() => {
+    autoRef.current = firstAlive ?? null;
+  }, [firstAlive]);
   // If every source is cooling down (a global relay outage), keep trying the
   // least-recently-failed one instead of blanking to "no stream" — it's the most
   // likely to have recovered, and the player's own recovery reconnects in place.
@@ -252,6 +265,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
         src={src}
         channelName={channel.name}
         title={channel.name}
+        poster={channel.logo_url || channel.logo}
         isLive
         channelUp={channelUp}
         channelDown={channelDown}

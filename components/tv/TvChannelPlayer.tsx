@@ -136,15 +136,30 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   const shownWorking =
     workingCount + (confirmedUrl && statusOf(confirmedUrl) !== "working" ? 1 : 0);
 
+  // EVERY source stays listed. Membership must be stable here even more than on the
+  // web: this same array drives D-pad source cycling below, so a row appearing or
+  // vanishing between probe rounds makes the remote land on a different source than
+  // the one the user was aiming at. Verdicts change the badge and the ORDER only
+  // (playing/picked → Online → Busy → unprobed → dead), stable within each tier.
   const displayUrls = useMemo(() => {
-    const alive = allUrls.filter((u) => !isDead(u));
-    const base = (alive.length > 0 ? alive : allUrls).slice(0, MAX_SOURCES);
-    if (pickedUrl && allUrls.includes(pickedUrl) && !base.includes(pickedUrl)) {
-      return [pickedUrl, ...base].slice(0, MAX_SOURCES);
-    }
-    return base;
+    const tier = (u: string) => {
+      if (u === confirmedUrl) return 0;   // on screen → reality outranks a probe
+      if (u === pickedUrl) return 0;      // the user's explicit choice stays put
+      if (isDead(u)) return 4;
+      switch (statusOf(u)) {
+        case "working": return 1;
+        case "busy": return 2;
+        case "dead": return 4;
+        default: return 3;                // unknown / still checking
+      }
+    };
+    return allUrls
+      .map((u, i) => ({ u, i, t: tier(u) }))
+      .sort((a, b) => a.t - b.t || a.i - b.i)
+      .map((x) => x.u)
+      .slice(0, MAX_SOURCES);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allUrls, statusOf, pickedUrl, failedAt]);
+  }, [allUrls, statusOf, pickedUrl, confirmedUrl, failedAt]);
 
   const pickValid = pickedUrl != null && allUrls.includes(pickedUrl) && !isDead(pickedUrl);
   const pickRank = (u: string): number => {
@@ -155,9 +170,22 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
     if (s === "busy") return 2;
     return 3;
   };
-  const firstAlive = allUrls
+  // STICKY auto-pick. Re-sorting on every verdict meant a channel that was
+  // connecting fine on Source 1 got yanked to Source 2 the instant that one
+  // verified — a needless reload (black frame, audio restart) mid-tune, which is
+  // the opposite of fluid. Once an auto source is chosen we keep it until it is
+  // actually judged dead / drops, so verdicts refine the ORDER for failover
+  // without interrupting a healthy connect.
+  const ranked = allUrls
     .filter((u) => !isDead(u))
-    .sort((a, b) => pickRank(a) - pickRank(b))[0];
+    .sort((a, b) => pickRank(a) - pickRank(b));
+  const autoRef = useRef<string | null>(null);
+  const stick = autoRef.current;
+  const firstAlive =
+    stick && allUrls.includes(stick) && !isDead(stick) ? stick : ranked[0];
+  useEffect(() => {
+    autoRef.current = firstAlive ?? null;
+  }, [firstAlive]);
   const fallback =
     firstAlive ??
     [...allUrls].sort((a, b) => (failedAt[a] ?? 0) - (failedAt[b] ?? 0))[0] ??
@@ -306,6 +334,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
           src={src}
           channelName={channel.name}
           title={channel.name}
+          poster={channel.logo_url || channel.logo}
           isLive
           hideControls
           videoElRef={videoElRef}
@@ -399,7 +428,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
           </div>
 
           <div className="flex items-center gap-4 flex-wrap">
-            {displayUrls.map((url, i) => {
+            {displayUrls.map((url) => {
               const status = isDead(url) ? "dead" : statusOf(url);
               const isCurrent = url === src;
               return (
@@ -420,7 +449,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
                   }`}
                 >
                   <StatusDot status={status} />
-                  Source {i + 1}
+                  Source {allUrls.indexOf(url) + 1}
                 </button>
               );
             })}

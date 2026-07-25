@@ -442,6 +442,11 @@ export default function VideoPlayer({
   // FRAG_BUFFERED retries the initial autostart while this is false; once true,
   // a paused element means the user paused on purpose, so nothing re-plays it.
   const startedRef = useRef(false);
+  // State mirror of startedRef: a ref can't drive rendering, and we need to know
+  // "no frame has appeared for this src yet" to cover the connect window with a
+  // branded card instead of a black box (the buffering ring below only renders
+  // once `playing` is true, so the FIRST connect showed nothing at all).
+  const [started, setStarted] = useState(false);
 
   // Proactively load Cast SDK so button appears
   useEffect(() => {
@@ -569,6 +574,7 @@ export default function VideoPlayer({
     video.pause();
     // Fresh source hasn't started yet — re-arm the FRAG_BUFFERED autostart retry.
     startedRef.current = false;
+    setStarted(false);
     // Fresh source: clear a stale spinner; VOD auto-advance (autoPlay after a
     // failover) starts in the "waiting for playback" state so the user sees
     // progress, not a dead frame. Live keeps its existing overlay behavior.
@@ -802,7 +808,7 @@ export default function VideoPlayer({
     // `playing` (frames actually rendering), not `play` (which fires on the play()
     // CALL, before the initial autostart has really taken) — this is the point
     // after which FRAG_BUFFERED must stop resuming a paused element.
-    const onPlayingHandler = () => { startedRef.current = true; };
+    const onPlayingHandler = () => { startedRef.current = true; setStarted(true); };
     const onTimeHandler = () => {
       // A rolling remux has no finite video.duration, so the bar would sit empty
       // and never fill. With virtualSeek we know the file's real runtime and the
@@ -1587,6 +1593,31 @@ export default function VideoPlayer({
           >
             Bring it back
           </button>
+        </div>
+      )}
+
+      {/* CONNECTING cover — the window between choosing a source and the first
+          frame. Without it the user stares at a black box: the buffering ring
+          below is gated on `playing`, which is false until playback actually
+          begins, so the initial tune-in had NO indicator at all. Branded with the
+          channel/title so a zap looks like a channel change rather than a crash,
+          and it disappears the instant a frame lands. */}
+      {src && !started && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[#0b1016] pointer-events-none">
+          {poster ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={poster}
+              alt=""
+              className="max-h-[28%] max-w-[45%] object-contain opacity-90"
+            />
+          ) : null}
+          <div className="flex items-center gap-3">
+            <span className="w-6 h-6 rounded-full border-[3px] border-white/20 border-t-cyan-400 border-r-brand animate-spin" />
+            <span className="text-white/80 text-sm sm:text-base font-medium">
+              {channelName || title ? `Tuning ${channelName || title}…` : "Tuning…"}
+            </span>
+          </div>
         </div>
       )}
 
