@@ -21,7 +21,7 @@
  * To raise one: set this to ~25 minutes out (UTC), commit, deploy, THEN deploy
  * the real change. Set it back to null when the work is cosmetic again.
  */
-export const UPDATE_NOTICE_UNTIL: string | null = "2026-07-22T19:40:00Z";
+export const UPDATE_NOTICE_UNTIL: string | null = "2026-07-25T14:35:00Z";
 
 /** Roughly how long viewers are told things may be rough. Kept next to the
  *  deadline so the copy and the window can't drift apart. */
