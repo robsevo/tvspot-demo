@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Pause, SkipForward, RefreshCw, ListVideo, Languages } from "lucide-react";
 import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 import VodPlayer, { isRemuxSource, remuxStartFor, REMUX_SEEK_MIN_S } from "@/components/VodPlayer";
@@ -8,6 +8,7 @@ import type { TvCcHandle } from "@/components/VideoPlayer";
 import { useTvBack } from "@/components/tv/TvNav";
 import { TVKEY } from "@/lib/tv";
 import type { PlayableSource } from "@/lib/sources";
+import { useStreamCheck } from "@/hooks/useStreamCheck";
 import type { SubtitleTrack } from "@/lib/subtitles";
 import { useEpisodeMarkers } from "@/hooks/useEpisodeMarkers";
 
@@ -80,6 +81,41 @@ export default function TvVodPlayback({
 }: Props) {
   const [index, setIndex] = useState(0);
   const [resumeAt, setResumeAt] = useState(initialTime ?? 0);
+
+  // SERVER-SIDE PROBE. Without this the TV discovered every dead source the slow
+  // way — VodPlayer's never-started watchdog is 25s (35s for remux), so a title
+  // whose first six sources were dead burned 2.5-3.5 MINUTES of timeouts before
+  // reaching a good one ("Disclosure Day took 5 min, HD7 won"). The web page has
+  // probed all along; this path never did. One POST checks every URL in parallel
+  // server-side, so the TV pays no per-source cost and can OPEN on a source that
+  // is already known to answer.
+  const probeUrls = useMemo(() => sources.map((x) => x.url), [sources]);
+  const { statusOf } = useStreamCheck(probeUrls, { mode: "vod" });
+
+  // Reorder for playback: verified working first, then unprobed, busy, dead last.
+  // Stable within a tier, so this only ever moves a dead source DOWN — it never
+  // shuffles two equally-good ones. `index` addresses THIS array.
+  // FROZEN once playback begins. `index` addresses this array, so if a late probe
+  // verdict reordered it mid-movie the element under `index` would change and the
+  // player would reload a different file — a self-inflicted interruption. Ordering
+  // is therefore only allowed to settle BEFORE the first frame; after that the
+  // chain is fixed and verdicts only inform the dead-skip in `fail`.
+  const frozenRef = useRef<PlayableSource[] | null>(null);
+  const ordered = useMemo(() => {
+    if (frozenRef.current) return frozenRef.current;
+    const tier = (u: string) => {
+      switch (statusOf(u)) {
+        case "working": return 0;
+        case "busy": return 2;
+        case "dead": return 3;
+        default: return 1;   // unknown / still checking — worth trying
+      }
+    };
+    return sources
+      .map((x, i) => ({ x, i, t: tier(x.url) }))
+      .sort((a, b) => a.t - b.t || a.i - b.i)
+      .map((v) => v.x);
+  }, [sources, statusOf]);
   const [exhausted, setExhausted] = useState(false);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
 
@@ -117,7 +153,7 @@ export default function TvVodPlayback({
   // few seconds; without a marker the screen just freezes and looks broken.
   const [seeking, setSeeking] = useState(false);
 
-  const source = sources[index];
+  const source = ordered[index];
   // What actually plays: a chosen audio track's URL overrides the plain source.
   const activeUrl = audioUrl ?? source?.url ?? "";
   const isRemux = isRemuxSource(source?.url);
@@ -260,7 +296,7 @@ export default function TvVodPlayback({
     videoElRef,
     nextUp ? nextUp.play : null,
     index,
-    !/remux\.m3u8/.test(sources[index]?.url ?? ""),
+    !/remux\.m3u8/.test(ordered[index]?.url ?? ""),
   );
   const actionVisible = skipVisible || nextVisible;
 
@@ -297,18 +333,26 @@ export default function TvVodPlayback({
       setIndex((i) => {
         // Remember what died so the picker can grey it out — otherwise the user
         // is invited to hand-pick sources the player has already ruled out.
-        const dead = sources[i]?.url;
+        const dead = ordered[i]?.url;
         if (dead) setDeadUrls((prev) => (prev.indexOf(dead) === -1 ? [...prev, dead] : prev));
-        if (i + 1 < sources.length) {
-          setNotice(`Source failed — trying ${sources[i + 1].label}`);
+        // Skip straight past sources the PROBE already judged dead. Landing on
+        // one costs the full never-started watchdog (25s, 35s for remux) to learn
+        // what we already know — six of those in a row is the 3+ minute hunt this
+        // path used to do. A probe verdict of "dead" is only trusted for skipping,
+        // never for hiding: if everything is judged dead we still try the next one.
+        let n = i + 1;
+        while (n < ordered.length && statusOf(ordered[n].url) === "dead") n += 1;
+        if (n >= ordered.length) n = i + 1;   // all dead ahead → try anyway
+        if (n < ordered.length) {
+          setNotice(`Source failed — trying ${ordered[n].label}`);
           setTimeout(() => setNotice(null), 4000);
-          return i + 1;
+          return n;
         }
         setExhausted(true);
         return i;
       });
     },
-    [sources],
+    [ordered, statusOf],
   );
 
   useEffect(() => {
@@ -450,6 +494,9 @@ export default function TvVodPlayback({
             onPlay={() => {
               setPaused(false);
               setSeeking(false);
+              // First frame → lock the failover chain (see frozenRef): from here a
+              // late verdict must not be able to reorder the array `index` points into.
+              if (!frozenRef.current) frozenRef.current = ordered;
             }}
             onEnded={nextUp ? playNext : undefined}
             onProgress={onProgress}
@@ -476,7 +523,7 @@ export default function TvVodPlayback({
                 {refreshing ? "Looking…" : "Find new sources"}
               </button>
             )}
-            {sources.length > 1 && (
+            {ordered.length > 1 && (
               <button
                 data-tv
                 data-tv-overlay-action
@@ -501,12 +548,12 @@ export default function TvVodPlayback({
           <div className="px-14 pb-14">
             <p className="text-3xl font-bold text-white mb-2">Sources</p>
             <p className="text-lg text-[#8197a4] mb-7">
-              {sources.length} available
+              {ordered.length} available
               {deadUrls.length > 0 ? ` · ${deadUrls.length} stopped working` : ""}
             </p>
 
             <div className="flex items-center gap-4 flex-wrap">
-              {sources.map((s, i) => {
+              {ordered.map((s: PlayableSource, i: number) => {
                 const isCurrent = i === index;
                 const isDead = deadUrls.indexOf(s.url) !== -1;
                 return (
