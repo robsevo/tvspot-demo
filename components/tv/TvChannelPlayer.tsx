@@ -449,6 +449,23 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
           </div>
 
           <div className="flex items-center gap-4 flex-wrap">
+            {/* Recheck leads the row. The overlay gets opened BECAUSE something
+                is wrong, and this is the one control that re-judges every source
+                at once — behind up to ten chips it was the furthest thing from
+                the remote at the moment it's most wanted.
+                Moving it here costs nothing on the way in: displayUrls sorts the
+                playing/picked source to tier 0, so the chip carrying
+                data-tv-autofocus is normally the FIRST one, which now sits
+                immediately to Recheck's right. One press of Left. */}
+            <button
+              data-tv
+              onClick={recheckAll}
+              disabled={loading}
+              className="flex items-center gap-2.5 px-6 py-3.5 rounded-lg text-xl font-medium bg-[#1a242f] text-[#aebbc5] disabled:opacity-50"
+            >
+              <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
+              Recheck
+            </button>
             {displayUrls.map((url) => {
               const status = isDead(url) ? "dead" : statusOf(url);
               const isCurrent = url === src;
@@ -474,15 +491,6 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
                 </button>
               );
             })}
-            <button
-              data-tv
-              onClick={recheckAll}
-              disabled={loading}
-              className="flex items-center gap-2.5 px-6 py-3.5 rounded-lg text-xl font-medium bg-[#1a242f] text-[#aebbc5] disabled:opacity-50"
-            >
-              <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
-              Recheck
-            </button>
           </div>
 
           <p className="mt-6 text-base text-[#5a6b78]">
