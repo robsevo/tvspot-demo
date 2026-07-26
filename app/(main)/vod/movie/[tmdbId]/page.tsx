@@ -135,11 +135,13 @@ export default function VodMoviePage() {
 
   // Server-side reachability probe (same machinery as live channels, VOD mode:
   // HEAD / range-GET — these are files and embed pages, not HLS playlists).
-  // Probe the CHEAP sources first and cap the round. A remux source is proxied as
-  // /api/vod-stream?url=<relay>/remux.m3u8… and each probe of one starts a relay
-  // ffmpeg session, so a title whose leading rows are all mkv would spend the whole
-  // opening round waiting on transcoders. Direct files/embeds answer in ms; remux
-  // sources stay in the list, just unprobed (⇒ never judged dead) until a recheck.
+  // Probe the CHEAP sources first and cap the round. A remux source is a relay
+  // /remux.m3u8 URL and each probe of one starts a relay ffmpeg session, so a title
+  // whose leading rows are all mkv would spend the whole opening round waiting on
+  // transcoders — and those sessions compete with the stream the viewer is actually
+  // watching. Direct files/embeds answer in ms; remux sources stay in the list, just
+  // unprobed (⇒ never judged dead) until a recheck. The `includes("remux")` test
+  // still holds now that the URL is the relay's directly (see lib/vod-resolve).
   const probeUrls = useMemo(() => {
     const isRemux = (u: string) => u.includes("remux");
     const cheap = sources.filter((s) => !isRemux(s.url));
