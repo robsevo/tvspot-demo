@@ -6,6 +6,7 @@ import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 import VodPlayer, { isRemuxSource, remuxStartFor, REMUX_SEEK_MIN_S } from "@/components/VodPlayer";
 import type { TvCcHandle } from "@/components/VideoPlayer";
 import { useTvBack } from "@/components/tv/TvNav";
+import TvKeyHints from "@/components/tv/TvKeyHints";
 import { TVKEY } from "@/lib/tv";
 import type { PlayableSource } from "@/lib/sources";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
@@ -620,6 +621,24 @@ export default function TvVodPlayback({
           </div>
         </div>
       )}
+
+      {/* Remote hints (top-right, transient). Up = sources is the one binding
+          nobody guesses — Left/Right/Enter behave like every other player, but
+          the escape hatch for a stuttering source does not — and it is exactly
+          what someone needs when the picture stalls. Clear of the failover
+          notice (top-left), the OSD (bottom) and the Skip/Next card
+          (bottom-right); hidden while the picker owns the screen. */}
+      <TvKeyHints
+        id="vod"
+        suppressed={pickerOpen || exhausted}
+        hints={[
+          { keys: "Enter", label: "Play / pause" },
+          { keys: "◀ ▶", label: `Skip ${SEEK_STEP_S} seconds` },
+          { keys: "▲", label: "Source list" },
+          { keys: "▼", label: "Subtitles" },
+        ]}
+        footer="Buffering or stuck? Press ▲ and pick another source."
+      />
 
       {/* Center pause badge */}
       {paused && !exhausted && (

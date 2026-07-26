@@ -9,6 +9,7 @@ import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
 import VideoPlayer from "@/components/VideoPlayer";
 import { LogoImage } from "@/components/LogoImage";
 import { useTvBack } from "@/components/tv/TvNav";
+import TvKeyHints from "@/components/tv/TvKeyHints";
 import { nowAndNext, fmtTime } from "@/lib/tvEpg";
 import { TVKEY } from "@/lib/tv";
 import { Check, X, Loader2, RefreshCw } from "lucide-react";
@@ -347,6 +348,22 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
           onError={handleSourceFailure}
         />
       </div>
+
+      {/* Remote hints (top-right, transient). Deliberately opposite the zap
+          banner's bottom-left corner and clear of the info overlay, so all
+          three can be up at once without colliding. Hidden the moment the
+          overlay opens — at that point the overlay's own footer line takes
+          over as the key legend. */}
+      <TvKeyHints
+        id="live"
+        suppressed={overlayOpen}
+        hints={[
+          { keys: "Enter", label: "Source list & Recheck" },
+          { keys: "▲ ▼", label: "Change channel" },
+          { keys: "◀ ▶", label: "Change source" },
+        ]}
+        footer="Buffering or stuck? Press Enter, then Recheck."
+      />
 
       {/* Zap banner (bottom-left, transient): channel + what's on now. */}
       {bannerText && !overlayOpen && (
