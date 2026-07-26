@@ -167,6 +167,12 @@ Live at `https://tv.example.com/tvspot.apk` (own domain on purpose — the AFTVn
 short code registered against it is **permanent and uneditable**, so the target
 had to be a hostname that can be repointed at a different host forever).
 
+**Downloader code: `8167020`** — also reachable as `aftv.news/8167020`. That code
+is welded to the URL above for good: it cannot be edited, re-pointed or deleted,
+and one URL can only ever hold one code. If the APK has to move, the fix is to
+keep serving `tv.example.com/tvspot.apk` (repoint the DNS, or redirect the path) —
+never to mint a second code, which would strand everyone holding the first.
+
 On the stick: **Settings → My Fire TV → Developer Options → Install unknown
 apps → Downloader: On**, then enter the code or URL in Downloader.
 
