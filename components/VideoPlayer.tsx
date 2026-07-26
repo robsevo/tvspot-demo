@@ -654,6 +654,22 @@ export default function VideoPlayer({
         maxBufferHole: 1.5,
         nudgeOffset: 0.2,
         nudgeMaxRetry: 5,
+        // How long hls.js lets playback sit FROZEN before it tries the nudge
+        // above. Its default is 2s — which, on the same flaky-TS timeline
+        // maxBufferHole exists for, IS the "it buffered for a few seconds out of
+        // nowhere" the viewer reports: the gap controller simply waits two full
+        // seconds before doing anything about a hole it could step over. 1s
+        // halves that while staying above the noise floor of a healthy stream,
+        // so an ordinary sub-second dip still doesn't trigger a nudge. Going
+        // lower (0.5) starts nudging streams that would have recovered on their
+        // own, which trades a rare freeze for frequent small glitches.
+        highBufferWatchdogPeriod: 1,
+        // Fetch the NEXT fragment while the current one is still playing out,
+        // rather than waiting for it to finish first (hls.js default). One slow
+        // segment then eats into prefetch time instead of straight into the
+        // playback cushion — the other way this shows up as buffering with no
+        // apparent cause. Costs at most one extra fragment in flight.
+        startFragPrefetch: true,
         // Sit a fixed 36 SECONDS behind the live edge (not a segment COUNT). The
         // relay's transmux window is 36×3s = 108s, designed for exactly this — but
         // a count of 4 only bought ~12s on those 3s segments, leaving almost no
