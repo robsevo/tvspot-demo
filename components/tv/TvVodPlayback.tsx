@@ -82,40 +82,26 @@ export default function TvVodPlayback({
   const [index, setIndex] = useState(0);
   const [resumeAt, setResumeAt] = useState(initialTime ?? 0);
 
-  // SERVER-SIDE PROBE. Without this the TV discovered every dead source the slow
-  // way — VodPlayer's never-started watchdog is 25s (35s for remux), so a title
-  // whose first six sources were dead burned 2.5-3.5 MINUTES of timeouts before
-  // reaching a good one ("Disclosure Day took 5 min, HD7 won"). The web page has
-  // probed all along; this path never did. One POST checks every URL in parallel
-  // server-side, so the TV pays no per-source cost and can OPEN on a source that
-  // is already known to answer.
-  const probeUrls = useMemo(() => sources.map((x) => x.url), [sources]);
+  // SERVER-SIDE PROBE — used ONLY to skip definitively-dead sources on failover,
+  // never to reorder. It must not reorder: lib/vod-resolve deliberately leads with
+  // the relay REMUX ("ENGLISH FIRST, EVERY VOD… Don't 'fix' this ordering by
+  // promoting direct files"), and remux is also the only path this 2019 Samsung
+  // plays reliably — the relay maps English audio and transcodes AC-3 (which the
+  // box cannot decode) to AAC. Ranking by probe verdict demoted remux (each remux
+  // probe has to spin up ffmpeg, so it answers slowly or not at all) and promoted
+  // raw progressive mp4s: foreign audio, and mid-playback freezing/stopping.
+  //
+  // Remux URLs are therefore NOT probed at all — a probe of one costs a relay
+  // ffmpeg session for no verdict we'd act on. Unprobed sources are never judged
+  // dead, so they stay exactly where the resolver put them.
+  const probeUrls = useMemo(
+    () => sources.filter((x) => !x.url.includes("remux")).map((x) => x.url),
+    [sources],
+  );
   const { statusOf } = useStreamCheck(probeUrls, { mode: "vod" });
 
-  // Reorder for playback: verified working first, then unprobed, busy, dead last.
-  // Stable within a tier, so this only ever moves a dead source DOWN — it never
-  // shuffles two equally-good ones. `index` addresses THIS array.
-  // FROZEN once playback begins. `index` addresses this array, so if a late probe
-  // verdict reordered it mid-movie the element under `index` would change and the
-  // player would reload a different file — a self-inflicted interruption. Ordering
-  // is therefore only allowed to settle BEFORE the first frame; after that the
-  // chain is fixed and verdicts only inform the dead-skip in `fail`.
-  const frozenRef = useRef<PlayableSource[] | null>(null);
-  const ordered = useMemo(() => {
-    if (frozenRef.current) return frozenRef.current;
-    const tier = (u: string) => {
-      switch (statusOf(u)) {
-        case "working": return 0;
-        case "busy": return 2;
-        case "dead": return 3;
-        default: return 1;   // unknown / still checking — worth trying
-      }
-    };
-    return sources
-      .map((x, i) => ({ x, i, t: tier(x.url) }))
-      .sort((a, b) => a.t - b.t || a.i - b.i)
-      .map((v) => v.x);
-  }, [sources, statusOf]);
+  // Playback order is the RESOLVER's order, untouched.
+  const ordered = sources;
   const [exhausted, setExhausted] = useState(false);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
 
@@ -494,9 +480,6 @@ export default function TvVodPlayback({
             onPlay={() => {
               setPaused(false);
               setSeeking(false);
-              // First frame → lock the failover chain (see frozenRef): from here a
-              // late verdict must not be able to reorder the array `index` points into.
-              if (!frozenRef.current) frozenRef.current = ordered;
             }}
             onEnded={nextUp ? playNext : undefined}
             onProgress={onProgress}
