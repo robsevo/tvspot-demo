@@ -25,6 +25,9 @@ export default function TvMoviePage() {
   const [detail, setDetail] = useState<VodDetail | null>(null);
   const [failed, setFailed] = useState(false);
   const [resolved, setResolved] = useState<string[]>(() => getPrewarmed("movie", tmdbId) ?? []);
+  // Has the stream resolve settled? Distinguishes "still looking" from "found
+  // nothing" — see the .finally() below.
+  const [resolveDone, setResolveDone] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [fromStart, setFromStart] = useState(false);
   // Hero "Play" deep-link (?play=1): start playback as soon as sources exist.
@@ -79,9 +82,17 @@ export default function TvMoviePage() {
         if (cancelled || err?.name === "AbortError") return;
         setFailed(true);
       });
-    resolveVod("movie", tmdbId).then((urls) => {
-      if (!cancelled && urls.length > 0) setResolved(urls);
-    });
+    resolveVod("movie", tmdbId)
+      .then((urls) => {
+        if (!cancelled && urls.length > 0) setResolved(urls);
+      })
+      .finally(() => {
+        // The resolve is DONE, whatever it found. Without this the button sat on a
+        // disabled "Finding streams…" forever when every tier came back empty —
+        // there was no terminal state, so the page looked hung rather than telling
+        // the user it found nothing and offering a retry.
+        if (!cancelled) setResolveDone(true);
+      });
     return () => {
       cancelled = true;
       ctl.abort();
@@ -133,8 +144,15 @@ export default function TvMoviePage() {
    *  nightly link refresh and now, so a dead chain is often fixed by simply
    *  re-resolving — that used to require backing out and re-opening the title. */
   const refreshSources = useCallback(async () => {
-    const urls = await resolveVod("movie", tmdbId, undefined, undefined, true);
-    if (urls.length > 0) setResolved(urls);
+    // Back to "looking" while the retry runs, so the button reflects reality
+    // instead of staying on "No sources" through a fresh attempt.
+    setResolveDone(false);
+    try {
+      const urls = await resolveVod("movie", tmdbId, undefined, undefined, true);
+      if (urls.length > 0) setResolved(urls);
+    } finally {
+      setResolveDone(true);
+    }
   }, [tmdbId]);
 
   const closePlayback = useCallback(() => setPlaying(false), []);
@@ -212,8 +230,14 @@ export default function TvMoviePage() {
             <button
               data-tv
               data-tv-autofocus
-              disabled={sources.length === 0}
+              disabled={sources.length === 0 && !resolveDone}
               onClick={() => {
+                if (sources.length === 0) {
+                  // Nothing found: the press becomes a retry that bypasses every
+                  // cached/in-flight answer, rather than a dead button.
+                  refreshSources();
+                  return;
+                }
                 setFromStart(false);
                 setPlaying(true);
               }}
@@ -221,7 +245,9 @@ export default function TvMoviePage() {
             >
               <Play className="w-6 h-6 fill-black" />
               {sources.length === 0
-                ? "Finding streams…"
+                ? resolveDone
+                  ? "No sources — Retry"
+                  : "Finding streams…"
                 : resumeTime > 0
                   ? "Resume"
                   : "Play"}

@@ -130,6 +130,8 @@ export default function TvSeriesPage() {
 
   const epKey = (s: number, e: number) => `s${s}e${e}`;
 
+  const [settled, setSettled] = useState<Set<string>>(new Set());
+
   const resolveEpisode = useCallback(
     (s: number, e: number) => {
       const key = epKey(s, e);
@@ -138,9 +140,15 @@ export default function TvSeriesPage() {
         dispatchResolved({ key, urls: warm });
         return;
       }
-      resolveVod("series", tmdbId, s, e).then((urls) => {
-        if (urls.length > 0) dispatchResolved({ key, urls });
-      });
+      resolveVod("series", tmdbId, s, e)
+        .then((urls) => {
+          if (urls.length > 0) dispatchResolved({ key, urls });
+        })
+        .finally(() => {
+          // Settled either way. Without this the "Finding streams…" cover had no
+          // terminal state and sat there forever when every tier came back empty.
+          setSettled((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+        });
     },
     [tmdbId],
   );
@@ -266,7 +274,12 @@ export default function TvSeriesPage() {
   }, [playing, detail]);
 
   // Episode picked but no playable source yet — hold a full-screen waiting state.
-  const waiting = playing !== null && playingSources.length === 0;
+  // Episodes whose resolve has finished, so "still looking" and "found nothing"
+  // are distinguishable.
+  const playingKey = playing ? epKey(playing.season, playing.episode) : "";
+  const resolveSettled = playingKey !== "" && settled.has(playingKey);
+  const waiting = playing !== null && playingSources.length === 0 && !resolveSettled;
+  const noSources = playing !== null && playingSources.length === 0 && resolveSettled;
   useTvBack(waiting ? closePlayback : null);
 
   const listed = isInList(seriesId, "series");
@@ -509,6 +522,39 @@ export default function TvSeriesPage() {
         >
           <p className="text-2xl text-white">Finding streams…</p>
           <p className="text-xl text-text-muted">Press Back to cancel.</p>
+        </div>
+      )}
+
+      {noSources && (
+        <div
+          data-tv-trap
+          className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center gap-5"
+        >
+          <p className="text-2xl text-white">No sources found for this episode.</p>
+          <button
+            data-tv
+            data-tv-autofocus
+            onClick={() => {
+              if (!playing) return;
+              const k = epKey(playing.season, playing.episode);
+              setSettled((prev) => {
+                const n = new Set(prev);
+                n.delete(k);
+                return n;
+              });
+              resolveVod("series", tmdbId, playing.season, playing.episode, true)
+                .then((urls) => {
+                  if (urls.length > 0) dispatchResolved({ key: k, urls });
+                })
+                .finally(() =>
+                  setSettled((prev) => (prev.has(k) ? prev : new Set(prev).add(k))),
+                );
+            }}
+            className="bg-white text-black text-xl font-bold px-7 py-3.5 rounded-lg focus:outline-none focus:ring-4 focus:ring-cyan-400"
+          >
+            Try again
+          </button>
+          <p className="text-xl text-text-muted">Press Back to pick another episode.</p>
         </div>
       )}
 
