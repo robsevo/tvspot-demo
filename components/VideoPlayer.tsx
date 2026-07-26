@@ -1601,8 +1601,12 @@ export default function VideoPlayer({
           below is gated on `playing`, which is false until playback actually
           begins, so the initial tune-in had NO indicator at all. Branded with the
           channel/title so a zap looks like a channel change rather than a crash,
-          and it disappears the instant a frame lands. */}
-      {src && !started && (
+          and it disappears the instant a frame lands.
+
+          LIVE ONLY. VOD already shows an indicator during its connect — the center
+          play button turns into an awaitingPlay spinner — so rendering this on top
+          of it put TWO spinners on screen at once. Live is the case that had none. */}
+      {isLive && src && !started && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[#0b1016] pointer-events-none">
           {poster ? (
             /* eslint-disable-next-line @next/next/no-img-element */
