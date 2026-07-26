@@ -8,6 +8,7 @@ import { useEpg } from "@/hooks/useEpg";
 import { useEvents } from "@/hooks/useEvents";
 import { useChannelFavorites } from "@/hooks/useChannelFavorites";
 import { channelSlug } from "@/lib/sources";
+import { getChannelType } from "@/lib/logos";
 import { nowAndNext } from "@/lib/tvEpg";
 import { carriersForLeague } from "@/lib/leagues";
 import { listRecentChannels } from "@/lib/recentChannels";
@@ -15,8 +16,11 @@ import TvBrowseScreen, { type TvBrowseItem, type TvBrowseRail } from "@/componen
 import TvChannelPanel from "@/components/tv/TvChannelPanel";
 import type { Channel, EpgProgram } from "@/lib/types";
 
-const PER_RAIL = 40;
 const EVENTS_TITLE = "Live and upcoming events";
+
+/** Rail order, copied from the web guide's tabs so both clients group the live
+ *  lineup identically. */
+const TYPE_ORDER = ["Sports", "News", "Entertainment", "Movies", "Kids", "Music", "Lifestyle"];
 
 /** A selected event carries its headline + every carrier channel into the
  *  panel (primary first, the rest as "Also on"). */
@@ -119,33 +123,45 @@ export default function TvLivePage() {
       .slice(0, 12);
   }, [events, channels, programsFor]);
 
-  // One rail per channel category (uncategorized falls into "More channels"),
-  // sorted alphabetically — browsable rails replace the old filter sidebar.
+  // One rail per channel TYPE, derived from the channel name — never from
+  // `c.category`, which the backend hardcodes to the string "live" for every
+  // lounge channel (main.py builds it that way in both branches). Grouping on
+  // that field put all 125 channels in ONE rail, and the per-rail cap then
+  // silently dropped everything past the 40th: the lineup looked cut down to a
+  // third of itself, with ESPN+ onward simply absent.
+  //
+  // The web guide already hit this and solved it — see app/(main)/live, whose
+  // tabs classify with getChannelType for exactly this reason. Reusing that one
+  // function (rather than a second TV-only classifier) is what keeps the two
+  // clients showing the same groups.
+  //
+  // No cap: truncating a rail is how the channels went missing in the first
+  // place, and it fails silently by construction. Sports is the biggest bucket
+  // (~45 of 125) and rails scroll horizontally, so the cost is a longer press
+  // of Right — while the Full guide stays the dense way to browse everything.
   const categoryRails = useMemo<TvBrowseRail[]>(() => {
-    const byCat = new Map<string, Channel[]>();
+    const byType = new Map<string, Channel[]>();
     for (const c of channels) {
-      const cat = c.category || "More channels";
-      const bucket = byCat.get(cat);
+      const t = getChannelType(c.name);
+      const bucket = byType.get(t);
       if (bucket) bucket.push(c);
-      else byCat.set(cat, [c]);
+      else byType.set(t, [c]);
     }
-    const cats = Array.from(byCat.keys()).sort((a, b) => {
-      if (a === "More channels") return 1;
-      if (b === "More channels") return -1;
-      return a.localeCompare(b);
-    });
-    // Backend categories are lowercase and often just "live" — title-case them,
-    // and give that generic bucket a real name so the rail isn't a bare "live".
-    const railTitle = (c: string) =>
-      c === "More channels"
-        ? c
-        : /^(live|tv|all)$/i.test(c)
-          ? "All channels"
-          : c.replace(/\b\w/g, (m) => m.toUpperCase());
-    return cats.map((cat) => ({
-      title: railTitle(cat),
-      items: byCat.get(cat)!.slice(0, PER_RAIL).map(channelItem),
-    }));
+    const rank = (t: string) => {
+      const i = TYPE_ORDER.indexOf(t);
+      return i < 0 ? TYPE_ORDER.length : i; // unknown types sort last, stably
+    };
+    return Array.from(byType.keys())
+      .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+      .map((type) => ({
+        title: type,
+        items: byType
+          .get(type)!
+          // Keep the lineup's own running order within a rail, like the web guide.
+          .slice()
+          .sort((a, b) => (a.channel_number || 0) - (b.channel_number || 0))
+          .map(channelItem),
+      }));
   }, [channels, channelItem]);
 
   const rails = useMemo<TvBrowseRail[]>(() => {
