@@ -21,40 +21,20 @@ import { useEffect, useRef, useState } from "react";
 const HINT_MS = 7000;
 
 /**
- * Stop showing a given card after this many appearances, ever. These are the
- * same handful of people every night — the hints are onboarding, not chrome,
- * and an overlay that greets a regular on every single tune-in is noise. Set to
- * `Infinity` to show it always.
+ * The ONLY thing that suppresses a repeat. There is deliberately no lifetime
+ * cap: the hints show every time someone opens a player, for everyone, forever.
+ *
+ * This exists purely because the live player REMOUNTS on every channel zap —
+ * Up/Down changes the route param — so without it, surfing channels would strobe
+ * the card on every press. A zap lands well inside this window and stays quiet;
+ * genuinely opening a player again later is past it and shows normally. Set to 0
+ * to show the card on literally every mount, zaps included.
  */
-const MAX_SHOWS = 6;
+const REPEAT_COOLDOWN_MS = 60000;
 
-/** localStorage key holding the lifetime count for one card id. */
-const countKey = (id: string) => `tv-hints-shown:${id}`;
-
-/**
- * Ids already shown in THIS page session. The live player remounts on every
- * channel zap (the route param changes), so without this the card would flash
- * again on every press of Up/Down and burn its whole lifetime budget in one
- * sitting. Module scope survives client-side navigation; a reload resets it,
- * which is the intent — one reminder per sitting.
- */
-const shownThisSession = new Set<string>();
-
-function readCount(id: string): number {
-  try {
-    return Number(window.localStorage.getItem(countKey(id))) || 0;
-  } catch {
-    // Private mode / storage disabled — treat as "never shown". The card is
-    // cosmetic, so failing open (show it) is the harmless direction.
-    return 0;
-  }
-}
-
-function bumpCount(id: string, next: number): void {
-  try {
-    window.localStorage.setItem(countKey(id), String(next));
-  } catch {}
-}
+/** When each card id was last put on screen. Module scope survives client-side
+ *  navigation between /tv routes; a reload starts fresh, which is harmless. */
+const lastShownAt = new Map<string, number>();
 
 export interface TvHint {
   /** Key cap text, e.g. "Enter" or "◀ ▶". Unicode arrows only — no emojis. */
@@ -80,24 +60,23 @@ export default function TvKeyHints({
   const [show, setShow] = useState(false);
   const decided = useRef(false);
 
-  // Eligibility is a CLIENT-only question (localStorage), so it cannot be
-  // decided during render without a hydration mismatch — hence the effect. The
-  // ref makes it run once per mount: React invokes effects twice in dev
-  // StrictMode, which would otherwise double-charge the lifetime counter.
+  // Decided in an effect rather than during render: it reads a clock, and the
+  // server has no idea what the client's zap cooldown looks like. The ref makes
+  // it run once per mount — React invokes effects twice in dev StrictMode, which
+  // would otherwise stamp the cooldown before the real pass reads it and make
+  // the card never appear in dev.
   useEffect(() => {
     if (decided.current) return;
     decided.current = true;
 
-    if (shownThisSession.has(id)) return;
-    const seen = readCount(id);
-    if (seen >= MAX_SHOWS) return;
+    const last = lastShownAt.get(id);
+    if (last !== undefined && Date.now() - last < REPEAT_COOLDOWN_MS) return;
 
-    shownThisSession.add(id);
-    bumpCount(id, seen + 1);
+    lastShownAt.set(id, Date.now());
     // The rule-compliant alternative — render the card always, then hide it from
-    // the DOM once localStorage says this user is past their quota — flashes the
-    // hints at people who have already seen them six times, and does it worst on
-    // exactly the slow TV webviews this ships to. One extra render is cheaper.
+    // the DOM when the cooldown says this is a zap — flashes the hints on every
+    // channel change, and does it worst on exactly the slow TV webviews this
+    // ships to. One extra render is cheaper.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setShow(true);
   }, [id]);
