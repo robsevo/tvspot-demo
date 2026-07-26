@@ -6,9 +6,14 @@
  * embedding all vary and are outside our control — so the UI labels each source
  * by provider (instead of "Source 1/2/3") and always offers an open-in-new-tab
  * escape hatch for providers that frame-bust or refuse embedding.
+ *
+ * THIS MODULE IS IMPORTED BY CLIENT COMPONENTS — keep it free of link data.
+ * It used to `import verified-sources.json` for getChannelSources(), which put
+ * the entire nightly link list (~480KB) into a client chunk and made every
+ * nightly refresh a forced reload for every open client. That lookup now lives
+ * in lib/channelSources.ts (server-only, reads lib/linkData at request time) and
+ * reaches the player as `channel.verified_sources` off /api/lounge/live-channels.
  */
-
-import verifiedSources from "@/data/verified-sources.json";
 
 /**
  * URL-safe channel slug. Replaces EVERY non-alphanumeric run (incl. "/" in
@@ -18,48 +23,6 @@ import verifiedSources from "@/data/verified-sources.json";
  */
 export function channelSlug(name: string): string {
   return (name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-
-/**
- * Curated per-channel source overrides, tried BEFORE the nightly-verified links.
- *
- * Some Origin upstreams pipe the WRONG-LANGUAGE feed under a correct English name
- * with nothing to detect it: "HGTV" serves a Portuguese (Brazilian) feed but has
- * an English EPG and no HLS LANGUAGE tag, so the pipeline genuinely can't tell and
- * can't auto-fix it. We pin a known English source here so the player plays IT
- * first; Origin's feed stays only as last-resort failover. The player runtime-
- * verifies every source, so a dead override just falls through. Keyed by
- * channelSlug(). Direct URLs must be CORS-enabled (hls.js fetches them in-browser).
- */
-const SOURCE_OVERRIDES: Record<string, string[]> = {
-  // HGTV: Origin's feed is Portuguese. Sky NZ HGTV is English + CORS-enabled
-  // (verified playing). No free US/CA HGTV stream exists publicly (iptv-org has none).
-  hgtv: ["https://i.mjh.nz/.r/sky-hgtv.m3u8"],
-};
-
-/**
- * Verified stream URLs for a channel from the freshness pipeline output.
- * Curated overrides first, then the active set, then the waiting bench as
- * lower-priority failover — the player de-dupes, live-checks, and auto-picks a
- * working one, so surfacing more just gives it more to try.
- *
- * Order is meaningful: the pipeline ranks the active set best-connection-first
- * (scripts/link-freshness/verifier.ts bufferScore — playlist window vs our 36s
- * liveSync, bitrate vs the TV's buffer cap, segment length, tier, latency), so
- * sources[0] is the link least likely to buffer under our player config. Do not
- * re-sort here.
- */
-export function getChannelSources(channelName: string): string[] {
-  try {
-    const slug = channelSlug(channelName);
-    const overrides = SOURCE_OVERRIDES[slug] || [];
-    const entry = (verifiedSources as any).channels?.[slug];
-    const active = entry ? (entry.sources || []).map((s: { url: string }) => s.url) : [];
-    const waiting = entry ? (entry.waiting || []).map((s: { url: string }) => s.url) : [];
-    return Array.from(new Set([...overrides, ...active, ...waiting]));
-  } catch {
-    return [];
-  }
 }
 
 /**

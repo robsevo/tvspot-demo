@@ -1,6 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useChannels } from "@/hooks/useChannels";
-import { getChannelSources } from "@/lib/sources";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
 import VideoPlayer from "./VideoPlayer";
 import { channelSlug } from "@/lib/sources";
@@ -29,12 +28,15 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     (c) => channelSlug(c.name) === channelName
   );
 
-  // Sources, best-first: nightly-verified links (lib/sources) first, then the
-  // backend's live links. Deduped, and capped so we never probe an unbounded set.
+  // Sources, best-first: nightly-verified links first, then the backend's live
+  // links. Deduped, and capped so we never probe an unbounded set. The verified
+  // list rides along on the channel (attached by /api/lounge/live-channels) —
+  // it is deliberately NOT bundled into the client, so a nightly link refresh
+  // no longer changes a chunk hash and no longer forces a reload.
   const probedUrls = useMemo(() => {
     if (!channel) return [];
     const merged = [
-      ...getChannelSources(channel.name),
+      ...(channel.verified_sources || []),
       channel.primary_url,
       ...(channel.backup_urls || []),
     ].filter((u): u is string => Boolean(u));

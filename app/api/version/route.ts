@@ -13,7 +13,14 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   return NextResponse.json(
-    { id: process.env.NEXT_PUBLIC_BUILD_ID || process.env.VERCEL_DEPLOYMENT_ID || "dev" },
+    {
+      id: process.env.NEXT_PUBLIC_BUILD_ID || process.env.VERCEL_DEPLOYMENT_ID || "dev",
+      // Identity of the code in this build with data/ excluded (see next.config.ts).
+      // Not used by the client — the nightly workflow reads it to decide whether
+      // anything other than the link data changed, and skips the deploy when
+      // nothing did. Empty on builds made before this shipped.
+      code: process.env.DEPLOY_CODE_ID || "",
+    },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

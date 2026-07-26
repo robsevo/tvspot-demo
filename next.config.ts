@@ -22,6 +22,23 @@ const commitSha =
   process.env.VERCEL_GIT_COMMIT_SHA ||
   "dev";
 
+/**
+ * Identity of the CODE in this build, ignoring data/.
+ *
+ * The nightly link refresh commits data/*.json but no longer deploys — the app
+ * reads that data from Blob at request time (lib/linkData.ts), which is what
+ * stopped every refresh from force-reloading open clients. The commit sha alone
+ * can't express that: it moves on a data-only night too.
+ *
+ * So the workflow stamps a hash of the tree with data/ excluded, and exposes it
+ * on /api/version. A scheduled run compares its own code hash against the live
+ * one and deploys only when actual code changed — preserving "code pushed to
+ * `deploy` ships by the next nightly at the latest" without resurrecting the
+ * nightly reload. Absent (older build, local build) → the workflow treats it as
+ * unknown and deploys, which is the safe direction.
+ */
+const codeId = process.env.DEPLOY_CODE_ID || "";
+
 const nextConfig: NextConfig = {
   // Run these through SWC so browserslist's chrome 63 floor (the 2019 Samsung
   // TV webview) applies to them too — their published ESM builds carry syntax
@@ -34,6 +51,9 @@ const nextConfig: NextConfig = {
     // the stale one (e.g. a service-worker-cached shell from before a deploy).
     // CI (GITHUB_SHA) stamps real builds; local dev/builds fall back to "dev".
     NEXT_PUBLIC_BUILD_ID: commitSha,
+    // Server-side only — referenced solely by /api/version, so it never reaches
+    // a client chunk (deliberately NOT NEXT_PUBLIC_).
+    DEPLOY_CODE_ID: codeId,
   },
   // Pin Next's internal buildId to the same sha. Without this, redeploying an
   // UNCHANGED commit (deploy-only dispatch) mints a new RANDOM buildId: the

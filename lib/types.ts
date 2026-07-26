@@ -59,6 +59,12 @@ export interface Channel {
   logo_url?: string;
   primary_url?: string;
   backup_urls?: string[];
+  /**
+   * Nightly-verified stream URLs, best-first, attached by our own
+   * /api/lounge/live-channels route (NOT by the backend) — see
+   * lib/channelSources.ts. Absent when the channel has no verified links.
+   */
+  verified_sources?: string[];
   /** Sports game-guide entries the backend attaches per channel on live-channels. */
   programs?: EpgProgram[];
 }

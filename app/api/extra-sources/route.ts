@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync } from "fs";
-import { join } from "path";
 import { channelSlug } from "@/lib/sources";
+import { loadVerifiedSources } from "@/lib/linkData";
 
-// Reads the verified-sources file at request time — not at build time — so it
-// always reflects the latest nightly run without a redeploy.
+// Reads the verified-sources data at request time — not at build time — so it
+// always reflects the latest nightly run without a redeploy. The data now comes
+// from the Blob store rather than the deployed file, so "latest nightly run"
+// is true even when that run shipped no deployment at all (see lib/linkData.ts).
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -33,16 +34,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const filePath = join(process.cwd(), "data", "verified-sources.json");
-    const data = JSON.parse(readFileSync(filePath, "utf-8"));
+    const data = await loadVerifiedSources();
     const entry = data.channels?.[slug];
     if (!entry) {
       return NextResponse.json({ urls: [] }, { headers: { "Cache-Control": "no-store" } });
     }
 
     const excludeSet = new Set(exclude);
-    const active: string[] = (entry.sources || []).map((s: { url: string }) => s.url);
-    const waiting: string[] = (entry.waiting || []).map((s: { url: string }) => s.url);
+    const active: string[] = (entry.sources || []).map((s) => s.url);
+    const waiting: string[] = (entry.waiting || []).map((s) => s.url);
     const extra = [...new Set([...active, ...waiting])]
       .filter((u) => !excludeSet.has(u))
       .slice(0, MAX_EXTRA);

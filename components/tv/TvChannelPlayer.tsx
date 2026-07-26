@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useChannels } from "@/hooks/useChannels";
 import { useEpg } from "@/hooks/useEpg";
-import { getChannelSources, channelSlug } from "@/lib/sources";
+import { channelSlug } from "@/lib/sources";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
 import VideoPlayer from "@/components/VideoPlayer";
 import { LogoImage } from "@/components/LogoImage";
@@ -54,10 +54,14 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   );
 
   // ── source pipeline (ported from ChannelPlayer) ─────────────────────────
+  // Verified links ride along on the channel (attached by our
+  // /api/lounge/live-channels route) rather than being compiled in — see
+  // lib/linkData.ts. Keeping them out of the bundle is what stopped the nightly
+  // link refresh from force-reloading the TV every night.
   const probedUrls = useMemo(() => {
     if (!channel) return [];
     const merged = [
-      ...getChannelSources(channel.name),
+      ...(channel.verified_sources || []),
       channel.primary_url,
       ...(channel.backup_urls || []),
     ].filter((u): u is string => Boolean(u));

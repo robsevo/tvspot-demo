@@ -7,20 +7,24 @@
   ],
   "scripts": {
     "dev": "next dev",
-    "build": "next build && node scripts/chunk-guard.mjs",
+    "build": "next build && node scripts/chunk-guard.mjs && node scripts/link-data-guard.mjs",
     "start": "next start",
     "verify:deploy": "node scripts/verify-chunk-guard.mjs",
     "lint": "eslint",
     "refresh-links": "tsx scripts/link-freshness/index.ts",
-    "refresh-vod-index": "tsx scripts/link-freshness/vod-index.ts"
+    "refresh-vod-index": "tsx scripts/link-freshness/vod-index.ts",
+    "publish-link-data": "tsx scripts/link-freshness/upload-blob.ts",
+    "smoke:link-data": "NODE_OPTIONS=--conditions=react-server tsx scripts/link-freshness/linkdata-smoke.ts"
   },
   "dependencies": {
+    "@vercel/blob": "^2.6.1",
     "framer-motion": "^12.42.0",
     "hls.js": "^1.6.16",
     "lucide-react": "^1.21.0",
     "next": "16.2.9",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
