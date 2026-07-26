@@ -654,22 +654,31 @@ export default function VideoPlayer({
         maxBufferHole: 1.5,
         nudgeOffset: 0.2,
         nudgeMaxRetry: 5,
-        // How long hls.js lets playback sit FROZEN before it tries the nudge
-        // above. Its default is 2s — which, on the same flaky-TS timeline
-        // maxBufferHole exists for, IS the "it buffered for a few seconds out of
-        // nowhere" the viewer reports: the gap controller simply waits two full
-        // seconds before doing anything about a hole it could step over. 1s
-        // halves that while staying above the noise floor of a healthy stream,
-        // so an ordinary sub-second dip still doesn't trigger a nudge. Going
-        // lower (0.5) starts nudging streams that would have recovered on their
-        // own, which trades a rare freeze for frequent small glitches.
-        highBufferWatchdogPeriod: 1,
-        // Fetch the NEXT fragment while the current one is still playing out,
-        // rather than waiting for it to finish first (hls.js default). One slow
-        // segment then eats into prefetch time instead of straight into the
-        // playback cushion — the other way this shows up as buffering with no
-        // apparent cause. Costs at most one extra fragment in flight.
-        startFragPrefetch: true,
+        // DELIBERATELY NOT SET: highBufferWatchdogPeriod and startFragPrefetch.
+        // Both were tried on 2026-07-26 against the rare few-second freeze and
+        // reverted the same day when live started skipping. Recorded so the same
+        // two knobs don't get re-tried:
+        //
+        //  - highBufferWatchdogPeriod 2 → 1. The nudge it gates is NOT a free
+        //    "step over the gap": gap-controller does
+        //    `media.currentTime += (retry + 1) * nudgeOffset`, so with
+        //    nudgeMaxRetry 5 a stubborn stall walks the playhead forward
+        //    0.2 → 0.4 → 0.6 → 0.8 → 1.0s — up to ~3s of content silently
+        //    discarded, each step a visible skip. Halving the window arms that on
+        //    the brief hiccups this origin has constantly. (Measured caveat: over
+        //    ~9 min across 4 channels the nudge never actually fired at either
+        //    value, so this was reverted on mechanism + the report, not on a
+        //    reproduction.)
+        //  - startFragPrefetch false → true. Reverted because it never did what
+        //    it was added for: its guard is `!media && … !config.startFragPrefetch`,
+        //    i.e. it only lets the FIRST fragment load before the media element is
+        //    attached. It is a startup optimisation, not an ongoing "fetch the
+        //    next fragment early", so it cannot deepen the cushion mid-playback.
+        //
+        // The freeze this was chasing stays handled by the settings above:
+        // maxBufferHole 1.5 steps over real holes WITHOUT seeking, and the
+        // two-strike stall watchdog below recovers a genuinely dead source.
+        // Neither discards content the way a nudge does.
         // Sit a fixed 36 SECONDS behind the live edge (not a segment COUNT). The
         // relay's transmux window is 36×3s = 108s, designed for exactly this — but
         // a count of 4 only bought ~12s on those 3s segments, leaving almost no
