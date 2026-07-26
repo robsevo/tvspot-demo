@@ -32,6 +32,13 @@ export async function middleware(request: NextRequest) {
     // Legacy-webview runtime shims — loaded by EVERY page including /login and
     // /tv/login, before any auth exists.
     pathname === "/tv-polyfills.js" ||
+    // The Fire TV APK and its typable alias are the one thing here that must
+    // serve to a total stranger: it is what the Downloader app on a fresh stick
+    // fetches, long before that person has an account. Gating it would 307 the
+    // download to /login and hand Downloader an HTML page to "install".
+    // Nothing leaks — the APK is a WebView shell that lands on /tv/login.
+    pathname === "/tvspot.apk" ||
+    pathname === "/fire" ||
     // The service worker script must be fetchable WITHOUT a cookie: the browser's
     // SW update check is the only recovery path for a client wedged on cached
     // broken chunks after its session expired — a 307-to-login here would leave

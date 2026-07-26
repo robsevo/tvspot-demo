@@ -103,11 +103,74 @@ Three seams, and nothing else:
 
 ## Release build / distribution
 
+Public installs go through the **Downloader** app (AFTVnews) on the stick, so the
+build has to be signed with the release key and published at a URL a stranger can
+reach with no cookie.
+
+### The signing key — read this before touching anything
+
+The release keystore is **not in this repo**. It lives at
+`~/.config/tvspot/tvspot-release.jks`, and `firetv/keystore.properties`
+(gitignored) holds its path and passwords.
+
+Android identifies an installed app by `applicationId` + *signing certificate*.
+Once a stranger has installed a signed build, only the **same key** can ever
+upgrade it in place. Lose the key and every user must uninstall — losing their
+remembered session — before they can move to a new build. Back up **both** files
+off this machine.
+
+Current cert: `CN=TVSpot, O=TVSpot, C=CA`, RSA 4096, SHA-256 fingerprint
+`7B:74:A8:72:65:51:F2:1E:87:D4:A1:B9:2C:E6:D1:20:01:38:6A:8F:F7:6B:56:5F:83:22:5E:9B:B0:47:72:DA`.
+Verify any APK before publishing it:
+
 ```bash
-keytool -genkey -v -keystore tvspot-firetv.jks \
-    -keyalg RSA -keysize 2048 -validity 10000 -alias tvspot
-# add a signingConfig to app/build.gradle.kts, then:
-JAVA_HOME=~/android-studio/jbr ./gradlew :app:assembleRelease
+PATH=~/android-studio/jbr/bin:$PATH \
+  ~/Android/Sdk/build-tools/35.0.0/apksigner verify --print-certs <apk>
 ```
 
-Sideload the resulting APK the same way as the debug one.
+v1 signing is enabled alongside v2/v3 because `minSdk` 22 keeps Fire OS 5 sticks
+in scope and those only understand v1 (JAR) signatures.
+
+### Cutting a release
+
+1. **Bump `versionCode`** in `app/build.gradle.kts`. Fire OS refuses an APK whose
+   `versionCode` is ≤ the installed one, so a forgotten bump means nobody
+   upgrades. Bump `versionName` too if it's a user-visible change.
+2. Build and publish:
+
+```bash
+cd firetv
+JAVA_HOME=~/android-studio/jbr ./gradlew :app:assembleRelease
+cp app/build/outputs/apk/release/app-release.apk ../public/tvspot.apk
+cd .. && git add public/tvspot.apk && git commit && git push origin deploy
+gh workflow run "Nightly link refresh" -f mode=deploy-only
+```
+
+The build fails loudly if `keystore.properties` is missing — otherwise AGP
+quietly emits `app-release-unsigned.apk`, which looks fine and then fails to
+install on every stick it reaches.
+
+### How people install it
+
+`public/tvspot.apk` is served by the Next app at a path that is **public by
+design** — `middleware.ts` allowlists it, because the person fetching it has no
+account yet. The APK is only a WebView shell that lands on `/tv/login`, so there
+is nothing to protect. Two seams make it work with Downloader:
+
+- The path ends in **`.apk`**, and `next.config.ts` serves it as
+  `application/vnd.android.package-archive`. Downloader decides "file to install"
+  vs "web page to render" from that; an extensionless path gets rendered.
+- `/fire` is the human-typable alias and 307s to `/tvspot.apk`, so the URL that
+  finally lands in Downloader still carries the extension.
+
+Live at `https://tv.example.com/tvspot.apk` (own domain on purpose — the AFTVnews
+short code registered against it is **permanent and uneditable**, so the target
+had to be a hostname that can be repointed at a different host forever).
+
+On the stick: **Settings → My Fire TV → Developer Options → Install unknown
+apps → Downloader: On**, then enter the code or URL in Downloader.
+
+> A stick that already has a **debug** build installed cannot take the release
+> APK over the top — different signing key, `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+> Uninstall the old one first. This applies to our own test sticks, not to new
+> users.

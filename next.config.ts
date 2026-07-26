@@ -55,6 +55,35 @@ const nextConfig: NextConfig = {
     // a client chunk (deliberately NOT NEXT_PUBLIC_).
     DEPLOY_CODE_ID: codeId,
   },
+  // Fire TV sideload endpoint. `public/tvspot.apk` is the signed release APK; the
+  // Downloader app (and anyone typing a URL with a remote) fetches it directly.
+  //
+  // The path ends in `.apk` ON PURPOSE and the code registered with the AFTVnews
+  // shortener points at THIS url, not at /fire: Downloader decides "file to
+  // download" vs "page to open in the browser" from the response, and a bare
+  // extensionless path invites it to render the bytes as a web page instead of
+  // installing them. /fire exists only as the human-typable alias and redirects
+  // here (see redirects() below) so the URL that finally lands in Downloader
+  // still carries the extension.
+  async headers() {
+    return [
+      {
+        source: "/tvspot.apk",
+        headers: [
+          // Vercel serves unknown extensions as octet-stream; this is the MIME
+          // type Fire OS's package installer expects to be handed.
+          { key: "Content-Type", value: "application/vnd.android.package-archive" },
+          { key: "Content-Disposition", value: 'attachment; filename="tvspot.apk"' },
+          // A new release overwrites this same path, so the CDN must not pin an
+          // old build for a day. Small file, cheap revalidation.
+          { key: "Cache-Control", value: "public, max-age=300, must-revalidate" },
+        ],
+      },
+    ];
+  },
+  async redirects() {
+    return [{ source: "/fire", destination: "/tvspot.apk", permanent: false }];
+  },
   // Pin Next's internal buildId to the same sha. Without this, redeploying an
   // UNCHANGED commit (deploy-only dispatch) mints a new RANDOM buildId: the
   // sha check above says "nothing changed" so DeployRefresh never reloads,

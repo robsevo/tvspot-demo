@@ -11,6 +11,8 @@
 *.apk
 *.keystore
 *.jks
+# Release signing passwords + the path to the keystore. Never commit.
+/keystore.properties
 
 # The repo root ignores *.pem as a secrets rule. This one is the PUBLIC ISRG
 # Root X1 CA certificate, referenced by network_security_config.xml so Fire OS 5
