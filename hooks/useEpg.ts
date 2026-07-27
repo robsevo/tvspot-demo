@@ -6,6 +6,23 @@ import { fetchJson, DEADLINE } from "@/lib/fetchDeadline";
 import type { EpgProgram, EpgResponse } from "@/lib/types";
 
 const CACHE_KEY = "tvspot_epg_v1";
+/**
+ * Which channel names the last completed round actually ASKED about.
+ *
+ * Freshness alone is not enough to trust the EPG cache, and that gap was a real
+ * bug: DailySplash prewarms only the FIRST batch (20 of 125 channels) and writes
+ * it to CACHE_KEY. The guide then mounted, found a cache that was seconds old,
+ * and scheduled its refresh 15 minutes out — so 20 channels had a guide and
+ * every other row read "No guide data" until the cache aged out. Measured on
+ * prod: of the 40 rows the TV guide shows, only 3 genuinely lack EPG upstream,
+ * yet 23 rendered as "No guide data", and exactly ONE /api/lounge/epg request
+ * was made in 100 seconds.
+ *
+ * Coverage is tracked by ATTEMPT, not by result — 22 channels legitimately have
+ * no programmes upstream, so "did we get data for it" would never be satisfied
+ * and would refetch everything on every mount.
+ */
+const COVER_KEY = "tvspot_epg_cover_v1";
 const FRESH_MS = 15 * 60_000; // cache newer than this → paint it, skip the network
 const REVALIDATE_MS = 15 * 60_000; // background refresh cadence while the guide is open
 const RETRY_MS = [2_000, 5_000, 15_000, 60_000]; // backoff after a failed/empty fetch
@@ -78,6 +95,10 @@ export function useEpg(channelNames: string[]) {
         // is what recovers, not grinding through the remaining batches.
         const MAX_CONSECUTIVE_FAILURES = 2;
         let consecutiveFailures = 0;
+        // Names this round got a real answer for (data OR a legitimate empty),
+        // which is what the coverage check reads. Batches we never reached
+        // because of the early exit must NOT be recorded as covered.
+        const attempted: string[] = [];
         for (let i = 0; i < names.length; i += EPG_BATCH) {
           if (cancelled) return;
           if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) break;
@@ -99,6 +120,7 @@ export function useEpg(channelNames: string[]) {
             // An empty batch is a real answer from a warming backend, not a
             // network failure — don't let it trip the early exit.
             consecutiveFailures = 0;
+            attempted.push(...batch);
             if (Object.keys(map).length === 0) continue;
             anyData = true;
             Object.assign(merged, map);
@@ -116,6 +138,10 @@ export function useEpg(channelNames: string[]) {
         // clobber a real guide with {} (the backend serves {} while warming).
         if (!anyData) throw new Error("EPG empty — backend warming / all batches failed");
         writeCache(CACHE_KEY, merged);
+        // Union with prior coverage: a round that exited early still covered the
+        // batches it reached, and the next round fills in the rest.
+        const priorCover = readCache<string[]>(COVER_KEY)?.data ?? [];
+        writeCache(COVER_KEY, Array.from(new Set([...priorCover, ...attempted])));
         state.lastSuccess = Date.now();
         state.attempt = 0;
         if (!cancelled) schedule(REVALIDATE_MS);
@@ -132,13 +158,18 @@ export function useEpg(channelNames: string[]) {
       }
     };
 
-    // Last-good copy first, then revalidate only if it has aged out.
+    // Last-good copy first, then revalidate if it has aged out OR does not cover
+    // every channel we were asked about. The coverage half is what stops a
+    // partial prewarm (DailySplash warms one batch into the same key) from
+    // passing as a complete guide for a full FRESH_MS — see COVER_KEY.
     const cached = readCache<EpgMap>(CACHE_KEY);
+    const covered = new Set(readCache<string[]>(COVER_KEY)?.data ?? []);
+    const uncovered = namesKey.split(",").filter((n) => !covered.has(n));
     if (cached && Object.keys(cached.data).length > 0) {
       setEpg(cached.data);
       setReady(true);
       state.lastSuccess = Date.now() - cached.ageMs;
-      if (cached.ageMs > FRESH_MS) void refresh();
+      if (cached.ageMs > FRESH_MS || uncovered.length > 0) void refresh();
       else schedule(FRESH_MS - cached.ageMs);
     } else {
       void refresh();

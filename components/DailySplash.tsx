@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { proxyFetch } from "@/lib/api";
-import { writeCache } from "@/lib/localCache";
+import { readCache, writeCache } from "@/lib/localCache";
 import { lastRolloverMs } from "@/lib/dailyBoundary";
 import { fetchJson, DEADLINE } from "@/lib/fetchDeadline";
 import { EPG_BATCH } from "@/hooks/useEpg";
@@ -99,7 +99,15 @@ async function prewarmLive(): Promise<void> {
         stop_utc: p.stop_utc,
       }));
     }
-    if (Object.keys(map).length > 0) writeCache(EPG_CACHE_KEY, map);
+    // MERGE, never replace. This warms only the first batch (20 of ~125
+    // channels); a bare write threw away a complete guide the last session had
+    // already fetched and left every other row blank. useEpg's coverage check
+    // (COVER_KEY) is what guarantees the missing channels get fetched — this
+    // just makes sure we don't destroy good data on the way in.
+    if (Object.keys(map).length > 0) {
+      const prev = readCache<typeof map>(EPG_CACHE_KEY)?.data ?? {};
+      writeCache(EPG_CACHE_KEY, { ...prev, ...map });
+    }
   } catch {
     // Non-fatal: useEpg has its own retry/backoff.
   }
