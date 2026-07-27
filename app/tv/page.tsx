@@ -13,6 +13,7 @@ import { channelSlug } from "@/lib/sources";
 import { nowAndNext } from "@/lib/tvEpg";
 import TvBrowseScreen, { type TvBrowseItem, type TvBrowseRail } from "@/components/tv/TvBrowseScreen";
 import TvChannelPanel from "@/components/tv/TvChannelPanel";
+import { loopShowName } from "@/lib/channelProgramming";
 import type { CatalogItem, Channel } from "@/lib/types";
 
 const CHANNELS_ON_HOME = 12;
@@ -47,10 +48,14 @@ function vodItem(
 
 function channelItem(c: Channel): TvBrowseItem {
   const guide = nowAndNext(c.programs ?? []);
+  // "24/7 <Show>" channels carry no EPG because they have no schedule — the
+  // name is the programming. Render them like a real programme (show on top,
+  // channel underneath) instead of "· Live programming".
+  const loop = loopShowName(c.name);
   return {
     key: `ch-${c.name}`,
-    title: guide.now?.title || c.name,
-    metaLine: guide.now
+    title: guide.now?.title || loop || c.name,
+    metaLine: guide.now || loop
       ? c.name
       : c.online
         ? `${c.name} · Live programming`

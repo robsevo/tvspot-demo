@@ -1647,11 +1647,35 @@ export default function VideoPlayer({
               {channelName || title ? `Tuning ${channelName || title}…` : "Tuning…"}
             </span>
           </div>
+          {/* Rebuffering DURING tune-in reads as three dots under the channel
+              name, not a second ring. See the buffering block below for why two
+              rings could appear at once; this is the same information in a form
+              that doesn't look like the app double-loading. */}
+          {buffering && (
+            <div className="flex items-center gap-1.5" aria-hidden="true">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="w-1.5 h-1.5 rounded-full bg-white/45 animate-pulse"
+                  style={{ animationDelay: `${i * 180}ms`, animationDuration: "1.2s" }}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Buffering ring — shown whenever the stream is rebuffering */}
-      {buffering && playing && (
+      {/* Buffering ring — shown whenever the stream is rebuffering.
+          `started` is required, not just `playing`: those come from DIFFERENT
+          media events. `playing` is set by the `play` event, which fires when
+          playback is REQUESTED; `started` by the `playing` event, which fires
+          when frames actually roll. On a slow live tune-in the gap between them
+          is exactly when buffering kicks in — so `buffering && playing` was true
+          while the Tuning overlay (gated on `!started`) was still up, and the
+          user saw TWO loading circles. Requiring `started` makes the two states
+          mutually exclusive: the overlay owns tune-in (with the dots above), the
+          ring owns rebuffering after playback has begun. */}
+      {buffering && playing && started && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div className="w-14 h-14 rounded-full border-[3px] border-white/15 border-t-cyan-400 border-r-brand animate-spin" />
         </div>

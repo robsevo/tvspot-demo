@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogoImage } from "@/components/LogoImage";
 import { channelSlug } from "@/lib/sources";
+import { fallbackProgramming } from "@/lib/channelProgramming";
 import type { Channel, EpgProgram } from "@/lib/types";
 
 /** Pixels per minute — 8 → 480px per hour, a 5h window ≈ 2400px wide. */
@@ -205,10 +206,20 @@ export default function TvEpgGrid({
                   className="absolute top-1 bottom-1 rounded-lg px-4 text-left ring-1 ring-white/10 bg-[#121a24] focus:outline-none"
                   style={{ left: 2, width: width - 4 }}
                 >
-                  <p className="text-lg font-semibold text-white mt-3">
-                    {c.online ? "Live programming" : "Offline"}
-                  </p>
-                  <p className="text-base text-[#8197a4]">No guide data</p>
+                  {(() => {
+                    // A "24/7 <Show>" channel has no schedule to fetch because
+                    // it has no schedule — but the channel name says exactly
+                    // what's on. See lib/channelProgramming.ts.
+                    const fb = fallbackProgramming(c.name, Boolean(c.online));
+                    return (
+                      <>
+                        <p className="text-lg font-semibold text-white mt-3">{fb.title}</p>
+                        {fb.detail ? (
+                          <p className="text-base text-[#8197a4]">{fb.detail}</p>
+                        ) : null}
+                      </>
+                    );
+                  })()}
                 </button>
               )}
             </div>

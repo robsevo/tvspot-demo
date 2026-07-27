@@ -80,7 +80,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
     [probedUrls, extraUrls],
   );
 
-  const { statusOf, workingCount, busyCount, loading, recheck } = useStreamCheck(allUrls);
+  const { statusOf, workingCount, busyCount, loading, recheck, revalidating } = useStreamCheck(allUrls);
 
   const channelSlugValue = channel ? channelSlug(channel.name) : "";
   const prevChannelSlug = useRef(channelSlugValue);
@@ -457,14 +457,25 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
                 playing/picked source to tier 0, so the chip carrying
                 data-tv-autofocus is normally the FIRST one, which now sits
                 immediately to Recheck's right. One press of Left. */}
+            {/* Feedback is wired to `revalidating`, NOT `loading` — that gap is
+                why this button "did nothing" on the Samsung and the Fire Stick.
+                useStreamCheck deliberately leaves `loading` false during a
+                manual recheck (blanking every badge on each press was the old
+                flicker bug) and raises `revalidating` instead. The web player
+                reads that flag; this one never destructured it, so a press ran
+                a full probe round whose results usually MERGE to the same
+                verdicts — no spinner, no label change, nothing on screen. On a
+                10-foot UI with no devtools that is indistinguishable from a dead
+                button. The label swap matters more than the spinner here: it is
+                readable from a couch. */}
             <button
               data-tv
               onClick={recheckAll}
-              disabled={loading}
+              disabled={loading || revalidating}
               className="flex items-center gap-2.5 px-6 py-3.5 rounded-lg text-xl font-medium bg-[#1a242f] text-[#aebbc5] disabled:opacity-50"
             >
-              <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
-              Recheck
+              <RefreshCw className={`w-5 h-5 ${loading || revalidating ? "animate-spin" : ""}`} />
+              {revalidating ? "Checking…" : "Recheck"}
             </button>
             {displayUrls.map((url) => {
               const status = isDead(url) ? "dead" : statusOf(url);

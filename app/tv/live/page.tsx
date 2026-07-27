@@ -14,6 +14,7 @@ import { carriersForLeague } from "@/lib/leagues";
 import { listRecentChannels } from "@/lib/recentChannels";
 import TvBrowseScreen, { type TvBrowseItem, type TvBrowseRail } from "@/components/tv/TvBrowseScreen";
 import TvChannelPanel from "@/components/tv/TvChannelPanel";
+import { loopShowName } from "@/lib/channelProgramming";
 import type { Channel, EpgProgram } from "@/lib/types";
 
 const EVENTS_TITLE = "Live and upcoming events";
@@ -55,10 +56,12 @@ export default function TvLivePage() {
   const channelItem = useCallback(
     (c: Channel): TvBrowseItem => {
       const guide = nowAndNext(programsFor(c) ?? []);
+      // See app/tv/page.tsx — 24/7 loop channels have no schedule to miss.
+      const loop = loopShowName(c.name);
       return {
         key: `ch-${c.name}`,
-        title: guide.now?.title || c.name,
-        metaLine: guide.now
+        title: guide.now?.title || loop || c.name,
+        metaLine: guide.now || loop
           ? c.name
           : c.online
             ? `${c.name} · Live programming`

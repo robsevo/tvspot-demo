@@ -60,6 +60,17 @@ export function LogoImage({ name, logoUrl, className = "", fallbackClassName = "
           // instead of showing hard square corners inside it.
           className={`w-full h-full object-contain rounded-md ${imgClassName}`}
           onError={() => setIdx((i) => i + 1)}
+          // onError alone is not enough. A source can answer 200 with something
+          // that is not an image (the backend logo path served its HTML login
+          // page for every channel — see app/api/lounge/logo-proxy), and whether
+          // that fires `error` is engine-dependent: Chromium does, older WebKit
+          // renders the broken-image glyph silently. That is the "just a question
+          // mark" on mobile, and because it never errored, the fallback chain
+          // never advanced. A decoded image with zero natural width IS the
+          // broken glyph, so treat it exactly like an error and move on.
+          onLoad={(e) => {
+            if (e.currentTarget.naturalWidth === 0) setIdx((i) => i + 1);
+          }}
         />
       </div>
     );
