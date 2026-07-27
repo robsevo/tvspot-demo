@@ -9,8 +9,11 @@ import { Check } from "lucide-react";
 /**
  * TV login. Two jobs:
  *  1. Silent re-login: if "Remember on this TV" credentials exist, replay them
- *     before showing anything — the nightly 4 AM logout becomes invisible on
- *     the TV. Only a FAILED replay (credentials rotated) shows the form.
+ *     before showing anything. Only a FAILED replay (credentials rotated) shows
+ *     the form. This was the TV's cover for the nightly 4 AM forced-logout —
+ *     which is gone as of 2026-07-27 (lib/auth.ts), so it should now fire only
+ *     after a month of disuse or a credential rotation. Worth keeping exactly
+ *     as-is: retyping a password on a remote is the worst input surface we have.
  *  2. The form itself, remote-friendly: big fields, D-pad focus, Samsung's
  *     on-screen keyboard appears for a focused input on its own.
  */

@@ -1,23 +1,24 @@
 /**
  * Daily rollover boundary — 4:00 AM in America/Toronto (Eastern), DST-safe.
  *
- * One shared source of truth for two features:
- *  - nightly forced-logout: the JWT `exp` (and login cookie maxAge) are set to
- *    `nextRolloverMs()`, so every token dies at the next 4 AM ET and middleware
- *    redirects the stale cookie to /login (see lib/auth.ts, app/api/auth/login).
- *  - the "first sign-in of the day" splash keys off `lastRolloverMs()` as its
- *    per-day epoch, so the splash lines up exactly with the logout boundary
- *    rather than a naive midnight (see components/DailySplash.tsx).
+ * Sole remaining use: `lastRolloverMs()` is the per-day epoch for the
+ * "first open of the day" splash (components/DailySplash.tsx). 4 AM rather than
+ * midnight because it sits after the nightly refresh and before anyone is up,
+ * so "today" starts on fresh data.
+ *
+ * This file used to serve a second feature — a nightly forced-logout that set
+ * the JWT `exp` to `nextRolloverMs()` — which meant every device on every
+ * platform was signed out every morning. That was removed on 2026-07-27 (see
+ * lib/auth.ts for the full reasoning) and `nextRolloverMs` went with it. The
+ * splash is now a pure prewarm: it no longer needs anyone's session to die in
+ * order to fire.
  *
  * Uses Intl.DateTimeFormat with an explicit timeZone, which is available in the
- * Edge runtime (middleware/auth), the Node runtime (API routes), and the browser.
+ * Edge runtime, the Node runtime (API routes), and the browser.
  */
 
 export const ROLLOVER_HOUR = 4; // 4:00 AM local (Eastern)
 const TZ = "America/Toronto";
-// Don't issue a token that expires almost immediately: a 3:30 AM login shouldn't
-// be kicked at 4:00. If the next boundary is closer than this, skip to the day after.
-const MIN_TTL_MS = 60 * 60 * 1000;
 
 /** Calendar Y/M/D of an instant, evaluated in Eastern time (en-CA → YYYY-MM-DD). */
 function etDateParts(atMs: number): { year: number; month: number; day: number } {
@@ -57,26 +58,6 @@ function etWallToUtc(year: number, month: number, day: number, hour: number): nu
   const guess = Date.UTC(year, month - 1, day, hour, 0, 0);
   const utc1 = guess - tzOffsetMs(guess);
   return guess - tzOffsetMs(utc1);
-}
-
-/**
- * Epoch ms of the first 4 AM ET strictly after `nowMs`.
- *
- * `minTtlMs` defaults to the token-issuance guard (a 3:30 AM login shouldn't be
- * kicked at 4:00). Pass 0 to get the RAW next boundary — the client-side
- * session watcher needs that: a page whose token expires at today's 4 AM must
- * watch today's 4 AM even if it happens to (re)mount at 3:59.
- */
-export function nextRolloverMs(nowMs: number = Date.now(), minTtlMs: number = MIN_TTL_MS): number {
-  const { year, month, day } = etDateParts(nowMs);
-  let target = etWallToUtc(year, month, day, ROLLOVER_HOUR);
-  let guard = 0;
-  while (target <= nowMs + minTtlMs && guard < 4) {
-    const next = etDateParts(target + 26 * 60 * 60 * 1000); // safely into next ET day
-    target = etWallToUtc(next.year, next.month, next.day, ROLLOVER_HOUR);
-    guard++;
-  }
-  return target;
 }
 
 /** Epoch ms of the most recent 4 AM ET at or before `nowMs`. */

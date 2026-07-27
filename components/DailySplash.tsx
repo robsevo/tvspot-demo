@@ -25,10 +25,18 @@ import type {
  * the time to PREWARM the exact localStorage caches the pages read — so when it
  * lifts, Home and the guide paint instantly.
  *
- * Shown at most once per 4 AM ET rollover (the same boundary as nightly logout),
- * claimed via localStorage the moment it appears so a same-morning reload (e.g.
- * DeployRefresh) doesn't re-trigger it. Dismissal is adaptive: at least MIN_MS,
- * lifts as soon as the trending prewarm settles, hard-capped at MAX_MS.
+ * Shown at most once per 4 AM ET rollover, claimed via localStorage the moment
+ * it appears so a same-morning reload (e.g. DeployRefresh) doesn't re-trigger
+ * it. Dismissal is adaptive: at least MIN_MS, lifts as soon as the trending
+ * prewarm settles, hard-capped at MAX_MS.
+ *
+ * NOTE: this used to be paired with a nightly forced-logout at the same 4 AM
+ * boundary — the session was deliberately killed so that re-signing in would
+ * trigger this splash. That coupling is gone (lib/auth.ts): sessions now last
+ * 30 days and slide. The splash stands on its own as a first-open-of-the-day
+ * prewarm, which is the part that was ever worth having. It is deliberately
+ * keyed to `username` being present rather than to a sign-in EVENT, so it still
+ * fires for someone who is simply already logged in.
  */
 
 // Cache keys/shapes mirror the consumers so a prewarm write paints them directly:

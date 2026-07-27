@@ -537,6 +537,30 @@ export default function TvVodPlayback({
             </p>
 
             <div className="flex items-center gap-4 flex-wrap">
+              {/* "Find new" leads the row, matching the live picker (8024d8b).
+                  The overlay is opened BECAUSE something is wrong, and this is
+                  the one control that goes and fetches sources we don't have
+                  yet — behind up to ten chips it was the furthest thing from the
+                  remote at the moment it's most wanted, and with a full list it
+                  wrapped onto a second line entirely.
+
+                  Unlike live, we canNOT sort the playing source to the front to
+                  keep it one press away: `ordered` IS the resolver's order and
+                  `index` points into it (7780371 — reordering VOD sources
+                  demoted remux and froze the Samsung). In practice the player
+                  starts at index 0 and stays there unless a source fails, so the
+                  autofocused chip is normally the first one anyway. */}
+              {onRefreshSources && (
+                <button
+                  data-tv
+                  onClick={refresh}
+                  disabled={refreshing}
+                  className="tv-menu-item flex items-center gap-3 px-7 py-4 rounded-lg text-xl font-medium bg-[#1a242f] text-[#aebbc5] disabled:opacity-50 focus:outline-none"
+                >
+                  <RefreshCw className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`} />
+                  {refreshing ? "Looking…" : "Find new"}
+                </button>
+              )}
               {ordered.map((s: PlayableSource, i: number) => {
                 const isCurrent = i === index;
                 const isDead = deadUrls.indexOf(s.url) !== -1;
@@ -564,18 +588,6 @@ export default function TvVodPlayback({
                   </button>
                 );
               })}
-
-              {onRefreshSources && (
-                <button
-                  data-tv
-                  onClick={refresh}
-                  disabled={refreshing}
-                  className="tv-menu-item flex items-center gap-3 px-7 py-4 rounded-lg text-xl font-medium bg-[#1a242f] text-[#aebbc5] disabled:opacity-50 focus:outline-none"
-                >
-                  <RefreshCw className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`} />
-                  {refreshing ? "Looking…" : "Find new"}
-                </button>
-              )}
             </div>
 
             {/* Audio language. Only for remux sources (a direct mp4 is one baked-in

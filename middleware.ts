@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import {
+  verifyToken,
+  signToken,
+  sessionCookieOptions,
+  SESSION_COOKIE,
+  SESSION_RENEW_AFTER_MS,
+} from "@/lib/auth";
 import { TV_UA_RE } from "@/lib/tv";
 
 export async function middleware(request: NextRequest) {
@@ -46,9 +52,9 @@ export async function middleware(request: NextRequest) {
     pathname === "/sw.js" ||
     // Build-id endpoint (deploy detection) is public: it only returns the commit
     // sha, and DeployRefresh polls it from EVERY open page — including /login and
-    // apps whose session died at the 4 AM rollover. Gating it turned each of
-    // those into an all-night 401 stream and blinded deploy detection exactly
-    // where a stale build is most likely to be sitting.
+    // apps whose session has lapsed. Gating it turned each of those into a
+    // rolling 401 stream and blinded deploy detection exactly where a stale
+    // build is most likely to be sitting.
     pathname === "/api/version" ||
     // The media proxy authenticates ITSELF (cookie OR a signed, target-bound
     // token) — see app/api/vod-stream. It has to: the TV's <video> element does
@@ -60,7 +66,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const token = request.cookies.get("tvspot_session")?.value;
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
   const payload = token ? await verifyToken(token) : null;
 
   if (!payload) {
@@ -74,7 +80,29 @@ export async function middleware(request: NextRequest) {
     );
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+
+  // Slide the session forward. Once a token is past halfway through its 30 days,
+  // any request from that user re-mints it — so somebody who opens the app even
+  // once a month is never logged out, while an abandoned device still lapses on
+  // schedule. This is the piece that replaces the old 4 AM forced-logout: the
+  // session now ends because it went UNUSED, never because the clock struck 4.
+  //
+  // Cheap enough to sit in the hot path: an HMAC sign is microseconds, and the
+  // halfway gate means a given cookie is rewritten roughly twice a month, not
+  // once a request. crypto.subtle + btoa (lib/auth.ts) are both available on the
+  // Edge runtime this middleware runs in.
+  const expMs = payload.exp ? payload.exp * 1000 : 0;
+  if (expMs - Date.now() < SESSION_RENEW_AFTER_MS) {
+    try {
+      response.cookies.set(SESSION_COOKIE, await signToken(payload.username), sessionCookieOptions());
+    } catch {
+      // Re-minting is an optimisation, never a gate: the request is already
+      // authenticated. A signing hiccup just means we try again next request.
+    }
+  }
+
+  return response;
 }
 
 export const config = {

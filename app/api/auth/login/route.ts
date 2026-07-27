@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateCredentials, signToken } from "@/lib/auth";
-import { nextRolloverMs } from "@/lib/dailyBoundary";
+import {
+  validateCredentials,
+  signToken,
+  sessionCookieOptions,
+  SESSION_COOKIE,
+} from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   const ip =
@@ -44,15 +48,10 @@ export async function POST(request: NextRequest) {
 
     const token = await signToken(username);
     const response = NextResponse.json({ ok: true });
-    // Mirror the cookie lifetime to the token's exp (next 4 AM ET rollover).
-    const maxAge = Math.max(60, Math.floor((nextRolloverMs() - Date.now()) / 1000));
-    response.cookies.set("tvspot_session", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge,
-    });
+    // Cookie lifetime mirrors the token's exp (30 days), and middleware slides
+    // both forward while the user is active — so signing in is a once-a-month
+    // event at worst, not a once-a-morning one.
+    response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
     return response;
   } catch (e) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
