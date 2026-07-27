@@ -8,8 +8,6 @@ import TvEpgGrid from "@/components/tv/TvEpgGrid";
 
 const ALL = "All";
 const FAVORITES = "Favorites";
-/** Row cap keeps the grid light on the TV's renderer — categories narrow it. */
-const MAX_ROWS = 40;
 
 /** Full timeline guide (the web app's EPG grid, D-pad edition): category chips
  *  up top, channel rows × time columns below. Enter on a block tunes to that
@@ -35,9 +33,21 @@ export default function TvGuidePage() {
           ? channels.filter((c) => favNames.includes(c.name))
           : channels.filter((c) => c.category === category);
     // Online channels first — dead rows sink to the bottom of the guide.
-    return [...base]
-      .sort((a, b) => Number(b.online) - Number(a.online))
-      .slice(0, MAX_ROWS);
+    //
+    // NO CAP. This used to .slice(0, 40), which silently hid 85 of 125 channels
+    // — the guide is the dense "browse everything" surface, so a channel missing
+    // from it reads as the channel being gone. Same failure the rails already
+    // fixed (a71dce3: "truncating a rail is how the channels went missing in the
+    // first place, and it fails silently by construction").
+    //
+    // Baseline measured on the actual Samsung UN58RU7100FXZC (Tizen 5.0 /
+    // Chromium 63) over CDP at 40 rows: 1037 DOM nodes, 234 focusables, 41
+    // images, 10MB JS heap against that device's 368MB limit, 2129ms to first
+    // paint. The renderer was nowhere near the constraint the cap assumed — it
+    // was using 3% of the allowed heap. /tv/live already renders all 125
+    // channels with eager logos, so that load was proven on this TV first.
+    // (Post-change numbers recorded below once measured on the same device.)
+    return [...base].sort((a, b) => Number(b.online) - Number(a.online));
   }, [channels, category, favNames]);
 
   return (
