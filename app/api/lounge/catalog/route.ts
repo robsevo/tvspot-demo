@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from "next/server";
+import { ALWAYS_INCLUDE_MOVIE_PICKS } from "@/lib/classic-picks";
 
 const BACKEND = process.env.BACKEND_API_URL || "https://api.example.com";
 
@@ -356,8 +357,14 @@ async function computeTrending(cookie: string): Promise<{ movies: any[]; series:
 
   // Inject the global-megahit bypass titles (Squid Game, …) so they appear even
   // if no backend service catalog carries them. Deduped against the above.
+  //
+  // ALWAYS_INCLUDE_MOVIE_PICKS rides the same injection for a different reason:
+  // not a language-gate bypass, but titles the panels DO carry which fall outside
+  // every service's 200-title catalog slice, so nothing else would ever surface
+  // them (see lib/classic-picks). fetchTmdbByIds tags them "Popular Movies",
+  // which is also what carries them past isUsCa().
   const [bypassMovies, bypassSeries] = await Promise.all([
-    fetchTmdbByIds("movie", BYPASS_MOVIE_IDS),
+    fetchTmdbByIds("movie", [...BYPASS_MOVIE_IDS, ...ALWAYS_INCLUDE_MOVIE_PICKS]),
     fetchTmdbByIds("tv", BYPASS_TV_IDS),
   ]);
   for (const m of bypassMovies) {
