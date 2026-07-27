@@ -40,13 +40,20 @@ export default function TvGuidePage() {
     // fixed (a71dce3: "truncating a rail is how the channels went missing in the
     // first place, and it fails silently by construction").
     //
-    // Baseline measured on the actual Samsung UN58RU7100FXZC (Tizen 5.0 /
-    // Chromium 63) over CDP at 40 rows: 1037 DOM nodes, 234 focusables, 41
-    // images, 10MB JS heap against that device's 368MB limit, 2129ms to first
-    // paint. The renderer was nowhere near the constraint the cap assumed — it
-    // was using 3% of the allowed heap. /tv/live already renders all 125
-    // channels with eager logos, so that load was proven on this TV first.
-    // (Post-change numbers recorded below once measured on the same device.)
+    // Measured on the actual Samsung UN58RU7100FXZC (Tizen 5.0 / Chromium 63)
+    // over CDP, same script both times — 40 rows vs all 125:
+    //
+    //   DOM nodes    1037 -> 2991      focusables    234 -> 687
+    //   images         41 -> 125       first paint  2129ms -> 3420ms
+    //   JS heap      10MB -> 10MB      (device limit: 368MB)
+    //
+    // The heap did not move and sits at ~3% of what this box allows, so the
+    // budget the cap was guarding was never the real constraint. The cost is
+    // ~1.3s more on first paint, paid once when the guide opens, in exchange for
+    // 85 channels that were previously unreachable here. /tv/live already
+    // renders all 125 with eager logos, so that load was proven on this TV
+    // first. If first paint ever becomes the complaint, window the rows around
+    // the focused one — do NOT reintroduce a silent cap.
     return [...base].sort((a, b) => Number(b.online) - Number(a.online));
   }, [channels, category, favNames]);
 
