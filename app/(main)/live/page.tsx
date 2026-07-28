@@ -8,6 +8,7 @@ import { channelSlug } from "@/lib/sources";
 import { useEvents } from "@/hooks/useEvents";
 import { useEpg } from "@/hooks/useEpg";
 import { carriersForLeague, type GameEvent } from "@/lib/leagues";
+import ChannelPreview from "@/components/ChannelPreview";
 import Link from "next/link";
 import { Tv, CalendarDays, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -58,6 +59,23 @@ export default function LivePage() {
   const { epg, ready: epgReady } = useEpg(channelNames);
   const scrollRef = useRef<HTMLDivElement>(null);
   const timeRulerRef = useRef<HTMLDivElement>(null);
+
+  // Tap-once-to-preview, tap-again-to-watch — same model as the TV guide
+  // (components/tv/TvEpgGrid.tsx), so browsing the schedule doesn't mean leaving
+  // it. Every row stays a real <Link>: we only preventDefault the FIRST tap, so
+  // middle-click, cmd-click and "open in new tab" still behave normally, and the
+  // page degrades to plain navigation without JS.
+  const [preview, setPreview] = useState<string | null>(null);
+  const previewChannel = channels.find((c) => c.name === preview) || null;
+  const previewFirstTap = useCallback(
+    (name: string) => (e: React.MouseEvent) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return; // let the browser do its thing
+      if (preview === name) return; // second tap on the same channel → follow the Link
+      e.preventDefault();
+      setPreview(name);
+    },
+    [preview],
+  );
   const [now, setNow] = useState(new Date());
 
   // Left/right paging for the events filter row. On a full slate the games run
@@ -437,6 +455,17 @@ export default function LivePage() {
         </div>
       )}
 
+      {/* key: switching channels remounts the preview, so the previous stream is
+          torn down before the next attaches — see ChannelPreview. */}
+      {previewChannel && (
+        <ChannelPreview
+          key={previewChannel.name}
+          channel={previewChannel}
+          variant="web"
+          onClose={() => setPreview(null)}
+        />
+      )}
+
       {/* EPG Grid */}
       {filteredChannels.length === 0 && selectedEntry ? (
         <div className="flex items-center justify-center min-h-[200px]">
@@ -456,6 +485,7 @@ export default function LivePage() {
                 <Link
                   key={ch.name}
                   href={`/live/${channelSlug(ch.name)}`}
+                  onClick={previewFirstTap(ch.name)}
                   className="flex flex-col items-center justify-center gap-0.5 h-14 border-b border-white/5 hover:bg-card/50 transition-colors"
                 >
                   <div className="w-11 h-9 rounded-lg bg-gradient-to-br from-zinc-200/90 via-zinc-400/75 to-zinc-600/70 backdrop-blur-sm flex items-center justify-center overflow-hidden relative p-1 ring-1 ring-white/15">
@@ -534,6 +564,7 @@ export default function LivePage() {
                       {is247 ? (
                         <Link
                           href={`/live/${channelSlug(ch.name)}`}
+                  onClick={previewFirstTap(ch.name)}
                           className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-white/[0.05] ring-1 ring-white/10 flex items-center px-3"
                         >
                           <span className="text-[11px] truncate font-medium text-white">
@@ -554,6 +585,7 @@ export default function LivePage() {
                               <Link
                                 key={`${ch.name}-${i}`}
                                 href={`/live/${channelSlug(ch.name)}`}
+                  onClick={previewFirstTap(ch.name)}
                                 className={`rounded-md flex items-center px-2 overflow-hidden ${
                                   isNow
                                     ? "bg-white/[0.07] ring-1 ring-white/10 z-10"
@@ -576,6 +608,7 @@ export default function LivePage() {
                       ) : (
                         <Link
                           href={`/live/${channelSlug(ch.name)}`}
+                  onClick={previewFirstTap(ch.name)}
                           className="absolute inset-x-0 top-1 bottom-1 left-1 right-9 rounded-lg bg-white/[0.02] border border-white/5 flex items-center px-3 hover:bg-white/[0.05] transition-colors"
                         >
                           <span className="text-text-muted text-[11px]">No schedule data</span>

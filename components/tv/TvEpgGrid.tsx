@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogoImage } from "@/components/LogoImage";
-import TvGuidePreview from "@/components/tv/TvGuidePreview";
+import ChannelPreview from "@/components/ChannelPreview";
 import { useTvBack } from "@/components/tv/TvNav";
 import { channelSlug } from "@/lib/sources";
 import { fallbackProgramming } from "@/lib/channelProgramming";
@@ -155,7 +155,7 @@ export default function TvEpgGrid({
     <div className="overflow-auto h-full">
       {/* key: switching channels remounts the preview, so the previous stream is
           torn down before the next attaches — see TvGuidePreview. */}
-      {previewChannel && <TvGuidePreview key={previewChannel.name} channel={previewChannel} />}
+      {previewChannel && <ChannelPreview key={previewChannel.name} channel={previewChannel} />}
       <div style={{ width: width + CHAN_W }} className="relative">
         {/* Time ruler */}
         <div className="sticky top-0 z-30 flex bg-[#0b1524]" style={{ height: RULER_H }}>

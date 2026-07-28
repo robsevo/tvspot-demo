@@ -6,8 +6,9 @@ import { LogoImage } from "@/components/LogoImage";
 import type { Channel } from "@/lib/types";
 
 /** 16:9 at a size that reads from the couch without crowding the grid.
- *  Fixed pixels on purpose: `aspect-ratio` is Chrome 88+, and the TV is
- *  Chromium 63 — it would drop the declaration and collapse the box. */
+ *  Fixed pixels on purpose for the TV: `aspect-ratio` is Chrome 88+, and the TV
+ *  is Chromium 63 — it would drop the declaration and collapse the box. The web
+ *  variant below is free to use modern CSS. */
 const W = 448;
 const H = 252;
 
@@ -49,7 +50,18 @@ function sourcesFor(channel: Channel): string[] {
  * Muted always. Autoplay with sound is blocked on most engines anyway, and a
  * guide that starts blaring while you browse is its own bug report.
  */
-export default function TvGuidePreview({ channel }: { channel: Channel }) {
+export default function ChannelPreview({
+  channel,
+  variant = "tv",
+  onClose,
+}: {
+  channel: Channel;
+  /** "tv" = fixed 448px box for the 10-foot UI on Chromium 63.
+   *  "web" = fluid box that fits a phone, sat below the app's top bar, with a
+   *  close button (there's no Back key on web). */
+  variant?: "tv" | "web";
+  onClose?: () => void;
+}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [idx, setIdx] = useState(0);
   const [failed, setFailed] = useState(false);
@@ -134,12 +146,23 @@ export default function TvGuidePreview({ channel }: { channel: Channel }) {
     };
   }, [src, channel.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const web = variant === "web";
+
   return (
     <div
-      className="fixed z-40 rounded-lg overflow-hidden bg-[#0b1524] ring-1 ring-[#1399ff]/60"
-      style={{ width: W, top: 16, right: 16 }}
+      className={
+        web
+          ? // Fluid so it fits a phone (a fixed 448px box overflows a 390px
+            // viewport). Sits below the app's top bar rather than over it.
+            "fixed z-40 rounded-lg overflow-hidden bg-[#0b1524] ring-1 ring-[#1399ff]/60 shadow-lg top-16 right-2 sm:right-4 w-[min(22rem,calc(100vw-1rem))] sm:w-[26rem]"
+          : "fixed z-40 rounded-lg overflow-hidden bg-[#0b1524] ring-1 ring-[#1399ff]/60"
+      }
+      style={web ? undefined : { width: W, top: 16, right: 16 }}
     >
-      <div className="relative bg-black" style={{ width: W, height: H }}>
+      <div
+        className={web ? "relative bg-black w-full aspect-video" : "relative bg-black"}
+        style={web ? undefined : { width: W, height: H }}
+      >
         <video
           ref={videoRef}
           muted
@@ -151,14 +174,20 @@ export default function TvGuidePreview({ channel }: { channel: Channel }) {
         />
         {!playing && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-base text-[#8197a4]">
+            <span className={web ? "text-xs text-[#8197a4]" : "text-base text-[#8197a4]"}>
               {failed ? "Preview unavailable" : "Tuning…"}
             </span>
           </div>
         )}
       </div>
-      <div className="flex items-center gap-2 px-3 py-2">
-        <div className="w-10 h-7 shrink-0 flex items-center justify-center rounded bg-[#121a24]">
+      <div className={web ? "flex items-center gap-2 px-2 py-1.5" : "flex items-center gap-2 px-3 py-2"}>
+        <div
+          className={
+            web
+              ? "w-8 h-6 shrink-0 flex items-center justify-center rounded bg-[#121a24]"
+              : "w-10 h-7 shrink-0 flex items-center justify-center rounded bg-[#121a24]"
+          }
+        >
           <LogoImage
             name={channel.name}
             logoUrl={channel.logo_url || channel.logo}
@@ -167,10 +196,25 @@ export default function TvGuidePreview({ channel }: { channel: Channel }) {
             eager
           />
         </div>
-        <span className="text-base text-white truncate">{channel.name}</span>
-        <span className="ml-auto shrink-0 text-sm text-[#8197a4]">
-          Press again to watch
+        <span className={web ? "text-xs text-white truncate" : "text-base text-white truncate"}>
+          {channel.name}
         </span>
+        {web ? (
+          <>
+            <span className="ml-auto shrink-0 text-[10px] text-[#8197a4]">Tap again to watch</span>
+            {/* Web has no Back key, so the preview needs a way out. */}
+            <button
+              type="button"
+              aria-label="Close preview"
+              onClick={onClose}
+              className="shrink-0 w-6 h-6 rounded flex items-center justify-center text-[#8197a4] hover:text-white hover:bg-white/10"
+            >
+              ✕
+            </button>
+          </>
+        ) : (
+          <span className="ml-auto shrink-0 text-sm text-[#8197a4]">Press again to watch</span>
+        )}
       </div>
     </div>
   );
