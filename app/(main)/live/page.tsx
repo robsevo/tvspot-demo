@@ -462,6 +462,7 @@ export default function LivePage() {
           key={previewChannel.name}
           channel={previewChannel}
           variant="web"
+          watchHref={`/live/${channelSlug(previewChannel.name)}`}
           onClose={() => setPreview(null)}
         />
       )}
