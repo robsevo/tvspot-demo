@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogoImage } from "@/components/LogoImage";
+import TvGuidePreview from "@/components/tv/TvGuidePreview";
+import { useTvBack } from "@/components/tv/TvNav";
 import { channelSlug } from "@/lib/sources";
 import { fallbackProgramming } from "@/lib/channelProgramming";
 import type { Channel, EpgProgram } from "@/lib/types";
@@ -125,10 +127,35 @@ export default function TvEpgGrid({
     [channels, epg, start, end, width],
   );
 
+  // Press-once-to-preview, press-again-to-watch.
+  //
+  // Pressing a block used to tune straight to the channel full-screen, which
+  // makes browsing the guide expensive: the only way to find out what a channel
+  // is actually showing was to leave the guide and come back. Now the first
+  // press opens a muted preview pinned top-right and the guide stays where it
+  // is; a second press ON THE SAME CHANNEL commits. Landing on a different
+  // channel swaps the preview instead of opening it, so walking the guide never
+  // navigates by accident.
+  const [preview, setPreview] = useState<string | null>(null);
+  const previewChannel = channels.find((c) => c.name === preview) || null;
+
   const openChannel = (c: Channel) => router.push(`/tv/live/${channelSlug(c.name)}`);
+
+  const selectChannel = (c: Channel) => {
+    if (preview === c.name) openChannel(c);
+    else setPreview(c.name);
+  };
+
+  // Back closes the preview before it leaves the guide — the innermost handler
+  // wins (see TvNav.useTvBack), and `null` while nothing is previewing hands
+  // Back straight back to the page.
+  useTvBack(preview ? () => setPreview(null) : null);
 
   return (
     <div className="overflow-auto h-full">
+      {/* key: switching channels remounts the preview, so the previous stream is
+          torn down before the next attaches — see TvGuidePreview. */}
+      {previewChannel && <TvGuidePreview key={previewChannel.name} channel={previewChannel} />}
       <div style={{ width: width + CHAN_W }} className="relative">
         {/* Time ruler */}
         <div className="sticky top-0 z-30 flex bg-[#0b1524]" style={{ height: RULER_H }}>
@@ -183,7 +210,7 @@ export default function TvEpgGrid({
                       key={`${p.start_utc}-${i}`}
                       data-tv
                       {...(rowIdx === 0 && onNow ? { "data-tv-autofocus": true } : {})}
-                      onClick={() => openChannel(c)}
+                      onClick={() => selectChannel(c)}
                       className={`absolute top-1 bottom-1 rounded-lg px-4 text-left overflow-hidden ring-1 focus:outline-none ${
                         onNow
                           ? "bg-[#14283d] ring-[#1399ff]/50"
@@ -202,7 +229,7 @@ export default function TvEpgGrid({
               ) : (
                 <button
                   data-tv
-                  onClick={() => openChannel(c)}
+                  onClick={() => selectChannel(c)}
                   className="absolute top-1 bottom-1 rounded-lg px-4 text-left ring-1 ring-white/10 bg-[#121a24] focus:outline-none"
                   style={{ left: 2, width: width - 4 }}
                 >
