@@ -124,9 +124,56 @@ export async function checkStream(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): 
   }
 }
 
-/** Probe many sources concurrently. Order of results matches input order. */
+/**
+ * The upstream panel behind a relay-wrapped URL, e.g.
+ * `https://relay.example.com/m3u8?u=http%3A%2F%2F1tvnow.icu%3A8080%2F…` -> `1tvnow.icu`.
+ * Every source we probe is relay-wrapped, so the relay's own hostname tells us
+ * nothing — the connection limit lives on the panel inside `u`.
+ */
+function upstreamHost(url: string): string {
+  try {
+    const outer = new URL(url);
+    const inner = outer.searchParams.get("u");
+    return inner ? new URL(inner).hostname : outer.hostname;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Probe many sources. Order of results matches input order.
+ *
+ * Serialised PER UPSTREAM PANEL, in parallel across panels. These upstream panels
+ * are connection-limited — several advertise max_connections=1 — so firing every
+ * probe at once (the old `Promise.all` over the whole list) opened N simultaneous
+ * connections to the same panel and it answered 403/456 to all but the first.
+ * That did two kinds of damage:
+ *
+ *   - working sources came back "dead"/"busy" and got ranked to the bottom
+ *     (measured: probing 8 live channels on one panel in parallel reported 2 of
+ *     them dead; the same 8 probed one-at-a-time were all fine);
+ *   - the probe itself held the panel's only slot, so the source the player then
+ *     tried to PLAY was genuinely busy — we manufactured the outage we reported.
+ *
+ * A channel's list rarely holds more than 2-3 URLs on any one panel, so the
+ * wall-clock cost is roughly one extra probe timeout, and the verdicts are real.
+ */
 export async function checkStreams(urls: string[], timeoutMs = DEFAULT_TIMEOUT_MS): Promise<StreamCheck[]> {
-  return Promise.all(urls.map((u) => checkStream(u, timeoutMs)));
+  const byHost = new Map<string, number[]>();
+  urls.forEach((u, i) => {
+    const h = upstreamHost(u);
+    const bucket = byHost.get(h);
+    if (bucket) bucket.push(i);
+    else byHost.set(h, [i]);
+  });
+
+  const out = new Array<StreamCheck>(urls.length);
+  await Promise.all(
+    [...byHost.values()].map(async (idxs) => {
+      for (const i of idxs) out[i] = await checkStream(urls[i], timeoutMs);
+    }),
+  );
+  return out;
 }
 
 /** VOD probes wait longer: a cold relay remux / double-proxied file can take

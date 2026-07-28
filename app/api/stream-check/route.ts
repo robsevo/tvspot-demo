@@ -5,8 +5,17 @@ import { checkStreams, checkVodSources } from "@/lib/stream-verify";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Cap per request so a malformed payload can't fan out unbounded fetches. */
-const MAX_URLS = 12;
+/**
+ * Cap per request so a malformed payload can't fan out unbounded fetches.
+ *
+ * Must be >= the largest set the players actually send, or the tail of the list
+ * silently never gets a verdict. Both players probe up to 24 (TvChannelPlayer /
+ * ChannelPlayer cap `allUrls` at 24 once /api/extra-sources has expanded the
+ * bench), so a cap of 12 left the last twelve sources permanently "unknown" —
+ * they still rank ahead of known-busy ones in the auto-pick, so the player could
+ * settle on a source nothing had ever checked.
+ */
+const MAX_URLS = 24;
 
 /**
  * POST { urls: string[], mode?: "live" | "vod" } -> { results: StreamCheck[] }

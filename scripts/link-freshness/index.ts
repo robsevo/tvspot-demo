@@ -175,18 +175,53 @@ async function main(): Promise<void> {
     else candidateMap.set(slug, [c]);
   };
 
+  // The backend's current links per channel, needed by step 1 below as well as by
+  // the fallback injection further down.
+  const backendUrlsBySlugNow = new Map<string, Set<string>>();
+  for (const ch of channels) {
+    if (!ch.name) continue;
+    const slug = slugify(ch.name);
+    const set = backendUrlsBySlugNow.get(slug) ?? new Set<string>();
+    for (const u of [ch.primary_url, ...(ch.backup_urls || [])]) if (u) set.add(u);
+    backendUrlsBySlugNow.set(slug, set);
+  }
+
   // 1) Existing store first (active + waiting bench) — so dedupe keeps its
   //    preserved firstSeenUtc and benched links get re-tested for promotion.
+  //
+  //    EXCEPT relay.example.com links the backend has since dropped. Those are the
+  //    backend's own links (scraped ones are stored wrapped through
+  //    api.example.com/stream-proxy or as direct hosts), so the backend is
+  //    authoritative for them — and a link it stopped serving is usually one it
+  //    stopped serving for a REASON. When the backend's channel matcher was
+  //    fixed to stop pooling sub-brands onto their parent (MTV Classic / MTV 2 /
+  //    MTV Lebanon were all being served as "MTV"), the wrong-channel links would
+  //    otherwise have lived on here forever: the store re-seeds itself every
+  //    night, they still verify fine — they ARE working streams, just of the
+  //    wrong channel — and `verified_sources` is what the players try FIRST.
+  //    Links from any other origin are untouched; the backend never had them.
   let storeCount = 0;
+  let retiredCount = 0;
   if (existing?.channels) {
     for (const [slug, vc] of Object.entries(existing.channels)) {
       nameBySlug.set(slug, vc.name);
+      const backendNow = backendUrlsBySlugNow.get(slug);
       for (const s of [...(vc.sources || []), ...(vc.waiting || [])]) {
+        // `backendNow.size > 0` matters: a channel the backend momentarily serves
+        // with no links at all (warming, or every candidate failing its probe)
+        // must not take its whole stored bench down with it. Retire only against
+        // a backend answer that actually listed something for this channel.
+        const isBackendLink = s.url.includes("relay.example.com");
+        if (isBackendLink && backendNow && backendNow.size > 0 && !backendNow.has(s.url)) {
+          retiredCount++;
+          continue;
+        }
         add(slug, { verifyUrl: s.url, storeUrl: s.url, origin: "store", firstSeenUtc: s.firstSeenUtc || s.verifiedUtc });
         storeCount++;
       }
     }
   }
+  if (retiredCount) log(`  Retired ${retiredCount} stored links the backend no longer serves`);
 
   // 2) Links currently on the backend (primary + backups).
   let backendCount = 0;
