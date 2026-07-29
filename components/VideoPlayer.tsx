@@ -152,6 +152,11 @@ const CC_MAX_CHARS = 42;
  *  ~112 characters, which covers all but the rare long caption. Bounded, though
  *  — a 90-character line spanning a TV is not readable either. */
 const CC_MAX_CHARS_RELAXED = 56;
+/** How far UP into the picture the caption box sits, as a fraction of the
+ *  picture's height (not the container's — letterboxing is accounted for
+ *  separately). Clear of the very bottom edge, and above where encodes tend to
+ *  burn in their own subtitle line. */
+const CC_PICTURE_LIFT = 0.09;
 /** A line may break early for a good grammatical reason, but not so early that
  *  the box turns ragged — an early break must still fill this much of the line. */
 const CC_MIN_FILL = 0.6;
@@ -423,12 +428,23 @@ function ccCollapse(lines: CcLine[]): CcLine[] {
   return out;
 }
 
+/**
+ * Seconds AHEAD of the playhead to read live captions from.
+ *
+ * Live captions are typed by a person listening to the show, so the 608 data is
+ * stamped a beat later than the words it transcribes — the lag is upstream of us
+ * and baked into the stream. Reading slightly ahead of the playhead is what
+ * pulls them back onto the audio. One number, easy to retune: raise it if
+ * captions still trail the speech, lower it if they start arriving early.
+ * VOD is untouched — subtitle files are authored against the picture already.
+ */
+const CC_LIVE_LEAD_S = 1;
+
 /** Same flattening as linesFromActiveCues, but for the cues active at an
- *  EXPLICIT time rather than the browser's `track.activeCues`. Used when the
- *  media clock and the cue clock don't share a zero — a resumed relay remux
- *  plays from &start=<offset> so video.currentTime is 0-based from there, while
- *  the WebVTT cues are episode-absolute. We look up cues at currentTime+offset
- *  instead of trusting activeCues, which would show the wrong line. */
+ *  EXPLICIT time rather than the browser's `track.activeCues`. Used whenever the
+ *  cue clock isn't the clock to display on: a resumed relay remux plays from
+ *  &start=<offset> so video.currentTime is 0-based from there while the WebVTT
+ *  cues are episode-absolute, and live reads CC_LIVE_LEAD_S ahead. */
 function linesAtTime(track: TextTrack, t: number): CcSource {
   const cues = track.cues;
   if (!cues) return CC_EMPTY;
@@ -717,8 +733,8 @@ export default function VideoPlayer({
   // actual VIDEO FRAME. object-contain letterboxes non-16:9 content, and a
   // container-anchored caption landed in the black bar BELOW a widescreen
   // movie's picture — right where many encodes burn in foreign-language subs,
-  // so both caption layers showed at once. Anchoring ~5.5% up into the picture
-  // puts our (opaque) box on top of the burned-in line instead of beside it.
+  // so both caption layers showed at once. Anchoring up into the picture puts
+  // our (opaque) box on top of the burned-in line instead of beside it.
   const [ccBottomPx, setCcBottomPx] = useState<number | null>(null);
   // iOS native <video> fullscreen: the video composites outside our DOM there,
   // so the overlay can't follow — tracked to hand rendering back to the browser.
@@ -1552,15 +1568,39 @@ export default function VideoPlayer({
       else lingerTimer = setTimeout(() => setCcSource(CC_EMPTY), LINGER_MS);
     };
 
-    // When the media clock and the cue clock DON'T share a zero (a resumed remux
-    // — see captionTimeOffset), the browser's own activeCues/cuechange are
-    // computed against currentTime and would surface the wrong line, so poll and
-    // look cues up at currentTime+offset ourselves. With no offset (the usual
-    // case) keep the cheap cuechange path, which only fires on cue boundaries.
-    if (captionTimeOffset) {
-      const tick = () => apply(linesAtTime(track, (video.currentTime || 0) + captionTimeOffset));
+    // Read cues at currentTime + offset rather than trusting activeCues, for the
+    // two cases where the cue clock isn't the clock we want to display on:
+    //
+    //  - captionTimeOffset: the media clock and cue clock don't share a zero (a
+    //    resumed remux plays from &start=, so currentTime is 0-based from there
+    //    while the cues are episode-absolute).
+    //  - CC_LIVE_LEAD_S: live captions are typed by a human WHILE the show airs,
+    //    so the 608 data is stamped a beat after the words it transcribes. That
+    //    lag is baked in upstream and no amount of presentation fixes it —
+    //    reading slightly ahead of the playhead is what pulls captions back onto
+    //    the audio. Only safe because the decoder runs ahead of the playhead:
+    //    hls.js parses 608 out of fragments as they buffer, so the next couple of
+    //    seconds of cues already exist.
+    //
+    // With neither (VOD, offset 0) keep the cheap cuechange path, which only
+    // fires on cue boundaries.
+    const lead = isLive ? CC_LIVE_LEAD_S : 0;
+    const offset = captionTimeOffset + lead;
+    if (offset) {
+      const tick = () => {
+        const now = video.currentTime || 0;
+        let next = linesAtTime(track, now + offset);
+        if (lead && !next.lines.length) {
+          // Right at the live edge the lead can outrun what's been decoded — and
+          // a native iOS HLS track may expose activeCues without a browsable
+          // `cues` list at all. Give up the lead before giving up captions.
+          next = linesAtTime(track, now + captionTimeOffset);
+          if (!next.lines.length) next = linesFromActiveCues(track);
+        }
+        apply(next);
+      };
       tick();
-      const id = setInterval(tick, 300);
+      const id = setInterval(tick, 200);
       return () => {
         clearInterval(id);
         if (lingerTimer) clearTimeout(lingerTimer);
@@ -1576,7 +1616,7 @@ export default function VideoPlayer({
       track.removeEventListener("cuechange", update);
       setCcSource(CC_EMPTY);
     };
-  }, [ccSelected, ccTracks, src, captionTimeOffset]);
+  }, [ccSelected, ccTracks, src, captionTimeOffset, isLive]);
 
   // Roll-up vs one self-contained caption. This ONLY picks a wrap strategy —
   // nothing about it changes what text is shown or when, because the two are
@@ -1640,7 +1680,7 @@ export default function VideoPlayer({
         const scale = Math.min(w / vw, h / vh);
         const contentH = vh * scale;
         const letterbox = (h - contentH) / 2;
-        setCcBottomPx(Math.round(letterbox + contentH * 0.055));
+        setCcBottomPx(Math.round(letterbox + contentH * CC_PICTURE_LIFT));
       } else {
         setCcBottomPx(null);
       }
