@@ -61,6 +61,11 @@ const CC_BOTTOM_FALLBACK =
 /** One styled run of caption text; a rendered caption line is a list of these. */
 interface CcSeg { text: string; i: boolean; b: boolean; u: boolean }
 type CcLine = CcSeg[];
+/** What's on screen right now, plus whether it came from more than one cue —
+ *  i.e. a live roll-up window rather than one self-contained caption. ccWrap
+ *  lays those out differently; see there. */
+interface CcSource { lines: CcLine[]; streaming: boolean }
+const CC_EMPTY: CcSource = { lines: [], streaming: false };
 
 /**
  * Cue → display lines, keeping only the formatting we draw (italic/bold/
@@ -130,51 +135,391 @@ function cueToLines(cue: TextTrackCue): CcLine[] {
   return out;
 }
 
+/* ── Caption line layout ────────────────────────────────────────────────────
+   The line breaks a caption ARRIVES with are not breaks a person would make.
+   CEA-608 cuts every line at column 32 of a fixed broadcast grid with no regard
+   for grammar (and hls.js emits one cue per grid ROW), so live captions showed
+   up pre-broken mid-phrase — "…TAKE A LOOK AT THE" / "WEATHER FOR TOMORROW".
+   Subtitle files are better but still arrive with the author's breaks, often
+   three or four short lines. So we throw the incoming breaks away and re-wrap
+   the words ourselves against the standard subtitling rules (BBC/Netflix house
+   style, and what every streaming player converges on): never more than two
+   lines, ~42 characters each, broken where a sentence or phrase actually ends. */
+const CC_MAX_LINES = 2;
+const CC_MAX_CHARS = 42;
+/** Two lines is a hard cap, so when text won't fit inside the 42-character
+ *  reading measure we widen the lines rather than add a third — the character
+ *  count is a style guideline, the player's measured width is the real limit.
+ *  Bounded, though: a 90-character line spanning a TV is not readable either. */
+const CC_MAX_CHARS_RELAXED = 56;
+/** A line may break early for a good grammatical reason, but not so early that
+ *  the box turns ragged — an early break must still fill this much of the line. */
+const CC_MIN_FILL = 0.6;
+/** How hard uneven line lengths count against an otherwise good break, when
+ *  choosing between two-line splits. Calibrated so punctuation (a real sentence
+ *  or clause boundary) still wins at almost any imbalance, while the weaker
+ *  "break before a preposition" preference loses to an even pair — otherwise a
+ *  two-word line ends up sitting above a full one. */
+const CC_BALANCE_WEIGHT = 90;
+
+/** Words that start the next phrase: breaking BEFORE one reads naturally. */
+const CC_CONJUNCTIONS = new Set([
+  "and", "but", "or", "nor", "so", "yet", "because", "although", "though", "while",
+  "whereas", "since", "unless", "until", "if", "when", "whenever", "where", "wherever",
+  "that", "which", "who", "whom", "whose", "than", "as", "after", "before",
+]);
+const CC_PREPOSITIONS = new Set([
+  "about", "above", "across", "against", "along", "among", "around", "at", "behind",
+  "below", "beneath", "beside", "between", "beyond", "by", "despite", "down", "during",
+  "except", "for", "from", "in", "inside", "into", "near", "of", "off", "on", "onto",
+  "out", "outside", "over", "past", "through", "throughout", "to", "toward", "towards",
+  "under", "underneath", "up", "upon", "with", "within", "without",
+]);
+/** Words that bind FORWARD onto whatever follows. Stranding one at the end of a
+ *  line ("…of the" / "…in") is the single thing that makes captions read wrong. */
+const CC_DETERMINERS = new Set([
+  "a", "an", "the", "my", "your", "his", "her", "its", "our", "their",
+  "this", "that", "these", "those", "no", "some", "any", "every",
+]);
+const CC_AUXILIARIES = new Set([
+  "is", "are", "was", "were", "be", "been", "being", "am", "do", "does", "did",
+  "have", "has", "had", "will", "would", "can", "could", "shall", "should", "may",
+  "might", "must", "ain't", "don't", "doesn't", "didn't", "can't", "won't",
+]);
+/** Titles belong to the name after them — never break between them. */
+const CC_TITLES = new Set([
+  "mr.", "mrs.", "ms.", "miss", "dr.", "st.", "prof.", "sgt.", "capt.", "lt.", "gen.",
+  "rev.", "sen.", "gov.", "pres.",
+]);
+
+/**
+ * How good a line break between two adjacent words would be. Higher is better;
+ * every gap is breakable, so this only ranks them.
+ */
+function ccBreakScore(prev: string, next: string): number {
+  // Trailing/leading quotes and brackets hide the punctuation we care about.
+  const p = prev.toLowerCase().replace(/[")\]}'’”]+$/, "");
+  const n = next.toLowerCase().replace(/^[("[{'‘“]+/, "");
+  let score: number;
+  if (/[.!?]$/.test(p)) score = 100;          // sentence ends here
+  else if (/[—–]$/.test(p)) score = 85;  // em/en dash — an interruption
+  else if (/[,;:]$/.test(p)) score = 75;      // clause ends here
+  else if (CC_CONJUNCTIONS.has(n)) score = 55;
+  else if (CC_PREPOSITIONS.has(n)) score = 45;
+  else score = 10;                            // a plain word gap: allowed, not liked
+
+  const bare = p.replace(/[^\w.'’-]/g, "");
+  if (CC_TITLES.has(bare)) score -= 130;      // "Mr." also looks like a sentence end
+  else if (CC_DETERMINERS.has(bare)) score -= 120;
+  else if (CC_PREPOSITIONS.has(bare)) score -= 70;
+  else if (CC_AUXILIARIES.has(bare)) score -= 40;
+  if (/[-‐]$/.test(p)) score -= 130;     // don't split a hyphenated compound
+  if (/^[-–—]/.test(next)) score += 40; // a dash starts a new speaker's line
+
+  return score;
+}
+
+/** Measured text width, so the wrap matches what actually renders instead of
+ *  guessing from character counts (CEA-608 arrives in ALL CAPS, which is much
+ *  wider than the same count of lowercase). Falls back to an estimate if the
+ *  engine has no 2D canvas. */
+let ccMeasureCtx: CanvasRenderingContext2D | null | undefined;
+function ccTextWidth(text: string, font: string, fontPx: number): number {
+  if (ccMeasureCtx === undefined) {
+    try {
+      ccMeasureCtx = document.createElement("canvas").getContext("2d");
+    } catch {
+      ccMeasureCtx = null;
+    }
+  }
+  if (!ccMeasureCtx) return text.length * fontPx * 0.58;
+  ccMeasureCtx.font = font;
+  return ccMeasureCtx.measureText(text).width || text.length * fontPx * 0.58;
+}
+
+/** Incoming lines → a flat word stream, each word keeping its own formatting so
+ *  italics (off-screen voices) survive being moved to a different line. */
+function ccWordsOf(lines: CcLine[]): CcSeg[] {
+  const out: CcSeg[] = [];
+  for (const line of lines) {
+    for (const seg of line) {
+      for (const word of seg.text.split(" ")) {
+        if (word) out.push({ text: word, i: seg.i, b: seg.b, u: seg.u });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Wrap a word stream into rendered caption lines.
+ *
+ * Never more than two lines. In order: it all fits on one; it fits on two inside
+ * the 42-character reading measure (pick the split that reads best, nudged
+ * toward even line lengths — a full line above a two-word line looks broken);
+ * it fits on two WIDER lines; or it's genuinely longer than the box holds, and
+ * we fill forward and take a window.
+ *
+ * `streaming` says whether these words came from more than one cue, which is
+ * what live CEA-608 roll-up looks like: several broadcast rows on screen at once
+ * with the newest still being typed in a character at a time. That changes two
+ * things. Filling FORWARD (rather than balancing) keeps the earlier breaks put
+ * while the newest text grows, and the window keeps the NEWEST lines, since
+ * anything older has already scrolled past the viewer. A self-contained cue
+ * keeps its opening instead — you read a caption top-down, and its tail usually
+ * continues into the next cue anyway.
+ */
+function ccWrap(
+  words: CcSeg[],
+  maxPx: number,
+  font: string,
+  fontPx: number,
+  streaming: boolean,
+): CcLine[] {
+  const n = words.length;
+  if (!n) return [];
+
+  const textOf = (a: number, b: number) => {
+    let s = words[a].text;
+    for (let i = a + 1; i < b; i++) s += " " + words[i].text;
+    return s;
+  };
+  const widthOf = (a: number, b: number) => ccTextWidth(textOf(a, b), font, fontPx);
+  const fits = (a: number, b: number, charCap: number) => {
+    const s = textOf(a, b);
+    return s.length <= charCap && ccTextWidth(s, font, fontPx) <= maxPx;
+  };
+  // Re-merge the words of one line back into styled runs. A run that follows
+  // another carries the joining space, which is invisible either way.
+  const lineOf = (a: number, b: number): CcLine => {
+    const segs: CcLine = [];
+    for (let i = a; i < b; i++) {
+      const w = words[i];
+      const last = segs[segs.length - 1];
+      if (last && last.i === w.i && last.b === w.b && last.u === w.u) last.text += " " + w.text;
+      else segs.push({ ...w, text: (segs.length ? " " : "") + w.text });
+    }
+    return segs;
+  };
+  /** Best two-line split of words[a..b), or -1 if no split has both sides fit. */
+  const bestSplit = (a: number, b: number, charCap: number) => {
+    let at = -1;
+    let top = -Infinity;
+    // Imbalance is measured against the text being split, not the container:
+    // on a 1920px TV a 42-character line uses well under half the width, so
+    // scaling by the container would mute this term exactly where it's needed.
+    const whole = widthOf(a, b) || 1;
+    for (let k = a + 1; k < b; k++) {
+      if (!fits(a, k, charCap) || !fits(k, b, charCap)) continue;
+      const gap = Math.abs(widthOf(a, k) - widthOf(k, b));
+      const score =
+        ccBreakScore(words[k - 1].text, words[k].text) - (gap / whole) * CC_BALANCE_WEIGHT;
+      if (score > top) {
+        top = score;
+        at = k;
+      }
+    }
+    return at;
+  };
+
+  if (fits(0, n, CC_MAX_CHARS)) return [lineOf(0, n)];
+
+  // Two lines at the preferred measure, else two wider ones. Widening beats
+  // adding a line, and it beats dropping words even harder.
+  // A self-contained cue is finished text, so balance it across the two lines.
+  // Live roll-up is NOT finished — its last line is still being typed — and
+  // re-balancing on every character that arrives is the jitter the forward fill
+  // below exists to avoid, so roll-up skips straight to it.
+  if (!streaming) {
+    const preferred = bestSplit(0, n, CC_MAX_CHARS);
+    const split = preferred > 0 ? preferred : bestSplit(0, n, CC_MAX_CHARS_RELAXED);
+    if (split > 0) return [lineOf(0, split), lineOf(split, n)];
+  }
+
+  // More text than two lines can hold — a live roll-up window with several rows
+  // up at once, mostly. Fill forward, recording where each line starts.
+  const starts: number[] = [];
+  let start = 0;
+  while (start < n) {
+    starts.push(start);
+    // Longest run of words that still fits (at least one, so a single
+    // over-long word can't loop forever — CSS break-word catches that).
+    let end = start + 1;
+    while (end < n && fits(start, end + 1, CC_MAX_CHARS_RELAXED)) end++;
+    if (end < n) {
+      // Then pull the break back to the best-reading gap that still fills the
+      // line. Ties go to the fuller line, which keeps this stable as text grows.
+      // "Full" is relative to how much this line could hold — which is the
+      // character cap on a wide screen, not the container width.
+      const capacity = widthOf(start, end);
+      let pick = end;
+      let pickScore = -Infinity;
+      for (let c = start + 1; c <= end; c++) {
+        if (widthOf(start, c) < capacity * CC_MIN_FILL) continue;
+        const score = ccBreakScore(words[c - 1].text, words[c].text);
+        if (score >= pickScore) {
+          pickScore = score;
+          pick = c;
+        }
+      }
+      end = pick;
+    }
+    start = end;
+  }
+
+  const ranges = starts.map((from, idx) => [from, starts[idx + 1] ?? n] as const);
+  // Roll-up keeps the newest lines; a self-contained cue keeps its opening.
+  const kept = streaming ? ranges.slice(-CC_MAX_LINES) : ranges.slice(0, CC_MAX_LINES);
+  return kept.map(([from, to]) => lineOf(from, to));
+}
+
+/* ── Live roll-up pacing ────────────────────────────────────────────────────
+   Live captions advance at the CAPTIONER'S TYPING SPEED, not a reading speed.
+   hls.js cuts a new cue every time the 608 screen changes (cea-608-parser's
+   outputDataUpdate emits [last change → now] and starts a fresh window), so a
+   row being typed arrives as a burst of short-lived cues and the roll-up window
+   scrolls as fast as the keystrokes land. Mirroring that straight into a
+   two-line box makes lines vanish before they can be read.
+
+   So the transcript of delivered rows is kept, and rows are RELEASED to the
+   screen on a reading clock. The bottom row still updates live while it's being
+   typed — nothing feels laggy — but moving a finished row up, and a new one in,
+   waits until the previous has had time on screen. The backlog is bounded: if
+   the captioner outruns us we speed up and, past CC_MAX_BACKLOG rows, release
+   immediately, so captions can never drift far behind the audio. */
+/** Reading speed used to size a row's time on screen. Deliberately conservative
+ *  — captions are read at a glance while watching, not studied. */
+const CC_READ_CPS = 24;
+const CC_DWELL_MIN_MS = 650;
+const CC_DWELL_MAX_MS = 2200;
+/** Rows waiting behind the display before pacing gives way to catching up. */
+const CC_MAX_BACKLOG = 3;
+/** Ceiling on remembered rows; only the newest two are ever drawn. */
+const CC_TRANSCRIPT_CAP = 24;
+
+interface CcRow { key: string; line: CcLine }
+
+/**
+ * Fold a delivered roll-up window into the running transcript, in place.
+ *
+ * Each update re-delivers every row currently on the 608 screen, so the window
+ * mostly REPEATS rows already recorded — with the last one a little longer than
+ * last time, since it's still being typed. Aligning the incoming window against
+ * the transcript's tail is what tells repeats from genuinely new rows: find the
+ * longest overlap, refresh those in place (picking up the growth), append the
+ * rest. Returns how many rows were trimmed off the front, so a caller tracking
+ * positions can adjust.
+ */
+function ccIngest(transcript: CcRow[], incoming: CcLine[]): number {
+  const rows: CcRow[] = [];
+  for (const line of incoming) {
+    const key = line.map((s) => s.text).join(" ");
+    if (key) rows.push({ key, line });
+  }
+  if (!rows.length) return 0;
+
+  let overlap = 0;
+  for (let k = Math.min(rows.length, transcript.length); k >= 1; k--) {
+    let ok = true;
+    for (let i = 0; i < k; i++) {
+      const was = transcript[transcript.length - k + i].key;
+      const now = rows[i].key;
+      // Only the LAST row of the window can have grown since we saw it; the
+      // ones above it have scrolled up and are final.
+      if (now !== was && !(i === k - 1 && now.startsWith(was))) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      overlap = k;
+      break;
+    }
+  }
+
+  for (let i = 0; i < overlap; i++) transcript[transcript.length - overlap + i] = rows[i];
+  for (let i = overlap; i < rows.length; i++) transcript.push(rows[i]);
+
+  if (transcript.length > CC_TRANSCRIPT_CAP) {
+    return transcript.splice(0, transcript.length - CC_TRANSCRIPT_CAP).length;
+  }
+  return 0;
+}
+
+/** How long a row should hold the screen before the next one replaces it. */
+function ccDwellMs(row: CcRow | undefined, backlog: number): number {
+  if (!row) return 0;
+  if (backlog > CC_MAX_BACKLOG) return 0; // falling behind — catch up now
+  const read = (row.key.length / CC_READ_CPS) * 1000;
+  const dwell = Math.min(CC_DWELL_MAX_MS, Math.max(CC_DWELL_MIN_MS, read));
+  // A row or two waiting is normal mid-sentence; trim the hold rather than let
+  // a queue build into real lag.
+  return backlog > 1 ? dwell * 0.55 : dwell;
+}
+
+/**
+ * Collapse the redundancy roll-up captions arrive with. hls.js re-emits a row
+ * every time the display screen changes, so a row still being typed shows up
+ * repeatedly as ever-longer prefixes of itself, and a row already on screen is
+ * re-sent as the window scrolls. Keep the longest version of each, in order.
+ */
+function ccCollapse(lines: CcLine[]): CcLine[] {
+  const out: CcLine[] = [];
+  const keys: string[] = [];
+  for (const line of lines) {
+    const key = line.map((s) => s.text).join(" ");
+    if (!key) continue;
+    const prev = keys[keys.length - 1];
+    if (prev !== undefined && key.startsWith(prev)) {
+      out[out.length - 1] = line;
+      keys[keys.length - 1] = key;
+      continue;
+    }
+    if (prev !== undefined && prev.startsWith(key)) continue;
+    out.push(line);
+    keys.push(key);
+  }
+  return out;
+}
+
 /** Same flattening as linesFromActiveCues, but for the cues active at an
  *  EXPLICIT time rather than the browser's `track.activeCues`. Used when the
  *  media clock and the cue clock don't share a zero — a resumed relay remux
  *  plays from &start=<offset> so video.currentTime is 0-based from there, while
  *  the WebVTT cues are episode-absolute. We look up cues at currentTime+offset
  *  instead of trusting activeCues, which would show the wrong line. */
-function linesAtTime(track: TextTrack, t: number): CcLine[] {
+function linesAtTime(track: TextTrack, t: number): CcSource {
   const cues = track.cues;
-  if (!cues) return [];
+  if (!cues) return CC_EMPTY;
   const out: CcLine[] = [];
-  let prev = "";
+  let contributors = 0;
   for (let i = 0; i < cues.length; i++) {
     const c = cues[i] as VTTCue;
     if (!(c.startTime <= t && t < c.endTime)) continue;
-    for (const line of cueToLines(c)) {
-      const key = line.map((s) => s.text).join(" ");
-      if (key === prev) continue;
-      prev = key;
-      out.push(line);
-    }
+    const lines = cueToLines(c);
+    if (lines.length) contributors++;
+    out.push(...lines);
   }
-  return out.slice(-4);
+  return { lines: ccCollapse(out).slice(-4), streaming: contributors > 1 };
 }
 
 /**
- * Flatten a track's active cues into the lines to draw. CEA-608 roll-up
- * re-emits lines it has already shown as the window scrolls (hls.js cuts a new
- * cue per scroll step, and both are briefly active), so consecutive duplicate
- * lines collapse. The cap matches the 4-row 608 roll-up window and keeps a
- * pathological cue pile-up from filling the screen — newest lines win.
+ * Flatten a track's active cues into the raw lines behind the drawn ones (see
+ * ccCollapse for the roll-up redundancy, ccWrap for the final layout). The cap
+ * matches the 4-row 608 roll-up window and keeps a pathological cue pile-up
+ * from filling the screen — newest lines win.
  */
-function linesFromActiveCues(track: TextTrack): CcLine[] {
+function linesFromActiveCues(track: TextTrack): CcSource {
   const cues = track.activeCues;
-  if (!cues) return [];
+  if (!cues) return CC_EMPTY;
   const out: CcLine[] = [];
-  let prev = "";
+  let contributors = 0;
   for (let i = 0; i < cues.length; i++) {
-    for (const line of cueToLines(cues[i])) {
-      const key = line.map((s) => s.text).join(" ");
-      if (key === prev) continue;
-      prev = key;
-      out.push(line);
-    }
+    const lines = cueToLines(cues[i]);
+    if (lines.length) contributors++;
+    out.push(...lines);
   }
-  return out.slice(-4);
+  return { lines: ccCollapse(out).slice(-4), streaming: contributors > 1 };
 }
 
 /**
@@ -417,11 +762,22 @@ export default function VideoPlayer({
   // CEA-608 cues at the broadcast grid's coordinates — left-cornered, tiny on a
   // phone, jumping between roll-up rows — and sat them behind our control bar,
   // which the browser doesn't know exists.
-  const [ccLines, setCcLines] = useState<CcLine[]>([]);
-  // Caption font size tracks the player's rendered width (same ~4% ratio the
-  // big streaming players use), so text is readable inline on a phone and
-  // scales up in fullscreen instead of staying at one CSS size.
-  const [ccFontPx, setCcFontPx] = useState(16);
+  const [ccSource, setCcSource] = useState<CcSource>(CC_EMPTY);
+  // Live roll-up pacing (see ccIngest): every delivered row, how many have been
+  // released to the screen, and when the last release happened.
+  const ccTranscriptRef = useRef<CcRow[]>([]);
+  const ccReleasedRef = useRef(0);
+  const ccReleasedAtRef = useRef(0);
+  const [ccPaced, setCcPaced] = useState<CcLine[]>([]);
+  // Caption font size tracks the player's rendered width, so text is readable
+  // inline on a phone and scales up in fullscreen instead of staying at one CSS
+  // size. Deliberately below the ~4% the big players use: at that ratio the box
+  // was heavier than the picture wanted, on the TV especially.
+  const [ccFontPx, setCcFontPx] = useState(15);
+  // The width one caption line may occupy, and the CSS font shorthand for it —
+  // ccWrap measures candidate lines against exactly what will render.
+  const [ccLineWidthPx, setCcLineWidthPx] = useState(0);
+  const [ccFont, setCcFont] = useState("");
   // Bottom anchor (px from container bottom) placing captions just inside the
   // actual VIDEO FRAME. object-contain letterboxes non-16:9 content, and a
   // container-anchored caption landed in the black bar BELOW a widescreen
@@ -1233,7 +1589,7 @@ export default function VideoPlayer({
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !ccSelected) {
-      setCcLines([]);
+      setCcSource(CC_EMPTY);
       return;
     }
     const track =
@@ -1241,7 +1597,7 @@ export default function VideoPlayer({
         ? video.textTracks[ccSelected.index]
         : extTrackRef.current?.track;
     if (!track) {
-      setCcLines([]);
+      setCcSource(CC_EMPTY);
       return;
     }
     // Hold a caption through the GAP to the next one rather than blinking to
@@ -1255,10 +1611,10 @@ export default function VideoPlayer({
     // stays up during a pause, matching how streaming players present them.
     const LINGER_MS = 1200;
     let lingerTimer: ReturnType<typeof setTimeout> | null = null;
-    const apply = (lines: CcLine[]) => {
+    const apply = (next: CcSource) => {
       if (lingerTimer) { clearTimeout(lingerTimer); lingerTimer = null; }
-      if (lines.length) setCcLines(lines);
-      else lingerTimer = setTimeout(() => setCcLines([]), LINGER_MS);
+      if (next.lines.length) setCcSource(next);
+      else lingerTimer = setTimeout(() => setCcSource(CC_EMPTY), LINGER_MS);
     };
 
     // When the media clock and the cue clock DON'T share a zero (a resumed remux
@@ -1273,7 +1629,7 @@ export default function VideoPlayer({
       return () => {
         clearInterval(id);
         if (lingerTimer) clearTimeout(lingerTimer);
-        setCcLines([]);
+        setCcSource(CC_EMPTY);
       };
     }
 
@@ -1283,12 +1639,73 @@ export default function VideoPlayer({
     return () => {
       if (lingerTimer) clearTimeout(lingerTimer);
       track.removeEventListener("cuechange", update);
-      setCcLines([]);
+      setCcSource(CC_EMPTY);
     };
   }, [ccSelected, ccTracks, src, captionTimeOffset]);
 
-  // Caption geometry: font scales with the player's on-screen width (~4%,
-  // clamped — one size did not fit both a 375px inline player and fullscreen),
+  // Roll-up presentation: a scrolling transcript rather than one self-contained
+  // caption. `isLive` is the stable signal — deriving it from "more than one cue
+  // is active" flickers, since a roll-up window is briefly one row at the start
+  // of each caption. Multi-cue still counts, to cover a live-style track on a
+  // source not flagged live.
+  const ccRollUp = Boolean(isLive) || ccSource.streaming;
+
+  // Ingest delivered rows into the paced transcript (see ccIngest). VOD subtitle
+  // cues are already timed by their file and skip all of this.
+  useEffect(() => {
+    if (!ccRollUp || !ccSource.lines.length) {
+      // Captions stopped (or this isn't roll-up): drop the transcript so the
+      // next burst can't replay rows from the last one.
+      ccTranscriptRef.current = [];
+      ccReleasedRef.current = 0;
+      ccReleasedAtRef.current = 0;
+      setCcPaced([]);
+      return;
+    }
+    const trimmed = ccIngest(ccTranscriptRef.current, ccSource.lines);
+    if (trimmed) ccReleasedRef.current = Math.max(0, ccReleasedRef.current - trimmed);
+  }, [ccSource, ccRollUp]);
+
+  // Release rows on the reading clock. The newest RELEASED row keeps updating
+  // live as it's typed (it's already on screen); only advancing to a new row
+  // waits, which is what stops lines scrolling past at typing speed.
+  useEffect(() => {
+    if (!ccRollUp) return;
+    const tick = () => {
+      const transcript = ccTranscriptRef.current;
+      if (!transcript.length) return;
+      const backlog = transcript.length - ccReleasedRef.current;
+      if (backlog > 0) {
+        const now = Date.now();
+        const held = now - ccReleasedAtRef.current;
+        const current = transcript[ccReleasedRef.current - 1];
+        if (held >= ccDwellMs(current, backlog)) {
+          ccReleasedRef.current++;
+          ccReleasedAtRef.current = now;
+        }
+      }
+      const end = Math.max(1, ccReleasedRef.current);
+      setCcPaced(transcript.slice(Math.max(0, end - CC_MAX_LINES), end).map((r) => r.line));
+    };
+    tick();
+    const id = setInterval(tick, 120);
+    return () => clearInterval(id);
+  }, [ccRollUp, ccSelected, src]);
+
+  // The lines actually drawn: the cue text re-wrapped for reading (see ccWrap).
+  // Keyed off the measured geometry too, so rotating the phone or going
+  // fullscreen re-breaks the lines for the new width rather than keeping breaks
+  // chosen for the old one.
+  const ccDisplayLines = useMemo(() => {
+    const lines = ccRollUp ? ccPaced : ccSource.lines;
+    if (!lines.length) return lines;
+    return ccLineWidthPx > 0
+      ? ccWrap(ccWordsOf(lines), ccLineWidthPx, ccFont, ccFontPx, ccRollUp)
+      : lines;
+  }, [ccRollUp, ccPaced, ccSource, ccLineWidthPx, ccFont, ccFontPx]);
+
+  // Caption geometry: font scales with the player's on-screen width (clamped —
+  // one size did not fit both a 375px inline player and fullscreen),
   // and the bottom anchor is computed from the letterboxed video frame (see
   // ccBottomPx). Recomputed on container resize AND loadedmetadata, since the
   // frame rect needs videoWidth/videoHeight.
@@ -1304,12 +1721,22 @@ export default function VideoPlayer({
     const compute = () => {
       const w = el.clientWidth;
       const h = el.clientHeight;
-      // A 10-foot screen needs bigger text than a 375px phone, but 52px filled
-      // too much of the frame across a room — pulled back to a 40px TV ceiling
-      // (and a slightly gentler width factor) so captions read without dominating
-      // the picture. `hideControls` is the TV shell's signal.
-      const maxPx = hideControls ? 40 : 26;
-      if (w > 0) setCcFontPx(Math.round(Math.min(maxPx, Math.max(13, w * 0.03))));
+      // A 10-foot screen needs bigger text than a 375px phone, but the ceilings
+      // kept creeping up (52 → 40 on TV) until the box dominated the picture.
+      // These are a further step down — captions should sit under the picture,
+      // not compete with it. `hideControls` is the TV shell's signal.
+      const maxPx = hideControls ? 32 : 22;
+      if (w > 0) {
+        const fontPx = Math.round(Math.min(maxPx, Math.max(12, w * 0.026)));
+        setCcFontPx(fontPx);
+        // Available text width: the overlay's inset-x-3 gutters, .cc-box's
+        // 0.6em side padding, and a little slack so a measured-to-the-pixel
+        // line can't get wrapped a second time by the browser.
+        setCcLineWidthPx(Math.max(80, w - 24 - fontPx * 1.2 - 4));
+        // .cc-line is font-weight 500 in the app's inherited family.
+        const family = getComputedStyle(el).fontFamily || "sans-serif";
+        setCcFont(`500 ${fontPx}px ${family}`);
+      }
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       if (vw > 0 && vh > 0 && w > 0 && h > 0) {
@@ -1682,13 +2109,13 @@ export default function VideoPlayer({
       )}
 
       {/* Caption overlay — OUR renderer for the hidden selected track. Bottom-
-          centered stacked lines (broadcast-grid positioning is deliberately
-          discarded), font scaled to player width, lifted clear of the control
-          bar while it's up. Hidden on native surfaces (iOS fullscreen / PiP),
+          centered stacked lines (broadcast-grid positioning AND the grid's line
+          breaks are deliberately discarded — see ccWrap), font scaled to player
+          width, lifted clear of the control bar while it's up. Hidden on native surfaces (iOS fullscreen / PiP),
           where the track flips to `showing` and ::cue takes over, and while
           casting (local playback is stopped). pointer-events-none: taps pass
           through to play/pause exactly as before. */}
-      {ccLines.length > 0 && !casting && !ccNativeSurface && (
+      {ccDisplayLines.length > 0 && !casting && !ccNativeSurface && (
         <div
           className="tv-cc-overlay absolute inset-x-3 z-10 flex flex-col items-center justify-end pointer-events-none transition-[bottom] duration-200"
           style={{
@@ -1707,7 +2134,7 @@ export default function VideoPlayer({
               spot — a translucent per-line pill let them bleed through and
               read as two caption layers. Solid black masks them. */}
           <div className="cc-box">
-            {ccLines.map((line, i) => (
+            {ccDisplayLines.map((line, i) => (
               <span key={i} className="cc-line">
                 {line.map((seg, j) => (
                   <span
