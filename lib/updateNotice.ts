@@ -21,12 +21,12 @@
  * To raise one: set this to ~25 minutes out (UTC), commit, deploy, THEN deploy
  * the real change. Set it back to null when the work is cosmetic again.
  */
-export const UPDATE_NOTICE_UNTIL: string | null = "2026-07-26T14:35:00Z";
+export const UPDATE_NOTICE_UNTIL: string | null = "2026-07-31T20:00:00Z";
 
 /** Roughly how long viewers are told things may be rough. Kept next to the
  *  deadline so the copy and the window can't drift apart. */
 export const UPDATE_NOTICE_TEXT =
-  "Update in progress — Live TV and movies/shows may not work for the next 15–20 minutes.";
+  "Update in progress — Live TV and movies/shows may not work for the next 20–30 minutes.";
 
 /** True while the notice window is still open. Takes `now` so callers can tick
  *  it on a timer (and so it's testable without faking the clock). */
