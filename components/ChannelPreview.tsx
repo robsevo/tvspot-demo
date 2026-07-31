@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type Hls from "hls.js"; // type only — the library is imported lazily below
+import { Volume2, VolumeX, Captions } from "lucide-react";
 import { LogoImage } from "@/components/LogoImage";
+import { ccWordsOf, ccWrap } from "@/lib/captions";
+import { useLiveCaptions } from "@/hooks/useLiveCaptions";
 import type { Channel } from "@/lib/types";
 
 /** 16:9 at a size that reads from the couch without crowding the grid.
@@ -42,6 +45,32 @@ function writeBox(b: { x: number; y: number; w: number }) {
   } catch {}
 }
 
+/** Preview sound + captions, remembered across channel swaps and sessions.
+ *
+ *  Separate from the full player's CC_PREF_KEY on purpose: the preview is a
+ *  glance, and wanting captions on a 400px tile you're scanning the guide with
+ *  is a different question from wanting them on the show you sat down to watch.
+ *  Both default ON — the preview exists to answer "what's on this channel", and
+ *  a silent, caption-less thumbnail answers it badly. */
+const SOUND_KEY = "tvspot_preview_sound_v1";
+const CC_KEY = "tvspot_preview_cc_v1";
+
+function readFlag(key: string, dflt: boolean): boolean {
+  if (typeof window === "undefined") return dflt;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? dflt : raw === "1";
+  } catch {
+    return dflt;
+  }
+}
+
+function writeFlag(key: string, on: boolean) {
+  try {
+    localStorage.setItem(key, on ? "1" : "0");
+  } catch {}
+}
+
 /** How many sources the preview will try before giving up.
  *
  *  Deliberately short. The full player probes up to 24 and picks the best; this
@@ -61,7 +90,7 @@ function sourcesFor(channel: Channel): string[] {
 }
 
 /**
- * Small muted preview of a channel, pinned to the top-right of the guide.
+ * Small live preview of a channel, pinned to the top-right of the guide.
  *
  * Interaction (driven by TvEpgGrid): the first Enter on a channel opens this;
  * a second Enter on the SAME channel tunes to it full-screen. Moving to another
@@ -77,8 +106,15 @@ function sourcesFor(channel: Channel): string[] {
  *   - the Hls instance is destroyed on every channel change and on unmount, so
  *     walking the guide can never leave a stack of live streams behind.
  *
- * Muted always. Autoplay with sound is blocked on most engines anyway, and a
- * guide that starts blaring while you browse is its own bug report.
+ * Sound and captions are ON by default (see SOUND_KEY / CC_KEY), because the
+ * preview's whole job is telling you what's on a channel and a silent tile does
+ * that poorly. Both are one tap away from off, and the choice sticks.
+ *
+ * Unmuted autoplay is not guaranteed: engines block it unless the gesture that
+ * opened the preview counts as activation. It usually does here — the preview is
+ * only ever opened by an Enter/tap on a channel — but when play() is rejected we
+ * fall back to muted, keep playing, and surface an "unmute" affordance rather
+ * than showing a dead tile.
  */
 export default function ChannelPreview({
   channel,
@@ -102,6 +138,15 @@ export default function ChannelPreview({
   const [idx, setIdx] = useState(0);
   const [failed, setFailed] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [soundOn, setSoundOn] = useState(() => readFlag(SOUND_KEY, true));
+  const [ccOn, setCcOn] = useState(() => readFlag(CC_KEY, true));
+  /** Set when the engine refused unmuted autoplay and we fell back to muted, so
+   *  the button can read "unmute" rather than silently contradicting the pref. */
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  /** Read inside the play effect without making it a dependency — changing the
+   *  sound setting must not tear down and re-attach the stream. */
+  const soundRef = useRef(soundOn);
+  soundRef.current = soundOn;
 
   const urls = sourcesFor(channel);
   const src = urls[idx];
@@ -116,6 +161,22 @@ export default function ChannelPreview({
     if (!video || !src) return;
     let cancelled = false;
     let hls: Hls | null = null;
+
+    /** Start playback honouring the sound preference, and survive an engine that
+     *  refuses it. A rejected unmuted play() must not leave a black tile: mute,
+     *  retry, and let the UI offer to unmute (that tap IS activation, so it
+     *  works). */
+    const tryPlay = () => {
+      video.muted = !soundRef.current;
+      void video.play().catch(() => {
+        if (cancelled || video.muted) return;
+        video.muted = true;
+        setAutoplayBlocked(true);
+        // Retry directly, NOT through tryPlay — that would reset muted from the
+        // preference and loop on an engine that keeps refusing.
+        void video.play().catch(() => {});
+      });
+    };
 
     /** Move to the next candidate, or report the preview as unavailable. */
     const nextSource = () => {
@@ -137,7 +198,7 @@ export default function ChannelPreview({
         if (cancelled) return;
         if (!HlsCtor.isSupported()) {
           video.src = src;
-          void video.play().catch(() => {});
+          void tryPlay();
           return;
         }
         hls = new HlsCtor({
@@ -159,12 +220,14 @@ export default function ChannelPreview({
         });
         hls.loadSource(src);
         hls.attachMedia(video);
-        void video.play().catch(() => {});
+        void tryPlay();
       })();
     } else {
-      // iOS/Safari play HLS natively.
+      // iOS/Safari play HLS natively — including the stream's own CEA-608, which
+      // lands in video.textTracks the same way hls.js's decoded track does, so
+      // useLiveCaptions finds it here too.
       video.src = src;
-      void video.play().catch(() => {});
+      void tryPlay();
     }
 
     return () => {
@@ -256,6 +319,62 @@ export default function ChannelPreview({
     return () => window.removeEventListener("resize", onResize);
   }, [web]);
 
+  // ── sound ──────────────────────────────────────────────────────────────────
+  // Kept out of the stream effect so toggling sound never re-attaches hls.js.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = !soundOn;
+    if (soundOn) {
+      setAutoplayBlocked(false);
+      // The toggle IS the user gesture, so this is exactly when an engine that
+      // refused unmuted autoplay will finally allow it.
+      void video.play().catch(() => {});
+    }
+  }, [soundOn]);
+
+  // ── captions ───────────────────────────────────────────────────────────────
+  const ccSource = useLiveCaptions(videoRef, ccOn, src);
+  const videoBoxRef = useRef<HTMLDivElement | null>(null);
+  const [ccMetrics, setCcMetrics] = useState({ widthPx: 0, fontPx: 11, font: "" });
+
+  useEffect(() => {
+    const el = videoBoxRef.current;
+    if (!el) return;
+    const compute = () => {
+      const w = el.clientWidth;
+      if (w <= 0) return;
+      // Same shape as the player's sizing but scaled for a tile — this box is
+      // 448px on the TV and ~350px on a phone, so the player's 12-32px range
+      // would bury the picture it's captioning.
+      const fontPx = Math.round(Math.min(18, Math.max(9, w * 0.038)));
+      const family = getComputedStyle(el).fontFamily || "sans-serif";
+      setCcMetrics({
+        // Gutters + .cc-box's 0.6em side padding, so a measured-to-the-pixel
+        // line can't get wrapped a second time by the browser.
+        widthPx: Math.max(60, w - 12 - fontPx * 1.2),
+        fontPx,
+        font: `500 ${fontPx}px ${family}`,
+      });
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [box, web]);
+
+  // Re-wrapped for reading, exactly as the full player does it (see ccWrap).
+  // `streaming: true` unconditionally — the preview only ever shows live.
+  const ccLines = useMemo(() => {
+    if (!ccSource.lines.length || ccMetrics.widthPx <= 0) return ccSource.lines;
+    return ccWrap(
+      ccWordsOf(ccSource.lines),
+      ccMetrics.widthPx,
+      ccMetrics.font,
+      ccMetrics.fontPx,
+      true,
+    );
+  }, [ccSource, ccMetrics]);
+
   return (
     <div
       ref={boxRef}
@@ -279,18 +398,49 @@ export default function ChannelPreview({
       }
     >
       <div
+        ref={videoBoxRef}
         className={web ? "relative bg-black w-full aspect-video" : "relative bg-black"}
         style={web ? undefined : { width: W, height: H }}
       >
         <video
           ref={videoRef}
-          muted
           playsInline
           autoPlay
           className="w-full h-full object-contain"
           onPlaying={() => setPlaying(true)}
           onError={() => setFailed(true)}
         />
+        {/* Captions, drawn by us from a `hidden` track — same .cc-box/.cc-line
+            styling the full player uses, so they read identically. Sits above
+            the picture but below nothing else; the tile has no controls to
+            collide with. */}
+        {ccOn && ccLines.length > 0 && (
+          <div
+            className="absolute inset-x-1.5 flex flex-col items-center justify-end pointer-events-none"
+            // No flex `gap` here: that's Chrome 84+ and the 2019 Samsung is
+            // Chromium 63. .cc-line is display:block with its own line-height,
+            // which stacks the rows on every engine.
+            style={{ fontSize: `${ccMetrics.fontPx}px`, bottom: "6%" }}
+          >
+            {/* ONE opaque box around all lines, exactly as the full player does
+                it — a per-line pill lets burned-in subs bleed through and reads
+                as two caption layers. */}
+            <div className="cc-box">
+              {ccLines.map((line, i) => (
+                <span key={i} className="cc-line">
+                  {line.map((seg, j) => (
+                    <span
+                      key={j}
+                      className={`${seg.i ? "italic" : ""} ${seg.b ? "font-bold" : ""} ${seg.u ? "underline" : ""}`}
+                    >
+                      {seg.text}
+                    </span>
+                  ))}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         {!playing && (
           <div className="absolute inset-0 flex items-center justify-center">
             <span className={web ? "text-xs text-[#8197a4]" : "text-base text-[#8197a4]"}>
@@ -327,18 +477,67 @@ export default function ChannelPreview({
         <span className={web ? "text-xs text-white truncate" : "text-base text-white truncate"}>
           {channel.name}
         </span>
+        {/* Sound + captions. `data-tv` makes them reachable with the remote —
+            TvNav's geometric navigation finds them from the grid, and Enter
+            activates a focused <button> natively. On web they're plain taps. */}
+        <div className="ml-auto shrink-0 flex items-center gap-1">
+          <button
+            type="button"
+            data-tv={web ? undefined : ""}
+            aria-label={soundOn ? "Mute preview" : "Unmute preview"}
+            aria-pressed={soundOn}
+            onClick={() => {
+              const next = !soundOn;
+              setSoundOn(next);
+              writeFlag(SOUND_KEY, next);
+            }}
+            className={
+              (web ? "w-6 h-6" : "w-9 h-9") +
+              " rounded flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-[#1399ff] " +
+              (soundOn && !autoplayBlocked
+                ? "text-white bg-[#1399ff]/20"
+                : "text-[#8197a4] hover:text-white hover:bg-white/10")
+            }
+          >
+            {soundOn && !autoplayBlocked ? (
+              <Volume2 className={web ? "w-3.5 h-3.5" : "w-5 h-5"} />
+            ) : (
+              <VolumeX className={web ? "w-3.5 h-3.5" : "w-5 h-5"} />
+            )}
+          </button>
+          <button
+            type="button"
+            data-tv={web ? undefined : ""}
+            aria-label={ccOn ? "Hide captions" : "Show captions"}
+            aria-pressed={ccOn}
+            onClick={() => {
+              const next = !ccOn;
+              setCcOn(next);
+              writeFlag(CC_KEY, next);
+            }}
+            className={
+              (web ? "w-6 h-6" : "w-9 h-9") +
+              " rounded flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-[#1399ff] " +
+              (ccOn
+                ? "text-white bg-[#1399ff]/20"
+                : "text-[#8197a4] hover:text-white hover:bg-white/10")
+            }
+          >
+            <Captions className={web ? "w-3.5 h-3.5" : "w-5 h-5"} />
+          </button>
+        </div>
         {web ? (
           <>
             {watchHref ? (
               <Link
                 href={watchHref}
                 data-preview-watch
-                className="ml-auto shrink-0 text-[10px] font-medium text-white px-2 py-1 rounded ring-1 ring-[#1399ff]/60 bg-[#1399ff]/15 hover:bg-[#1399ff]/30"
+                className="shrink-0 text-[10px] font-medium text-white px-2 py-1 rounded ring-1 ring-[#1399ff]/60 bg-[#1399ff]/15 hover:bg-[#1399ff]/30"
               >
                 Tap again to watch →
               </Link>
             ) : (
-              <span className="ml-auto shrink-0 text-[10px] text-[#8197a4]">Tap again to watch</span>
+              <span className="shrink-0 text-[10px] text-[#8197a4]">Tap again to watch</span>
             )}
             {/* Web has no Back key, so the preview needs a way out. */}
             <button
@@ -357,12 +556,12 @@ export default function ChannelPreview({
           <Link
             href={watchHref}
             data-tv
-            className="ml-auto shrink-0 text-sm font-medium text-white px-3 py-1 rounded ring-1 ring-[#1399ff]/60 bg-[#1399ff]/15 focus:outline-none focus:ring-2 focus:ring-[#1399ff]"
+            className="shrink-0 text-sm font-medium text-white px-3 py-1 rounded ring-1 ring-[#1399ff]/60 bg-[#1399ff]/15 focus:outline-none focus:ring-2 focus:ring-[#1399ff]"
           >
             Press again to watch →
           </Link>
         ) : (
-          <span className="ml-auto shrink-0 text-sm text-[#8197a4]">Press again to watch</span>
+          <span className="shrink-0 text-sm text-[#8197a4]">Press again to watch</span>
         )}
       </div>
 
