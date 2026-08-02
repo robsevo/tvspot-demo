@@ -6,6 +6,7 @@ import { Play, Pause, Maximize, Minimize, SkipBack, SkipForward, Monitor, Cast, 
 import { castMedia, loadCastSDK, endCastSession } from "@/lib/cast";
 import { setPlaybackActive } from "@/lib/playbackState";
 import type { SubtitleTrack } from "@/lib/subtitles";
+import { langLabel, pickEnglishTrack, dedupeLabels } from "@/lib/audioLang";
 
 import {
   CcTrack,
@@ -109,6 +110,12 @@ interface Props {
    *  selection + persistence path as the touch menu (selectCc), so the choice
    *  survives title changes on the TV exactly like it does on the phone. */
   ccRef?: React.MutableRefObject<TvCcHandle | null>;
+  /** TV mode's control surface for IN-STREAM audio tracks. The touch menu is
+   *  hidden on the TV, so the OSD reads and switches languages through this
+   *  instead. Only covers tracks the STREAM declares — the relay's one-URL-per-
+   *  track set stays on the `audioTracks` prop, which the TV shell fetches
+   *  itself. */
+  audioRef?: React.MutableRefObject<TvAudioHandle | null>;
 }
 
 /** Imperative caption control for the TV OSD (see Props.ccRef). */
@@ -117,6 +124,38 @@ export interface TvCcHandle {
    *  Returns the resulting state so the OSD can announce it. */
   toggle(): { on: boolean; available: boolean };
   state(): { on: boolean; available: boolean };
+}
+
+/** Imperative in-stream audio control for the TV OSD (see Props.audioRef). */
+export interface TvAudioHandle {
+  tracks(): { id: number; lang: string; label: string }[];
+  activeId(): number | null;
+  select(id: number): void;
+}
+
+/** One entry of the element's own AudioTrackList (Safari / iOS native HLS).
+ *  Not in lib.dom for every TS target, and absent entirely on Chrome. */
+interface NativeAudioTrack {
+  id: string;
+  kind: string;
+  label: string;
+  language: string;
+  enabled: boolean;
+}
+interface NativeAudioTrackList {
+  length: number;
+  [index: number]: NativeAudioTrack;
+  addEventListener(type: string, cb: () => void): void;
+  removeEventListener(type: string, cb: () => void): void;
+}
+
+/** The element's AudioTrackList, or null where the browser doesn't implement it
+ *  (Chromium ships no `video.audioTracks` — there, hls.js is the only route to
+ *  an alternate audio rendition, which is exactly why the hls.js path below is
+ *  the one that matters on Fire TV / Samsung / Android). */
+function nativeAudioList(video: HTMLVideoElement | null): NativeAudioTrackList | null {
+  const list = (video as unknown as { audioTracks?: NativeAudioTrackList } | null)?.audioTracks;
+  return list && typeof list.length === "number" ? list : null;
 }
 
 export default function VideoPlayer({
@@ -147,9 +186,13 @@ export default function VideoPlayer({
   videoElRef,
   hideControls = false,
   ccRef,
+  audioRef,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Declared up here (not down with the other player refs) because the audio
+  // track selector below closes over it.
+  const hlsRef = useRef<Hls | null>(null);
 
   // Mirror the video element out to a TV parent (see Props.videoElRef).
   useEffect(() => {
@@ -218,14 +261,50 @@ export default function VideoPlayer({
   const [ccSel, setCcSel] = useState<string | null>(null);
   const [ccMenuOpen, setCcMenuOpen] = useState(false);
   const [audioMenuOpen, setAudioMenuOpen] = useState(false);
-  const hasAudioChoice = (audioTracks?.length ?? 0) > 1;
+  // Audio tracks the STREAM ITSELF declares (hls.js `hls.audioTracks`, or
+  // Safari's native `video.audioTracks`), as opposed to the relay-produced
+  // one-URL-per-track set in the `audioTracks` prop.
+  //
+  // This is the half that was missing, and it's why "the languages disappeared":
+  // the relay set only exists for a /remux.m3u8 source, so the moment failover
+  // moved playback onto ANY other source — a direct panel file, provider-a, Origin,
+  // Provider B — there were no tracks to list and no English to select. The menu
+  // vanished and whatever the stream defaulted to played, which on these rips is
+  // routinely German or French. Reading the stream's own tracks covers every
+  // multi-audio HLS source on every platform that runs hls.js (Fire TV, Samsung,
+  // Chrome, Android), and the native list covers Safari/iOS.
+  const [streamAudio, setStreamAudio] = useState<{ id: number; lang: string; label: string }[]>([]);
+  const [streamAudioId, setStreamAudioId] = useState<number | null>(null);
+  // English is applied ONCE per source. After that the user's pick wins and a
+  // late-arriving track list must not yank it back.
+  const audioAutoAppliedRef = useRef(false);
+
+  const hasAudioChoice = (audioTracks?.length ?? 0) > 1 || streamAudio.length > 1;
   // Which row the menu shows as active. With no explicit pick yet, the relay
   // auto-plays English, so mark the English track rather than leaving the menu
   // with nothing checked while English is clearly playing.
   const activeAudioUrl =
     currentAudioUrl ??
-    audioTracks?.find((t) => /^en/.test(t.lang) || /english/i.test(t.label))?.url ??
-    null;
+    (() => {
+      const i = pickEnglishTrack(audioTracks ?? [], (t) => ({ lang: t.lang, label: t.label }));
+      return i >= 0 ? audioTracks![i].url : null;
+    })();
+
+  /** Switch the audio track the STREAM carries (no source swap, no reload —
+   *  hls.js re-fetches the alternate rendition in place). */
+  const selectStreamAudio = useCallback((id: number) => {
+    const hls = hlsRef.current;
+    if (hls) {
+      try { hls.audioTrack = id; } catch {}
+      setStreamAudioId(id);
+      return;
+    }
+    // Safari / iOS native HLS: an AudioTrackList on the element itself.
+    const list = nativeAudioList(videoRef.current);
+    if (!list) return;
+    for (let i = 0; i < list.length; i++) list[i].enabled = i === id;
+    setStreamAudioId(id);
+  }, []);
   // Captions are drawn by US, not the browser: the selected track runs in
   // `hidden` mode (cues parse and fire cuechange, nothing renders natively) and
   // these are the lines currently on screen. Native ::cue rendering placed
@@ -257,7 +336,6 @@ export default function VideoPlayer({
   // choice wins and must not be re-overridden by a late-arriving track.
   const ccAutoAppliedRef = useRef(false);
   const controlsTimer = useRef<NodeJS.Timeout | null>(null);
-  const hlsRef = useRef<Hls | null>(null);
   // True once THIS source has actually begun rendering frames (first `playing`).
   // FRAG_BUFFERED retries the initial autostart while this is false; once true,
   // a paused element means the user paused on purpose, so nothing re-plays it.
@@ -399,6 +477,13 @@ export default function VideoPlayer({
     // failover) starts in the "waiting for playback" state so the user sees
     // progress, not a dead frame. Live keeps its existing overlay behavior.
     setAwaitingPlay(autoPlay && !isLive);
+
+    // New source = a different file with a different track layout. Drop the old
+    // language list (otherwise a failover leaves the previous source's menu on
+    // screen) and re-arm the one-shot English selection for this source.
+    setStreamAudio([]);
+    setStreamAudioId(null);
+    audioAutoAppliedRef.current = false;
 
     // Clean up previous HLS instance
     if (hlsRef.current) {
@@ -544,9 +629,44 @@ export default function VideoPlayer({
       let lastRecoverAt = 0;
       const MAX_RECOVERS = 4;
 
+      // Audio renditions this stream declares. ENGLISH IS THE DEFAULT: hls.js
+      // otherwise honours the manifest's DEFAULT=YES rendition, which on these
+      // sources is whatever the packager felt like — routinely German or French.
+      // Applied once per source (audioAutoAppliedRef); after that a user pick
+      // stands and a re-fired AUDIO_TRACKS_UPDATED must not undo it.
+      const syncAudioTracks = () => {
+        if (cancelled) return;
+        const list = hls.audioTracks || [];
+        const labels = dedupeLabels(list.map((t, i) => langLabel(t.lang, t.name, i)));
+        setStreamAudio(
+          list.map((t, i) => ({
+            id: typeof t.id === "number" ? t.id : i,
+            lang: t.lang || "",
+            label: labels[i],
+          })),
+        );
+        setStreamAudioId(hls.audioTrack);
+        if (audioAutoAppliedRef.current || list.length < 2) return;
+        const want = pickEnglishTrack(list, (t) => ({ lang: t.lang, label: t.name }));
+        audioAutoAppliedRef.current = true;
+        if (want < 0) return; // nothing tagged English — leave the stream's own default alone
+        const id = typeof list[want].id === "number" ? (list[want].id as number) : want;
+        if (id === hls.audioTrack) return;
+        try { hls.audioTrack = id; } catch {}
+        setStreamAudioId(id);
+      };
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, syncAudioTracks);
+      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => {
+        if (!cancelled) setStreamAudioId(hls.audioTrack);
+      });
+
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        // A single-rendition manifest never fires AUDIO_TRACKS_UPDATED, so the
+        // menu has to be cleared from here or it keeps the PREVIOUS source's
+        // languages on screen after a failover.
+        syncAudioTracks();
         if (!autoPlay) return;
         const p = video.play();
         if (p) {
@@ -641,6 +761,56 @@ export default function VideoPlayer({
       }
     };
   }, [src, autoPlay, isLive, hideControls]);
+
+  // Audio tracks carried by the ELEMENT rather than by hls.js: Safari/iOS native
+  // HLS, and the native-handover fallback above. Same contract as the hls.js
+  // path — list them, and default to English exactly once per source.
+  //
+  // Chromium implements no `video.audioTracks` at all, so this is a no-op there;
+  // that is not a gap, because on those browsers HLS always goes through hls.js
+  // (and a progressive mp4 genuinely cannot switch tracks in any browser — which
+  // is why the resolver stops offering multi-audio mp4s whose default is not
+  // English, see lib/vod-resolve.ts).
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const list = nativeAudioList(video);
+    if (!list) return;
+
+    const sync = () => {
+      // hls.js owns track selection when it's attached — don't let both drive it.
+      if (hlsRef.current) return;
+      const n = list.length;
+      const raw: { id: number; lang: string; label: string }[] = [];
+      let activeIdx: number | null = null;
+      for (let i = 0; i < n; i++) {
+        raw.push({ id: i, lang: list[i].language || "", label: langLabel(list[i].language, list[i].label, i) });
+        if (list[i].enabled) activeIdx = i;
+      }
+      const labels = dedupeLabels(raw.map((t) => t.label));
+      const tracks = raw.map((t, i) => ({ ...t, label: labels[i] }));
+      setStreamAudio(tracks);
+      setStreamAudioId(activeIdx);
+      if (audioAutoAppliedRef.current || n < 2) return;
+      const want = pickEnglishTrack(tracks, (t) => ({ lang: t.lang, label: t.label }));
+      audioAutoAppliedRef.current = true;
+      if (want < 0 || want === activeIdx) return;
+      for (let i = 0; i < n; i++) list[i].enabled = i === want;
+      setStreamAudioId(want);
+    };
+
+    // The list is populated asynchronously as the manifest/moov parses, so both
+    // the element event and metadata are needed to catch it on every browser.
+    list.addEventListener("addtrack", sync);
+    list.addEventListener("change", sync);
+    video.addEventListener("loadedmetadata", sync);
+    sync();
+    return () => {
+      list.removeEventListener("addtrack", sync);
+      list.removeEventListener("change", sync);
+      video.removeEventListener("loadedmetadata", sync);
+    };
+  }, [src]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -1253,6 +1423,21 @@ export default function VideoPlayer({
     };
   }, [ccRef, ccSel, ccOptions, selectCc]);
 
+  // TV in-stream audio handle (see Props.audioRef). Same freshness contract as
+  // ccRef: rebuilt whenever the track list or selection changes, so the OSD
+  // never acts on a stale list after a failover swapped the source.
+  useEffect(() => {
+    if (!audioRef) return;
+    audioRef.current = {
+      tracks: () => streamAudio,
+      activeId: () => streamAudioId,
+      select: selectStreamAudio,
+    };
+    return () => {
+      audioRef.current = null;
+    };
+  }, [audioRef, streamAudio, streamAudioId, selectStreamAudio]);
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -1737,22 +1922,43 @@ export default function VideoPlayer({
                       className="absolute bottom-full right-0 mb-2 z-50 min-w-[10rem] max-h-56 overflow-y-auto rounded-xl bg-black/95 backdrop-blur-sm border border-white/10 py-1 shadow-xl"
                     >
                       <p className="px-4 pt-2 pb-1 text-[11px] uppercase tracking-wide text-white/40">Audio</p>
-                      {audioTracks!.map((t) => {
-                        const active = activeAudioUrl === t.url;
-                        return (
-                          <button
-                            key={t.rel}
-                            role="menuitemradio"
-                            aria-checked={active}
-                            onClick={() => { onSelectAudio?.(t.url); setAudioMenuOpen(false); }}
-                            className={`w-full text-left px-4 py-2 min-h-[44px] text-sm transition-colors ${
-                              active ? "text-brand font-medium" : "text-white/80 hover:bg-white/10"
-                            }`}
-                          >
-                            {t.label}
-                          </button>
-                        );
-                      })}
+                      {/* Relay-produced tracks (one signed remux URL each) when
+                          this is a remux source; otherwise the tracks the stream
+                          itself declares. Never both — a remux carries a single
+                          mapped track, so the two sets can't collide. */}
+                      {(audioTracks?.length ?? 0) > 1
+                        ? audioTracks!.map((t) => {
+                            const active = activeAudioUrl === t.url;
+                            return (
+                              <button
+                                key={t.rel}
+                                role="menuitemradio"
+                                aria-checked={active}
+                                onClick={() => { onSelectAudio?.(t.url); setAudioMenuOpen(false); }}
+                                className={`w-full text-left px-4 py-2 min-h-[44px] text-sm transition-colors ${
+                                  active ? "text-brand font-medium" : "text-white/80 hover:bg-white/10"
+                                }`}
+                              >
+                                {t.label}
+                              </button>
+                            );
+                          })
+                        : streamAudio.map((t) => {
+                            const active = streamAudioId === t.id;
+                            return (
+                              <button
+                                key={t.id}
+                                role="menuitemradio"
+                                aria-checked={active}
+                                onClick={() => { selectStreamAudio(t.id); setAudioMenuOpen(false); }}
+                                className={`w-full text-left px-4 py-2 min-h-[44px] text-sm transition-colors ${
+                                  active ? "text-brand font-medium" : "text-white/80 hover:bg-white/10"
+                                }`}
+                              >
+                                {t.label}
+                              </button>
+                            );
+                          })}
                     </div>
                   </>
                 )}

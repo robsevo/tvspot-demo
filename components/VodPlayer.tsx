@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import VideoPlayer, { type TvCcHandle } from "@/components/VideoPlayer";
+import VideoPlayer, { type TvCcHandle, type TvAudioHandle } from "@/components/VideoPlayer";
 import type { SubtitleTrack } from "@/lib/subtitles";
 import { fetchJson, DEADLINE } from "@/lib/fetchDeadline";
 
@@ -43,6 +43,10 @@ interface Props {
   hideControls?: boolean;
   /** Passed through to VideoPlayer — TV OSD caption toggle. */
   ccRef?: React.MutableRefObject<TvCcHandle | null>;
+  /** Passed through to VideoPlayer — TV OSD in-stream audio-language control,
+   *  for the sources that carry their languages in the stream rather than as
+   *  relay-produced per-track URLs. */
+  audioRef?: React.MutableRefObject<TvAudioHandle | null>;
 }
 
 // Remux sources get a longer runway: a cold relay ffmpeg spawn takes ~20-24s
@@ -109,6 +113,7 @@ export default function VodPlayer({
   videoElRef,
   hideControls,
   ccRef,
+  audioRef,
 }: Props) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Separate from `timer`: arm()/clear() manage the never-started watchdog and
@@ -278,6 +283,7 @@ export default function VodPlayer({
       videoElRef={videoElRef}
       hideControls={hideControls}
       ccRef={ccRef}
+      audioRef={audioRef}
       onProgress={
         onProgress &&
         ((t, d) => {

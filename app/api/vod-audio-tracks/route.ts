@@ -1,41 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { signedProxyUrl } from "@/lib/streamToken";
+import { langLabel, dedupeLabels } from "@/lib/audioLang";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 const RELAY = (process.env.BACKEND_RELAY_URL || "https://relay.example.com").replace(/\/+$/, "");
 const UA = "VLC/3.0.20 LibVLC/3.0.20";
-
-/** ISO-639 (both 2- and 3-letter, and the sloppy variants panels use) → a name
- *  a person reads on a couch. Unknown codes fall back to the embedded track
- *  title, then to the raw code, so nothing ever renders blank. */
-const LANG_NAMES: Record<string, string> = {
-  eng: "English", en: "English",
-  fre: "French", fra: "French", fr: "French",
-  ger: "German", deu: "German", de: "German",
-  spa: "Spanish", es: "Spanish",
-  ita: "Italian", it: "Italian",
-  dut: "Dutch", nld: "Dutch", nl: "Dutch",
-  por: "Portuguese", pt: "Portuguese",
-  rus: "Russian", ru: "Russian",
-  pol: "Polish", pl: "Polish",
-  jpn: "Japanese", ja: "Japanese",
-  kor: "Korean", ko: "Korean",
-  chi: "Chinese", zho: "Chinese", zh: "Chinese",
-  ara: "Arabic", ar: "Arabic",
-  hin: "Hindi", hi: "Hindi",
-  tur: "Turkish", tr: "Turkish",
-  swe: "Swedish", nor: "Norwegian", dan: "Danish", fin: "Finnish",
-};
-
-function label(lang: string, title: string, rel: number): string {
-  const name = LANG_NAMES[lang];
-  if (name) return name;
-  if (title) return title;
-  if (lang) return lang.toUpperCase();
-  return `Track ${rel + 1}`;
-}
 
 interface RelayTrack {
   rel: number;
@@ -57,22 +28,39 @@ interface RelayTrack {
  * English stays the default everywhere: with no `aidx` the relay auto-selects
  * English (see iptv_relay `_probe_english_audio_index`), so this endpoint only
  * exists to let someone deliberately change it. Only remux sources have a
- * switchable track set — a direct mp4 is one baked-in track — so a non-remux
- * `src` correctly yields an empty list and the player shows no menu.
+ * switchable track set THIS WAY — a direct mp4 is one baked-in track — so a
+ * non-remux `src` correctly yields an empty list here. That is no longer the
+ * end of the story for the viewer: the player also reads whatever audio
+ * renditions the STREAM declares (hls.js / native AudioTrackList) and defaults
+ * those to English too, so provider-a/Origin/Provider B sources get a menu of their own.
  */
 export async function GET(request: NextRequest) {
   const src = request.nextUrl.searchParams.get("src");
   if (!src) return NextResponse.json({ tracks: [], duration: null }, { status: 400 });
 
-  // Unwrap /api/vod-stream?url=<relay remux>&st=… → the relay remux URL.
+  // A remux source reaches the player in ONE OF TWO SHAPES, and this route has
+  // to read both:
+  //
+  //   1. `https://relay.example.com/remux.m3u8?u=<file>&t=<tok>` — handed to the
+  //      player directly, exactly like live. This is the normal shape.
+  //   2. `/api/vod-stream?url=<relay remux>&st=…` — the same-origin proxy hop,
+  //      now used only as the fallback when we have no relay token to sign with.
+  //
+  // Shape 1 became the default when VOD stopped going through a Vercel function
+  // (lib/vod-resolve.ts remuxPlayable), and this route was left understanding
+  // only shape 2 — so `new URLSearchParams(...).get("url")` came back null for
+  // every real source and the answer was an unconditional empty list. That is
+  // why the audio-language menu vanished from VOD: not "no tracks on this file",
+  // but "this endpoint never recognised the source it was given". It also took
+  // remux SEEKING down with it, since the file's `duration` rides the same reply.
   let relayRemux: string | null = null;
   try {
     const q = src.includes("?") ? src.slice(src.indexOf("?") + 1) : "";
-    relayRemux = new URLSearchParams(q).get("url");
+    relayRemux = new URLSearchParams(q).get("url") ?? src;
   } catch {
     return NextResponse.json({ tracks: [], duration: null });
   }
-  if (!relayRemux || !relayRemux.includes("/remux.m3u8")) {
+  if (!relayRemux.includes("/remux.m3u8")) {
     return NextResponse.json({ tracks: [], duration: null });
   }
 
@@ -111,14 +99,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ tracks: [], duration: null });
   }
 
-  // One signed, playable source per track.
+  // One signed, playable source per track. Labels are de-duplicated across the
+  // whole set — a file with two tracks both tagged `eng` and no titles would
+  // otherwise render two rows reading "English".
+  const labels = dedupeLabels(tracks.map((t, i) => langLabel(t.lang, t.title, i)));
   const out = await Promise.all(
-    tracks.map(async (t) => {
+    tracks.map(async (t, i) => {
       const remux = `${RELAY}/remux.m3u8?u=${encodeURIComponent(file!)}${tq}&aidx=${t.rel}`;
       return {
         rel: t.rel,
         lang: t.lang,
-        label: label(t.lang, t.title, t.rel),
+        label: labels[i],
         url: await signedProxyUrl(remux),
       };
     }),

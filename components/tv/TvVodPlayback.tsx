@@ -4,6 +4,8 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Pause, SkipForward, RefreshCw, ListVideo, Languages } from "lucide-react";
 import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 import VodPlayer, { isRemuxSource, remuxStartFor, REMUX_SEEK_MIN_S } from "@/components/VodPlayer";
+import type { TvAudioHandle } from "@/components/VideoPlayer";
+import { isEnglishLang } from "@/lib/audioLang";
 import type { TvCcHandle } from "@/components/VideoPlayer";
 import { useTvBack } from "@/components/tv/TvNav";
 import TvKeyHints from "@/components/tv/TvKeyHints";
@@ -132,6 +134,14 @@ export default function TvVodPlayback({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const audioFetchedFor = useRef<string | null>(null);
+  // Languages carried by the STREAM (provider-a, Origin, Provider B, any multi-audio
+  // HLS) rather than produced by the relay. Without these the OSD had nothing
+  // to show the moment failover moved off a remux — the Audio section simply
+  // disappeared and whatever the stream defaulted to played. The player already
+  // forces English on these; this is the manual override.
+  const audioHandleRef = useRef<TvAudioHandle | null>(null);
+  const [streamAudio, setStreamAudio] = useState<{ id: number; lang: string; label: string }[]>([]);
+  const [streamAudioId, setStreamAudioId] = useState<number | null>(null);
   // Runtime of the underlying file, for remux sources only. The rolling remux
   // playlist never ends, so the <video> reports no usable duration — this is
   // what gives the OSD a real scale and bounds a seek. null → seeking stays off.
@@ -258,6 +268,11 @@ export default function TvVodPlayback({
         );
       }
       if (ccRef.current) setCc(ccRef.current.state());
+      // In-stream languages arrive asynchronously (manifest parse), so read the
+      // handle on the same tick rather than once at open.
+      const ah = audioHandleRef.current;
+      setStreamAudio(ah ? ah.tracks() : []);
+      setStreamAudioId(ah ? ah.activeId() : null);
     };
     tick();
     const id = setInterval(tick, 500);
@@ -476,6 +491,7 @@ export default function TvVodPlayback({
             initialTime={resumeAt > REMUX_SEEK_MIN_S ? resumeAt : undefined}
             subtitles={subtitles}
             ccRef={ccRef}
+            audioRef={audioHandleRef}
             videoElRef={videoElRef}
             onSourceFail={fail}
             onPlay={() => {
@@ -590,22 +606,24 @@ export default function TvVodPlayback({
               })}
             </div>
 
-            {/* Audio language. Only for remux sources (a direct mp4 is one baked-in
-                track). English is already the default — this is the "if the user
-                wants, they can change it" path. */}
-            {isRemux && (audioLoading || audioTracks.length > 1) && (
+            {/* Audio language. English is already the default everywhere — the
+                relay maps it on a remux, and the player forces it on any stream
+                that declares its own renditions. This is the "if the user wants,
+                they can change it" path, and it now exists for BOTH kinds of
+                source instead of only the remux. */}
+            {((isRemux && (audioLoading || audioTracks.length > 1)) || streamAudio.length > 1) && (
               <div className="mt-8">
                 <div className="flex items-center gap-2 mb-3">
                   <Languages className="w-6 h-6 text-[#8197a4]" />
                   <p className="text-2xl font-bold text-white">Audio</p>
                 </div>
-                {audioLoading ? (
+                {isRemux && audioLoading && audioTracks.length === 0 ? (
                   <p className="text-lg text-[#8197a4]">Checking languages…</p>
-                ) : (
+                ) : audioTracks.length > 1 ? (
                   <div className="flex items-center gap-4 flex-wrap">
                     {audioTracks.map((t) => {
                       const isCurrent = audioUrl === t.url;
-                      const isEnglish = t.lang === "eng" || t.lang === "en";
+                      const isEnglish = isEnglishLang(t.lang, t.label);
                       return (
                         <button
                           key={t.rel}
@@ -619,6 +637,28 @@ export default function TvVodPlayback({
                         >
                           {t.label}
                           {isEnglish && !isCurrent ? " · default" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-4 flex-wrap">
+                    {streamAudio.map((t) => {
+                      const isCurrent = streamAudioId === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          data-tv
+                          onClick={() => {
+                            audioHandleRef.current?.select(t.id);
+                            setStreamAudioId(t.id);
+                            setPickerOpen(false);
+                          }}
+                          className={`tv-menu-item flex items-center gap-2 px-7 py-4 rounded-lg text-xl font-medium focus:outline-none ${
+                            isCurrent ? "bg-white text-black" : "bg-[#1a242f] text-[#aebbc5]"
+                          }`}
+                        >
+                          {t.label}
                         </button>
                       );
                     })}
