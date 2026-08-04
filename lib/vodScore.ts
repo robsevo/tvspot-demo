@@ -55,6 +55,18 @@ export interface VodProbe {
   container: "mp4" | "mkv" | "ts";
   /** Which playable form this row produced. */
   form: "direct" | "remux";
+  /**
+   * OBSERVED cold start for this row's upstream panel, in ms; 0 = unmeasured.
+   *
+   * Published by the relay (/panel-stats) from the sessions it has actually
+   * spawned — see lib/vod-resolve. `latencyMs` above cannot substitute for it:
+   * that is a 2-byte range probe, so it measures how fast the panel says hello,
+   * not how fast it serves. Measured 2026-08-04: 103.176.90.100 answers the
+   * range probe promptly and then delivers at ~2 MB/s, taking ~15s to first
+   * playable byte, while 103.176.90.182 takes 1.6s. Identical probe latency,
+   * a ten-fold difference in what the viewer waits through.
+   */
+  panelStartMs?: number;
 }
 
 export function tierOf(p: VodProbe): VodTierValue {
@@ -109,6 +121,25 @@ export function vodScore(p: VodProbe): number {
   //    already decided the tier.
   if (p.container === "mp4") score += 10;
   else if (p.container === "mkv") score += 5;
+
+  // 5. OBSERVED panel cold start (-40 … 0). The only term backed by what a
+  //    viewer actually waited through, so it is allowed to outweigh the whole
+  //    probe-latency term (max 45) — a panel measured at 15s should lose to one
+  //    measured at 1.6s even when it wins on every cheap signal, which is
+  //    exactly the case the range probe could not see.
+  //
+  //    Unmeasured panels (0) are NOT penalised: the relay's table is in-memory
+  //    and empty after a restart, so charging the unknown would reshuffle every
+  //    source on each bounce. Thresholds are the measured spread: ~1.6s good,
+  //    ~7s tolerable, ~15s the throttled panel.
+  const ps = p.panelStartMs ?? 0;
+  if (ps > 0) {
+    if (ps >= 12_000) score -= 40;
+    else if (ps >= 8_000) score -= 26;
+    else if (ps >= 5_000) score -= 14;
+    else if (ps >= 3_000) score -= 6;
+    // < 3s: no penalty — this is the "starts promptly" band.
+  }
 
   return Math.max(0, Math.min(100, score));
 }
