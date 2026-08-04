@@ -179,9 +179,21 @@ export async function checkStreams(urls: string[], timeoutMs = DEFAULT_TIMEOUT_M
   return out;
 }
 
-/** VOD probes wait longer: a cold relay remux / double-proxied file can take
- *  several seconds to answer its first byte and that's still a good source. */
-const VOD_TIMEOUT_MS = 10_000;
+/**
+ * VOD probes wait longer: a cold relay remux / double-proxied file can take
+ * several seconds to answer its first byte and that's still a good source.
+ *
+ * 20s, not 10s, and the old value was demonstrably below the floor. Probing a
+ * remux URL doesn't just observe the source — it STARTS the ffmpeg session, so
+ * the probe pays the full cold start. Measured end to end against production:
+ * 14.5s to first manifest before the relay fixes (ffprobe 3.9s + ffprobe 4.6s +
+ * a `-re`-paced 6s first segment), ~12s after them. At a 10s budget the probe
+ * timed out on exactly the sources the resolver puts FIRST on purpose (remux
+ * leads for English audio — see lib/vod-resolve), so healthy titles reported
+ * their best source as failed. The retryable/hysteresis path above softens
+ * that, but the budget itself has to clear the real number.
+ */
+const VOD_TIMEOUT_MS = 20_000;
 
 /**
  * Probe a single VOD source. VOD candidates aren't all HLS playlists — they're

@@ -118,3 +118,61 @@ export function prewarmVod(kind: Kind, tmdb: number | string, s?: number, e?: nu
   });
   pump();
 }
+
+/* ---------------- remux session warmup (10-foot UI only) ----------------
+ *
+ * Resolving a title gets you a LIST of URLs; it does not make any of them
+ * playable. Nearly every VOD source is a `relay.example.com/remux.m3u8`, and the
+ * relay won't answer that until ffmpeg has spun up and closed a first segment.
+ * Measured against production: 14.5s cold, 0.73s once the session exists. That
+ * gap is the entire "why does a movie take so long to start" complaint, and
+ * resolving earlier cannot touch it.
+ *
+ * The web detail page mounts VodPlayer with autoPlay as soon as sources land,
+ * so there is no dwell to hide the wait in. The TV has one: a card sits under
+ * the remote's cursor for seconds before anyone presses Enter. So this warms
+ * the FIRST source of a card that has held focus, and only then.
+ *
+ * Three guards, because a warm is an ffmpeg process on a 2 GB box:
+ *   • DWELL — nothing fires until the card has held focus for WARM_DWELL_MS, so
+ *     arrowing along a rail warms nothing.
+ *   • ONE AT A TIME — a later focus replaces the pending warm outright.
+ *   • REMUX ONLY — `/api/vod-stream` sources are a byte range proxy, not a
+ *     session; "warming" one would just pull movie bytes for nothing.
+ * The relay caps VOD at 3 sessions and evicts warmup-only ones (those that
+ * never served a segment) first, so a warm can never displace someone watching.
+ *
+ * Deliberately NOT aborted when focus moves on: by then ffmpeg is already
+ * starting, and dropping the request risks the server cancelling the handler
+ * mid-spawn. The session idle-reaps on its own; letting the small manifest
+ * request finish is the cheaper, safer end.
+ */
+
+const WARM_DWELL_MS = 1200;
+let warmTimer: ReturnType<typeof setTimeout> | null = null;
+let warmedUrl: string | null = null;
+let warmInFlight = false;
+
+/** Warm the remux session for a title the viewer is dwelling on. */
+export function warmFirstSource(kind: Kind, tmdb: number | string, s?: number, e?: number): void {
+  if (warmTimer) clearTimeout(warmTimer);
+  warmTimer = setTimeout(() => {
+    warmTimer = null;
+    if (warmInFlight) return;
+    void (async () => {
+      try {
+        const urls = getPrewarmed(kind, tmdb, s, e) ?? (await resolveVod(kind, tmdb, s, e));
+        const first = urls[0];
+        if (!first || !first.includes("remux.m3u8")) return;
+        if (first === warmedUrl) return; // already warm (or warming) for this title
+        warmedUrl = first;
+        warmInFlight = true;
+        await fetchWithDeadline(first, { cache: "no-store" }, DEADLINE.stream).catch(() => {});
+      } catch {
+        // Best effort — a failed warm just means the player pays the cold start.
+      } finally {
+        warmInFlight = false;
+      }
+    })();
+  }, WARM_DWELL_MS);
+}

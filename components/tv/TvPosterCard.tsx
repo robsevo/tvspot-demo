@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Film } from "lucide-react";
-import { prewarmVod } from "@/lib/vodPrewarm";
+import { prewarmVod, warmFirstSource } from "@/lib/vodPrewarm";
 
 interface Props {
   tmdbId: number;
@@ -135,7 +135,14 @@ export default function TvPosterCard({
       // keyed per episode — prewarming without them warmed S1E1 while the
       // viewer pressed S2E4 and then waited out the full resolve. Movies ignore
       // both args. Never prewarm a stream we are about to delete.
-      if (!onSelect) prewarmVod(kind, tmdbId, season, episode);
+      if (!onSelect) {
+        prewarmVod(kind, tmdbId, season, episode);
+        // Resolving only gets a URL list; the 14.5s wait is the relay starting
+        // ffmpeg for it. Dwelling on a card is the one window long enough to
+        // absorb that, so spend it. Self-debounced — arrowing past a card warms
+        // nothing. See warmFirstSource.
+        warmFirstSource(kind, tmdbId, season, episode);
+      }
       onCardFocus?.();
     },
     className: `block focus:outline-none ${fluid ? "w-full" : "w-[280px] shrink-0"}`,
