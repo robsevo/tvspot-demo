@@ -249,21 +249,27 @@ export default function TvBrowseScreen({
           Height is deliberately short: the hero pane and the rails pane split
           the screen, so every extra vh here costs a rail.
 
-          Budget @1080p, with the 200×300 portrait posters (TvPosterCard):
+          Budget @1080p, with the 280×420 portrait posters (TvPosterCard):
             pane      = 100vh − 76px topnav          = 1004px
             hero      = 40vh                         =  432px
             rails     = 1004 − 432                   =  572px
-            one rail  = 300 poster + 32 h2 + 8 mb
-                        + 16 inner py + 16 section py=  372px
-            one rail + pane pt-2                     =  380px
+            one rail  = 420 poster + 32 h2 + 8 mb
+                        + 16 inner py + 16 section py=  492px
+            one rail + pane pt-2                     =  500px
 
           This is DELIBERATELY a one-row split: a big hero and big poster art
           together cost more than 1004px can show, and the choice was to keep
-          both. The second rail peeks ~190px below the fold and TvNav scrolls
-          it into view on the first Down press — the standard Prime/Netflix
-          portrait behaviour. (Two full rows needs hero ≤26vh and ~264px
-          posters; that trade was made and then reversed on purpose.)
-          Change any of these numbers and re-check the sum. */}
+          both. The posters went 200×300 → 280×420 because they read too small
+          from a couch. That is paid for entirely out of the SECOND rail's peek,
+          which shrinks from ~190px to ~72px — still enough of a sliver to say
+          "there is more below", and TvNav scrolls it into view on the first
+          Down press either way (the standard Prime/Netflix portrait
+          behaviour). The first rail itself still clears the fold with 72px to
+          spare, and that margin is now the binding constraint: 420 is close to
+          the largest poster this split can hold. Anything taller has to come
+          out of the 40vh hero. (Two full rows needs hero ≤26vh and ~264px
+          posters; that trade was made and then reversed on purpose.) Change any
+          of these numbers and re-check the sum. */}
       {/* Section mark. Top-left is the one reliably empty part of the hero: the
           copy is bottom-aligned and the art's subject sits right. It also lands
           on the left-to-right scrim, so a wordmark stays legible over any

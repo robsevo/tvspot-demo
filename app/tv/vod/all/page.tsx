@@ -57,7 +57,7 @@ function TvVodAllInner() {
           {loading ? "Loading catalog…" : "No titles in this category."}
         </p>
       ) : (
-        <div className="grid grid-cols-6 gap-6">
+        <div className="grid grid-cols-5 gap-6">
           {items.slice(0, budget).map((item, i) => (
             <TvPosterCard
               key={`${kind}-${item.tmdb_id}`}

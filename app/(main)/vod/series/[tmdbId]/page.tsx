@@ -222,7 +222,11 @@ export default function VodSeriesPage() {
     },
     [playingSources]
   );
-  const { statusOf, workingCount, busyCount, loading: checking, recheck, revalidating } = useStreamCheck(probeUrls, { mode: "vod" });
+  // `skip`: never re-probe the episode source on screen — a remux source is one
+  // ffmpeg session on the relay, so that would request a second transcode of the
+  // same file to learn something playback has already proven.
+  const { statusOf, workingCount, busyCount, loading: checking, recheck, revalidating } =
+    useStreamCheck(probeUrls, { mode: "vod", skip: confirmedUrl });
   // Ref mirror for handleSourceFailure, which reads it inside a state updater.
   const checkingRef = useRef(checking);
   useEffect(() => { checkingRef.current = checking; }, [checking]);

@@ -66,7 +66,7 @@ export default function PosterRail({ title, items, kind, children, onSeeAll }: P
             return (
             <div
               key={`${item.tmdb_id}-${itemKind}`}
-              className="animate-fade-in-up flex-shrink-0 w-[40vw] sm:w-[180px] md:w-[200px] lg:w-[220px]"
+              className="animate-fade-in-up flex-shrink-0 w-[56vw] sm:w-[240px] md:w-[272px] lg:w-[300px]"
               style={{ animationDelay: `${Math.min(i * 0.03, 0.3)}s` }}
             >
               <PosterCard

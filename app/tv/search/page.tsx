@@ -51,7 +51,7 @@ export default function TvSearchPage() {
       ) : results.length === 0 ? (
         <p className="py-6 text-xl text-[#8197a4]">No titles match “{query}”.</p>
       ) : (
-        <div className="grid grid-cols-6 gap-6">
+        <div className="grid grid-cols-5 gap-6">
           {results.map((item) => (
             <TvPosterCard
               key={`${item.kind}-${item.tmdb_id}`}

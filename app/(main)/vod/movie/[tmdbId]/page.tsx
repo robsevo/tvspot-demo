@@ -147,7 +147,12 @@ export default function VodMoviePage() {
     const cheap = sources.filter((s) => !isRemux(s.url));
     return (cheap.length > 0 ? cheap : sources).slice(0, MAX_PROBE_SOURCES).map((s) => s.url);
   }, [sources]);
-  const { statusOf, workingCount, busyCount, loading: checking, recheck, revalidating } = useStreamCheck(probeUrls, { mode: "vod" });
+  // `skip` keeps the background watcher off the source currently playing: a
+  // remux source is one ffmpeg session on the relay, so re-probing it asks for a
+  // SECOND transcode of the same file rather than telling us anything playback
+  // hasn't already proven.
+  const { statusOf, workingCount, busyCount, loading: checking, recheck, revalidating } =
+    useStreamCheck(probeUrls, { mode: "vod", skip: confirmedUrl });
 
   // Ensure source index is valid
   const validIndex = Math.min(sourceIndex, Math.max(0, sources.length - 1));

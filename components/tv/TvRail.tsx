@@ -47,7 +47,7 @@ export default function TvRail({
   children: ReactNode;
 }) {
   /* Poster-shaped: seeAllHref is only ever set on VOD rails (TvProviderBrowse /
-     TvCatalogTabPage), so this tile sits beside 200×300 TvPosterCards and must
+     TvCatalogTabPage), so this tile sits beside 280×420 TvPosterCards and must
      match their footprint. Channel/event rails use `leading`/`trailing` instead
      and keep their own shape.
 
@@ -63,7 +63,7 @@ export default function TvRail({
     <Link
       href={seeAllHref}
       data-tv
-      className="tv-card-shadow w-[200px] h-[300px] shrink-0 rounded-lg flex flex-col items-center justify-center gap-4 focus:outline-none"
+      className="tv-card-shadow w-[280px] h-[420px] shrink-0 rounded-lg flex flex-col items-center justify-center gap-4 focus:outline-none"
       style={{
         backgroundColor: "#121a24",
         border: "1px solid rgba(255,255,255,0.10)",

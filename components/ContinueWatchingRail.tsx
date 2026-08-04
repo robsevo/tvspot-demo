@@ -67,7 +67,7 @@ export default function ContinueWatchingRail() {
           {resumable.map((i, idx) => (
             <div
               key={`cw-${i.kind}-${i.tmdbId}-${i.season ?? 0}-${i.episode ?? 0}`}
-              className="animate-fade-in-up flex-shrink-0 w-[40vw] sm:w-[180px] md:w-[200px] lg:w-[220px]"
+              className="animate-fade-in-up flex-shrink-0 w-[56vw] sm:w-[240px] md:w-[272px] lg:w-[300px]"
               style={{ animationDelay: `${Math.min(idx * 0.03, 0.3)}s` }}
             >
               <PosterCard

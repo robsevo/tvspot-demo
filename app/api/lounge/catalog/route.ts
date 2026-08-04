@@ -14,6 +14,77 @@ const BYPASS_TV_IDS = [93405, 71446, 70523, 110316, 99966, 96648, 210905, 96677]
 const BYPASS_MOVIE_IDS = [496243, 396535, 670];
 const BYPASS_IDS = new Set<number>([...BYPASS_TV_IDS, ...BYPASS_MOVIE_IDS]);
 
+/**
+ * Process-wide stale-while-revalidate memo.
+ *
+ * WHY THIS EXISTS: nothing this route computes depends on WHO is asking. The
+ * TMDB region crawl, the per-title US/CA verdicts and the assembled per-service
+ * payload are all identical for every user — yet the route is dynamic (it reads
+ * searchParams + the cookie), so every single request used to rebuild all of it.
+ * Measured on production before this change:
+ *
+ *     /api/lounge/catalog?service=Netflix   11.06s cold, 1.88s warm
+ *     …the backend call inside it            0.16s
+ *
+ * The other ~11s was 603 TMDB round trips: 256 for the region crawl (~2.9s) and
+ * ~347 per-title confirmations run in sequential batches of 24 (~10.3s). The
+ * proof that the per-title pass is the bulk of it: Crunchyroll is in
+ * ORIGIN_GATE_EXEMPT and therefore skips it entirely — it answered in 1.4s while
+ * every other provider took 6.4-11.1s.
+ *
+ * `next: { revalidate }` on the individual fetches was not enough. It dedupes
+ * the NETWORK, not the fan-out: a warm request still performs 603 cache lookups,
+ * ~15 of them in a sequential chain, which is the residual 1.9s.
+ *
+ * Semantics: a fresh entry returns instantly; a stale one returns instantly AND
+ * refreshes behind the response; a cold one waits for the build. Concurrent
+ * misses coalesce onto one build so a cold burst can't stampede TMDB. `accept`
+ * gates what's worth remembering — an empty result is a failed build, not a
+ * legitimately empty catalog, and caching it would pin the UI to "no titles".
+ */
+function swrMemo<K, V>(freshMs: number, accept: (v: V) => boolean = () => true) {
+  const cache = new Map<K, { data: V; ts: number }>();
+  const inflight = new Map<K, Promise<V>>();
+
+  function refresh(key: K, build: () => Promise<V>): Promise<V> {
+    const running = inflight.get(key);
+    if (running) return running;
+    const p = (async () => {
+      try {
+        const data = await build();
+        if (accept(data)) cache.set(key, { data, ts: Date.now() });
+        return data;
+      } finally {
+        inflight.delete(key);
+      }
+    })();
+    inflight.set(key, p);
+    return p;
+  }
+
+  return async function get(key: K, build: () => Promise<V>): Promise<V> {
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.ts < freshMs) return hit.data;
+    if (hit) {
+      // Stale — serve it now, refresh behind the response. after() keeps the
+      // work alive past the response on Vercel instead of being frozen.
+      //
+      // Guarded because these memos nest (a service build asks for region data,
+      // which may itself be stale) and after() throws when there is no request
+      // scope to attach to. A background refresh failing to schedule must never
+      // turn a cache HIT into a 500 — losing the refresh just means the next
+      // request rebuilds instead.
+      try {
+        after(() => refresh(key, build).catch(() => {}));
+      } catch {
+        void refresh(key, build).catch(() => {});
+      }
+      return hit.data;
+    }
+    return refresh(key, build);
+  };
+}
+
 /** Services whose content is foreign-origin BY DESIGN, so the US/CA-origin gate
  *  must not apply (it would drop nearly everything). Crunchyroll = anime. */
 const ORIGIN_GATE_EXEMPT = new Set<string>(["Crunchyroll"]);
@@ -70,9 +141,23 @@ const TMDB_PAGES = 32;
  * which a popularity-only crawl misses. Responses are cached (revalidate) so this
  * doesn't re-hit TMDB every request.
  */
-async function fetchRegionData(
-  kind: "movie" | "tv",
-): Promise<{ scores: Map<number, number>; allow: Set<number> }> {
+type RegionData = { scores: Map<number, number>; allow: Set<number> };
+
+/** The region crawl is global — same answer for every service and every user —
+ *  so it is built at most once an hour per process instead of 256 TMDB calls
+ *  (~2.9s measured) on every request. A build that returns nothing (no token,
+ *  TMDB down) is not cached, so we retry rather than pinning an empty allowlist
+ *  that would gate every title out. */
+const regionMemo = swrMemo<"movie" | "tv", RegionData>(
+  60 * 60 * 1000,
+  (r) => r.allow.size > 0,
+);
+
+function fetchRegionData(kind: "movie" | "tv"): Promise<RegionData> {
+  return regionMemo(kind, () => buildRegionData(kind));
+}
+
+async function buildRegionData(kind: "movie" | "tv"): Promise<RegionData> {
   const tmdbToken = process.env.TMDB_ACCESS_TOKEN;
   const scores = new Map<number, number>();
   const allow = new Set<number>();
@@ -263,23 +348,51 @@ async function fetchTmdbByIds(kind: "movie" | "tv", ids: number[]): Promise<any[
 async function fetchTitleUsCaEn(kind: "movie" | "tv", id: number): Promise<boolean> {
   const tmdbToken = process.env.TMDB_ACCESS_TOKEN;
   if (!tmdbToken || !id) return false;
-  try {
-    const r = await fetch(`https://api.themoviedb.org/3/${kind}/${id}?language=en-US`, {
-      headers: { Authorization: `Bearer ${tmdbToken}` },
-      next: { revalidate: 86400 },
-    });
-    if (!r.ok) return false;
-    const d = await r.json();
-    if (d.original_language !== "en") return false;
-    const countries: string[] = [
-      ...(d.origin_country || []),
-      ...((d.production_countries || []).map((c: any) => c.iso_3166_1)),
-    ];
-    return countries.includes("US") || countries.includes("CA");
-  } catch {
-    return false;
-  }
+
+  // A title's origin country and original language never change, so the verdict
+  // is memoised for the life of the process — this is the single biggest win in
+  // the route. Providers overlap heavily (the same title sits in several service
+  // catalogs, and every service re-checks the same long tail), so after the
+  // first build most lookups are answered without touching TMDB at all.
+  const key = `${kind}:${id}`;
+  const hit = titleUsCa.get(key);
+  if (hit !== undefined) return hit;
+  const running = titleUsCaInflight.get(key);
+  if (running) return running; // two services asking at once → one request
+
+  const p = (async () => {
+    try {
+      const r = await fetch(`https://api.themoviedb.org/3/${kind}/${id}?language=en-US`, {
+        headers: { Authorization: `Bearer ${tmdbToken}` },
+        next: { revalidate: 86400 },
+      });
+      // Only a real answer is worth remembering. A 429/5xx means "ask again",
+      // and caching it as `false` would silently delete the title from every
+      // catalog until this process recycled.
+      if (!r.ok) return false;
+      const d = await r.json();
+      const countries: string[] = [
+        ...(d.origin_country || []),
+        ...((d.production_countries || []).map((c: any) => c.iso_3166_1)),
+      ];
+      const ok =
+        d.original_language === "en" &&
+        (countries.includes("US") || countries.includes("CA"));
+      titleUsCa.set(key, ok);
+      return ok;
+    } catch {
+      return false;
+    } finally {
+      titleUsCaInflight.delete(key);
+    }
+  })();
+  titleUsCaInflight.set(key, p);
+  return p;
 }
+
+/** Memoised per-title US/CA-English verdicts, keyed "movie:123" / "tv:456". */
+const titleUsCa = new Map<string, boolean>();
+const titleUsCaInflight = new Map<string, Promise<boolean>>();
 
 /** Keep US/CA-English titles: fast-path the discover allowlist, then confirm the
  *  rest individually against TMDB (so we don't drop non-hit US/CA English titles).
@@ -291,7 +404,12 @@ async function filterUsCaEn(items: any[], kind: "movie" | "tv", allow: Set<numbe
     if (it.service === "Popular Movies" || it.service === "Popular Series" || allow.has(it.tmdb_id) || BYPASS_IDS.has(it.tmdb_id)) out.push(it);
     else toCheck.push(it);
   }
-  const CONC = 24;
+  // 24 meant ~15 sequential round trips for a 400-title service — measured at
+  // 10.3s, the bulk of the route's latency. This only ever runs on a genuinely
+  // cold cache now (fetchTitleUsCaEn memoises per title), so a wider batch pays
+  // once per process rather than once per request, and TMDB has no documented
+  // request-rate cap to trip.
+  const CONC = 64;
   for (let i = 0; i < toCheck.length; i += CONC) {
     const batch = toCheck.slice(i, i + CONC);
     const ok = await Promise.all(batch.map((it) => fetchTitleUsCaEn(kind, it.tmdb_id)));
@@ -446,59 +564,77 @@ async function getTrending(cookie: string): Promise<Trending> {
   return refreshTrending(cookie); // cold — compute once for this process
 }
 
+/** Build one provider's US/CA-ranked catalog. Same output as before; the caller
+ *  is what changed — see serviceMemo. */
+async function computeService(service: string, cookie: string): Promise<any> {
+  const url = `${BACKEND}/lounge/vod/catalog?service=${encodeURIComponent(service)}`;
+  const res = await fetch(url, { headers: { Cookie: cookie } });
+  const data = await res.json();
+  const normalized = {
+    ...data,
+    movies: normalizeItems(data.movies || []),
+    series: normalizeItems(data.series || []),
+  };
+
+  // Enrich + rank this service's titles by US/CA popularity, then drop non-US/CA
+  // titles so a service page is USA/Canada-only too (matches the home rails).
+  const [movieRegion, seriesRegion] = await Promise.all([
+    fetchRegionData("movie"),
+    fetchRegionData("tv"),
+  ]);
+  applyRegionScores(normalized.movies || [], movieRegion.scores);
+  applyRegionScores(normalized.series || [], seriesRegion.scores);
+  // The US/CA-origin gate drops everything not US/CA-origin — right for the
+  // mainstream services (it removes the foreign dramas the backend mixes in),
+  // but it would gut a foreign-BY-NATURE service. Crunchyroll is ~100%
+  // Japanese-origin anime, so the gate left ~10 of ~500. Services in
+  // ORIGIN_GATE_EXEMPT keep all their titles (still English-metadata'd by the
+  // backend's language=en-US discover) and are only re-ranked by popularity.
+  if (!ORIGIN_GATE_EXEMPT.has(service)) {
+    // Keep ALL US/CA-English titles (not just the popularity allowlist):
+    // confirm the long tail against TMDB by id. Lifts a service from ~67 to
+    // the full set of its genuine US/CA English titles.
+    [normalized.movies, normalized.series] = await Promise.all([
+      filterUsCaEn(normalized.movies || [], "movie", movieRegion.allow),
+      filterUsCaEn(normalized.series || [], "tv", seriesRegion.allow),
+    ]);
+  }
+
+  return normalized;
+}
+
+/**
+ * Assembled per-provider payload, memoised per process.
+ *
+ * 15 minutes matches the trending cache — the backend's own catalog is rebuilt
+ * nightly, so a quarter hour is far inside the window in which this can change,
+ * and the stale path refreshes behind the response anyway. An empty build is
+ * rejected: that means the backend was mid-bounce, and caching it would show
+ * "no titles" for the next 15 minutes.
+ */
+const serviceMemo = swrMemo<string, any>(
+  15 * 60 * 1000,
+  (d) => (d?.movies?.length || 0) + (d?.series?.length || 0) > 0,
+);
+
 export async function GET(request: NextRequest) {
   const service = request.nextUrl.searchParams.get("service");
   const trending = request.nextUrl.searchParams.get("trending");
+  const cookie = request.headers.get("cookie") || "";
 
   if (trending === "true") {
-    const data = await getTrending(request.headers.get("cookie") || "");
+    const data = await getTrending(cookie);
     return NextResponse.json({ ...data, sorted_by: "tmdb_popularity_us_ca" });
   }
 
   if (service) {
-    const url = `${BACKEND}/lounge/vod/catalog?service=${encodeURIComponent(service)}`;
-    const res = await fetch(url, {
-      headers: { Cookie: request.headers.get("cookie") || "" },
-    });
-    const data = await res.json();
-    const normalized = {
-      ...data,
-      movies: normalizeItems(data.movies || []),
-      series: normalizeItems(data.series || []),
-    };
-
-    // Enrich + rank this service's titles by US/CA popularity, then drop non-US/CA
-    // titles so a service page is USA/Canada-only too (matches the home rails).
-    const [movieRegion, seriesRegion] = await Promise.all([
-      fetchRegionData("movie"),
-      fetchRegionData("tv"),
-    ]);
-    applyRegionScores(normalized.movies || [], movieRegion.scores);
-    applyRegionScores(normalized.series || [], seriesRegion.scores);
-    // The US/CA-origin gate drops everything not US/CA-origin — right for the
-    // mainstream services (it removes the foreign dramas the backend mixes in),
-    // but it would gut a foreign-BY-NATURE service. Crunchyroll is ~100%
-    // Japanese-origin anime, so the gate left ~10 of ~500. Services in
-    // ORIGIN_GATE_EXEMPT keep all their titles (still English-metadata'd by the
-    // backend's language=en-US discover) and are only re-ranked by popularity.
-    if (!ORIGIN_GATE_EXEMPT.has(service)) {
-      // Keep ALL US/CA-English titles (not just the popularity allowlist):
-      // confirm the long tail against TMDB by id. Lifts a service from ~67 to
-      // the full set of its genuine US/CA English titles.
-      [normalized.movies, normalized.series] = await Promise.all([
-        filterUsCaEn(normalized.movies || [], "movie", movieRegion.allow),
-        filterUsCaEn(normalized.series || [], "tv", seriesRegion.allow),
-      ]);
-    }
-
-    return NextResponse.json(normalized);
+    const data = await serviceMemo(service, () => computeService(service, cookie));
+    return NextResponse.json(data);
   }
 
   // Raw catalog with TMDB enrichment
   const url = `${BACKEND}/lounge/vod/catalog`;
-  const res = await fetch(url, {
-    headers: { Cookie: request.headers.get("cookie") || "" },
-  });
+  const res = await fetch(url, { headers: { Cookie: cookie } });
   const data = await res.json();
   return NextResponse.json(data);
 }

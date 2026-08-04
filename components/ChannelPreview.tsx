@@ -6,6 +6,9 @@ import type Hls from "hls.js"; // type only — the library is imported lazily b
 import { Volume2, VolumeX, Captions } from "lucide-react";
 import { LogoImage } from "@/components/LogoImage";
 import { ccWordsOf, ccWrap } from "@/lib/captions";
+import { channelSourceList } from "@/lib/liveSources";
+import { notePreviewSource } from "@/lib/previewHandoff";
+import { channelSlug } from "@/lib/sources";
 import { useLiveCaptions } from "@/hooks/useLiveCaptions";
 import type { Channel } from "@/lib/types";
 
@@ -77,17 +80,13 @@ function writeFlag(key: string, on: boolean) {
  *  is a glance, not a viewing session, and every extra attempt is another
  *  connection to a panel that the real player may want a slot on. If none of the
  *  first few work the preview says so and tuning in properly will do the full
- *  probe + failover. */
+ *  probe + failover.
+ *
+ *  These are the SAME first four the player would list, in the same order —
+ *  channelSourceList is shared (see lib/liveSources). That matters twice over:
+ *  the preview starts where the player starts, and the URL it hands over on
+ *  "watch" is string-identical to the player's entry for that stream. */
 const MAX_SOURCES = 4;
-
-function sourcesFor(channel: Channel): string[] {
-  const merged = [
-    ...(channel.verified_sources || []),
-    channel.primary_url,
-    ...(channel.backup_urls || []),
-  ].filter((u): u is string => Boolean(u));
-  return Array.from(new Set(merged)).slice(0, MAX_SOURCES);
-}
 
 /**
  * Small live preview of a channel, pinned to the top-right of the guide.
@@ -148,8 +147,9 @@ export default function ChannelPreview({
   const soundRef = useRef(soundOn);
   soundRef.current = soundOn;
 
-  const urls = sourcesFor(channel);
+  const urls = useMemo(() => channelSourceList(channel, MAX_SOURCES), [channel]);
   const src = urls[idx];
+  const slug = channelSlug(channel.name);
 
   // NOTE: this component is mounted with key={channel.name} (see TvEpgGrid), so
   // switching channels REMOUNTS it. That's deliberate — it resets the source
@@ -407,7 +407,15 @@ export default function ChannelPreview({
           playsInline
           autoPlay
           className="w-full h-full object-contain"
-          onPlaying={() => setPlaying(true)}
+          onPlaying={() => {
+            setPlaying(true);
+            // Hand over the source that is DEMONSTRABLY on screen, so tuning in
+            // opens this stream rather than whichever one the player's own probe
+            // would rank first. Several channels pool two different feeds under
+            // one name, so "a source for this channel" is not good enough — see
+            // lib/previewHandoff.
+            notePreviewSource(slug, src);
+          }}
           onError={() => setFailed(true)}
         />
         {/* Captions, drawn by us from a `hidden` track — same .cc-box/.cc-line

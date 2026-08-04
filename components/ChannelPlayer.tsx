@@ -3,6 +3,8 @@ import { useChannels } from "@/hooks/useChannels";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
 import VideoPlayer from "./VideoPlayer";
 import { channelSlug } from "@/lib/sources";
+import { appendSources, channelSourceList } from "@/lib/liveSources";
+import { previewSourceFor } from "@/lib/previewHandoff";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, X, Loader2, RefreshCw, Info, ExternalLink } from "lucide-react";
@@ -15,8 +17,10 @@ function StatusDot({ status }: { status: SourceStatus }) {
   if (status === "checking") return <Loader2 className="w-3 h-3 animate-spin text-text-muted" />;
   if (status === "working") return <Check className="w-3 h-3 text-green-400" />;
   if (status === "dead") return <X className="w-3 h-3 text-red-400" />;
-  // Busy = connection-limited (shared account full right now), not dead — amber.
-  if (status === "busy") return <span className="w-2 h-2 rounded-full bg-amber-400" title="Busy — connection limit" />;
+  // Amber = "not now, but not dead": a connection-limited panel (shared account
+  // full this second) or a source that outran the probe's time budget. Both are
+  // re-checked rather than written off — see useStreamCheck's DEAD_STREAK.
+  if (status === "busy") return <span className="w-2 h-2 rounded-full bg-amber-400" title="Not available right now — still retrying" />;
   return null;
 }
 
@@ -29,19 +33,10 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   );
 
   // Sources, best-first: nightly-verified links first, then the backend's live
-  // links. Deduped, and capped so we never probe an unbounded set. The verified
-  // list rides along on the channel (attached by /api/lounge/live-channels) —
-  // it is deliberately NOT bundled into the client, so a nightly link refresh
-  // no longer changes a chunk hash and no longer forces a reload.
-  const probedUrls = useMemo(() => {
-    if (!channel) return [];
-    const merged = [
-      ...(channel.verified_sources || []),
-      channel.primary_url,
-      ...(channel.backup_urls || []),
-    ].filter((u): u is string => Boolean(u));
-    return Array.from(new Set(merged)).slice(0, 20);
-  }, [channel]);
+  // links — deduped by STREAM identity (the same feed arrives in two encodings;
+  // see lib/liveSources) and capped so we never probe an unbounded set. Shared
+  // with the guide preview so both start on the same source.
+  const probedUrls = useMemo(() => channelSourceList(channel, 20), [channel]);
 
   // Extra sources fetched dynamically when the initial probe comes up mostly dead.
   // Declared before allUrls so the memo can reference it without hoisting issues.
@@ -50,13 +45,19 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
 
   // Merge extra sources into the probe pool, deduped, capped at 24.
   const allUrls = useMemo(
-    () => (extraUrls.length > 0
-      ? [...new Set([...probedUrls, ...extraUrls])].slice(0, 24)
-      : probedUrls),
+    () => (extraUrls.length > 0 ? appendSources(probedUrls, extraUrls, 24) : probedUrls),
     [probedUrls, extraUrls],
   );
 
-  const { statusOf, workingCount, busyCount, loading, recheck, revalidating } = useStreamCheck(allUrls);
+  // The source ACTUALLY playing — playback is ground truth, so the verifier can
+  // never mark it dead or claim "no sources online" while it's on screen.
+  // Declared before the probe so it can be excluded from background re-probes:
+  // asking a max_connections=1 panel for a second slot on the stream you are
+  // watching is how the watchdog used to cause the stalls it looks for.
+  const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
+
+  const { statusOf, workingCount, busyCount, loading, recheck, revalidating } =
+    useStreamCheck(allUrls, { skip: confirmedUrl });
 
   // Reset expansion when the channel changes.
   const channelSlugValue = channel ? channelSlug(channel.name) : "";
@@ -102,13 +103,18 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, workingCount, channelSlugValue]);
 
-  // The source ACTUALLY playing — playback is ground truth, so the verifier can
-  // never mark it dead or claim "no sources online" while it's on screen.
-  const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
-
   // A user-chosen source pins playback. Tracked by URL (not index) so reordering
   // the list as verdicts arrive never changes what the user selected.
-  const [pickedUrl, setPickedUrl] = useState<string | null>(null);
+  //
+  // Seeded from the guide preview: whatever the preview had ON SCREEN counts as
+  // a choice, because on channels that pool two different feeds under one name
+  // (24/7 Pokemon carries the modern series on one source and the 1997 series on
+  // the other) the player's own probe could otherwise open a different show than
+  // the one you just previewed. Pinned, not forced — isDead() still drops it and
+  // fails over. See lib/previewHandoff.
+  const [pickedUrl, setPickedUrl] = useState<string | null>(() =>
+    previewSourceFor(channelName),
+  );
   // Sources that dropped DURING playback (stall watchdog / fatal error), mapped
   // to WHEN they dropped. The relay has ~30-40s GLOBAL outage windows where every
   // (shared-relay) source 403s at once, then recovers — so a drop is a COOLDOWN,
@@ -130,7 +136,12 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   const [prevName, setPrevName] = useState(channel?.name);
   if (channel?.name !== prevName) {
     setPrevName(channel?.name);
-    setPickedUrl(null);
+    // Re-seed rather than clear: the lineup often resolves a beat AFTER mount
+    // (cached-first useChannels), and this branch fires on that first resolve —
+    // a bare null here would throw away the preview's handoff on exactly the
+    // cold-load path it's needed for. previewSourceFor is a pure, TTL-bounded
+    // read, so it returns null for any channel the preview didn't just play.
+    setPickedUrl(channel ? previewSourceFor(channelSlug(channel.name)) : null);
     setFailedAt({});
     setConfirmedUrl(null);
   }
@@ -189,19 +200,35 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     if (s === "busy") return 2;                // connection-limited → last resort
     return 3;                                   // dead
   };
-  // STICKY auto-pick. Re-sorting on every verdict meant a channel that was
-  // connecting fine on Source 1 got yanked to Source 2 the instant that one
-  // verified — a needless reload (black frame, audio restart) mid-tune, which is
-  // the opposite of fluid. Once an auto source is chosen we keep it until it is
-  // actually judged dead / drops, so verdicts refine the ORDER for failover
-  // without interrupting a healthy connect.
+  // STICKY auto-pick, but only while sticking is still defensible.
+  //
+  // Re-sorting on every verdict yanked a channel that was connecting fine on
+  // Source 1 over to Source 2 the instant that one verified — a needless reload
+  // (black frame, audio restart) mid-tune. So the pick sticks.
+  //
+  // It used to stick until the source was judged DEAD, and that is the bug that
+  // made the ranking look broken: "busy" is not "dead". A source at its panel's
+  // connection limit is a source that will not start, yet it held the pick
+  // forever while verified-working sources sat below it. Measured on 24/7 Rick
+  // and Morty: 8 busy, 0 ok, and the player sat on a busy source until the stall
+  // watchdog eventually gave up — while other channels had working sources one
+  // rank down the whole time.
+  //
+  // Now the stick holds only while nothing is STRICTLY better. Once playback is
+  // confirmed, pickRank returns -1 for that source, so a healthy connect can
+  // never be displaced — which is the property the stickiness existed for.
   const ranked = allUrls
     .filter((u) => !isDead(u))
     .sort((a, b) => pickRank(a) - pickRank(b));
   const autoRef = useRef<string | null>(null);
   const stick = autoRef.current;
-  const firstAlive =
-    stick && allUrls.includes(stick) && !isDead(stick) ? stick : ranked[0];
+  const best = ranked[0];
+  const stickHolds =
+    stick != null &&
+    allUrls.includes(stick) &&
+    !isDead(stick) &&
+    (best === undefined || pickRank(stick) <= pickRank(best));
+  const firstAlive = stickHolds ? stick : best;
   useEffect(() => {
     autoRef.current = firstAlive ?? null;
   }, [firstAlive]);
@@ -302,11 +329,15 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
         <div className="flex flex-col gap-2">
           {/* Verification summary */}
           <div className="flex items-center justify-between px-1 text-xs text-text-muted">
+            {/* Counts lead, "checking" trails. Verdicts now arrive per panel
+                rather than all at the end (~0.5s for the first, vs 3-6s for the
+                whole pass), so a flat "Checking sources…" would hide the very
+                progress that was just made visible. */}
             <span>
-              {loading
-                ? "Checking sources…"
-                : shownWorking > 0
-                  ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}`
+              {shownWorking > 0
+                ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}${loading ? " · checking…" : ""}`
+                : loading
+                  ? "Checking sources…"
                   : busyCount > 0
                     ? `${busyCount} source${busyCount > 1 ? "s" : ""} busy — will connect when free`
                     : `0 of ${allUrls.length} sources online`}

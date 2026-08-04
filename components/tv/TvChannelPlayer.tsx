@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useChannels } from "@/hooks/useChannels";
 import { useEpg } from "@/hooks/useEpg";
 import { channelSlug } from "@/lib/sources";
+import { appendSources, channelSourceList } from "@/lib/liveSources";
+import { previewSourceFor } from "@/lib/previewHandoff";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
 import VideoPlayer from "@/components/VideoPlayer";
 import { LogoImage } from "@/components/LogoImage";
@@ -58,29 +60,26 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   // Verified links ride along on the channel (attached by our
   // /api/lounge/live-channels route) rather than being compiled in — see
   // lib/linkData.ts. Keeping them out of the bundle is what stopped the nightly
-  // link refresh from force-reloading the TV every night.
-  const probedUrls = useMemo(() => {
-    if (!channel) return [];
-    const merged = [
-      ...(channel.verified_sources || []),
-      channel.primary_url,
-      ...(channel.backup_urls || []),
-    ].filter((u): u is string => Boolean(u));
-    return Array.from(new Set(merged)).slice(0, 20);
-  }, [channel]);
+  // link refresh from force-reloading the TV every night. The list itself is
+  // built by the shared builder (deduped by stream identity, not URL string) so
+  // the guide preview and this player agree on what "source 1" is.
+  const probedUrls = useMemo(() => channelSourceList(channel, 20), [channel]);
 
   const [extraUrls, setExtraUrls] = useState<string[]>([]);
   const expansionFired = useRef(false);
 
   const allUrls = useMemo(
-    () =>
-      extraUrls.length > 0
-        ? [...new Set([...probedUrls, ...extraUrls])].slice(0, 24)
-        : probedUrls,
+    () => (extraUrls.length > 0 ? appendSources(probedUrls, extraUrls, 24) : probedUrls),
     [probedUrls, extraUrls],
   );
 
-  const { statusOf, workingCount, busyCount, loading, recheck, revalidating } = useStreamCheck(allUrls);
+  // Declared ahead of the probe so the source ON SCREEN can be excluded from
+  // background re-probes — several panels are max_connections=1, so re-probing
+  // what you are watching asks for a second slot and manufactures the stall.
+  const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
+
+  const { statusOf, workingCount, busyCount, loading, recheck, revalidating } =
+    useStreamCheck(allUrls, { skip: confirmedUrl });
 
   const channelSlugValue = channel ? channelSlug(channel.name) : "";
   const prevChannelSlug = useRef(channelSlugValue);
@@ -113,8 +112,13 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, workingCount, channelSlugValue]);
 
-  const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
-  const [pickedUrl, setPickedUrl] = useState<string | null>(null);
+  // Seeded from the guide preview — the source it had ON SCREEN counts as a
+  // pick, so Enter-to-watch opens the feed you were just looking at instead of
+  // whatever this player's probe ranks first (they differ on channels that pool
+  // two different feeds under one name). See lib/previewHandoff.
+  const [pickedUrl, setPickedUrl] = useState<string | null>(() =>
+    previewSourceFor(channelName),
+  );
   const [failedAt, setFailedAt] = useState<Record<string, number>>({});
   const FAIL_COOLDOWN_MS = 60000;
 
@@ -127,7 +131,10 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   const [prevName, setPrevName] = useState(channel?.name);
   if (channel?.name !== prevName) {
     setPrevName(channel?.name);
-    setPickedUrl(null);
+    // Re-seed, don't clear: this branch also fires the first time the lineup
+    // resolves (cached-first useChannels), which would otherwise discard the
+    // preview's handoff. Pure, TTL-bounded read — null for any other channel.
+    setPickedUrl(channel ? previewSourceFor(channelSlug(channel.name)) : null);
     setFailedAt({});
     setConfirmedUrl(null);
   }
@@ -175,19 +182,24 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
     if (s === "busy") return 2;
     return 3;
   };
-  // STICKY auto-pick. Re-sorting on every verdict meant a channel that was
-  // connecting fine on Source 1 got yanked to Source 2 the instant that one
-  // verified — a needless reload (black frame, audio restart) mid-tune, which is
-  // the opposite of fluid. Once an auto source is chosen we keep it until it is
-  // actually judged dead / drops, so verdicts refine the ORDER for failover
-  // without interrupting a healthy connect.
+  // STICKY auto-pick, but only while sticking is still defensible — same rule as
+  // the web player, and the same reason: "busy" is not "dead", so a source at its
+  // panel's connection limit used to hold the pick indefinitely while verified
+  // sources sat below it. The stick now yields to a strictly better rank, and
+  // once playback is confirmed pickRank returns -1 so a healthy connect can
+  // never be displaced.
   const ranked = allUrls
     .filter((u) => !isDead(u))
     .sort((a, b) => pickRank(a) - pickRank(b));
   const autoRef = useRef<string | null>(null);
   const stick = autoRef.current;
-  const firstAlive =
-    stick && allUrls.includes(stick) && !isDead(stick) ? stick : ranked[0];
+  const best = ranked[0];
+  const stickHolds =
+    stick != null &&
+    allUrls.includes(stick) &&
+    !isDead(stick) &&
+    (best === undefined || pickRank(stick) <= pickRank(best));
+  const firstAlive = stickHolds ? stick : best;
   useEffect(() => {
     autoRef.current = firstAlive ?? null;
   }, [firstAlive]);
@@ -437,11 +449,13 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
                 </p>
               )}
             </div>
+            {/* Counts lead, "checking" trails — verdicts land per panel now, so
+                the first one is ~0.5s in and the couch should see that. */}
             <p className="text-base text-[#8197a4] shrink-0">
-              {loading
-                ? "Checking sources…"
-                : shownWorking > 0
-                  ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}`
+              {shownWorking > 0
+                ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}${loading ? " · checking…" : ""}`
+                : loading
+                  ? "Checking sources…"
                   : busyCount > 0
                     ? `${busyCount} busy — will connect when free`
                     : `0 of ${allUrls.length} online`}

@@ -14,6 +14,8 @@
  * runtime path.
  */
 
+import { upstreamHost } from "@/lib/liveSources";
+
 export interface StreamCheck {
   url: string;
   ok: boolean;
@@ -28,6 +30,19 @@ export interface StreamCheck {
    * doesn't hide it: it plays fine once the shared slot frees up.
    */
   busy?: boolean;
+  /**
+   * The failure carries no information about the source — ask again before
+   * believing it. Set for timeouts and for connection-limit responses.
+   *
+   * WHY: the probe deadline is a latency budget, not a verdict. Measured across
+   * the whole lineup, every upstream panel answers in under 1.5s warm, but
+   * `81.31.194.66` takes 11.0s COLD (it carries 89 of our sources) and
+   * `bgdc.live` intermittently blows past 6s. Those produced first-round
+   * verdicts of `dead(timeout)` that the very next round called `ok` — and the
+   * first round is the one that picks what plays. So a timeout now feeds the
+   * hysteresis in useStreamCheck instead of going straight to "dead".
+   */
+  retryable?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 6000;
@@ -85,6 +100,7 @@ export async function checkStream(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): 
         url,
         ok: false,
         busy,
+        retryable: busy,
         status: res.status,
         latencyMs,
         reason: busy ? "busy (connection limit)" : httpReason(res.status),
@@ -112,31 +128,18 @@ export async function checkStream(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): 
     return { url, ok: true, status: res.status, latencyMs, reason: "ok" };
   } catch {
     const latencyMs = Date.now() - start;
+    const timedOut = ctrl.signal.aborted;
     return {
       url,
       ok: false,
+      // A timeout says "slower than our budget", not "broken" — see `retryable`.
+      retryable: timedOut,
       status: 0,
       latencyMs,
-      reason: ctrl.signal.aborted ? "timeout" : "unreachable",
+      reason: timedOut ? "timeout" : "unreachable",
     };
   } finally {
     clearTimeout(timer);
-  }
-}
-
-/**
- * The upstream panel behind a relay-wrapped URL, e.g.
- * `https://relay.example.com/m3u8?u=http%3A%2F%2F1tvnow.icu%3A8080%2F…` -> `1tvnow.icu`.
- * Every source we probe is relay-wrapped, so the relay's own hostname tells us
- * nothing — the connection limit lives on the panel inside `u`.
- */
-function upstreamHost(url: string): string {
-  try {
-    const outer = new URL(url);
-    const inner = outer.searchParams.get("u");
-    return inner ? new URL(inner).hostname : outer.hostname;
-  } catch {
-    return url;
   }
 }
 
@@ -233,12 +236,15 @@ export async function checkVodSource(url: string, origin: string, cookie = ""): 
       url,
       ok: false,
       busy,
+      retryable: busy,
       status: res.status,
       latencyMs,
       reason: busy ? "busy (connection limit)" : httpReason(res.status),
     };
   } catch {
-    return { url, ok: false, status: 0, latencyMs: Date.now() - start, reason: "unreachable" };
+    // Same reasoning as the live probe: a cold relay remux can outrun the
+    // budget, and that is not evidence the file is gone.
+    return { url, ok: false, retryable: true, status: 0, latencyMs: Date.now() - start, reason: "unreachable" };
   }
 }
 

@@ -39,7 +39,7 @@ interface Props {
   tvAutoFocus?: boolean;
 }
 
-/** Smallest TMDB size that still looks right in a 200×300 tile. The ladders
+/** Smallest TMDB size that still looks right in a 280×420 tile. The ladders
  *  differ by asset type and do NOT overlap: posters offer w154/w185/w342/w500,
  *  backdrops offer w300/w780/w1280. Asking for a size the type lacks 404s,
  *  which is why this is chosen per type rather than globally.
@@ -55,9 +55,18 @@ interface Props {
  *  the same failure mode more gently (cards compositing WHITE once a screenful
  *  of bitmaps blows the raster budget).
  *
- *  w185 into a 200px-wide tile is a 1.08× upscale — imperceptible from a couch,
- *  and the only version of this that stays up. Do not raise it without redoing
- *  the arithmetic above against the current rail count. */
+ *  THE TILE GREW 200×300 → 280×420 AND THIS DID NOT, deliberately. Decode cost
+ *  is set by the SOURCE pixels, not by the CSS box, so a bigger tile costs no
+ *  extra memory at the same source size — but stepping the source up is a
+ *  CLIFF, not a slope: the ladder's next rung is w342, and w342 is the ~133 MB
+ *  figure that froze the Samsung. There is nothing between w185 and w342.
+ *
+ *  So the upscale is now 1.51× (280 / 185), up from 1.08×. That is the real
+ *  cost of the bigger tile and it is a deliberate trade: slightly soft art on a
+ *  screen viewed from 8+ feet, against a TV that stays up. If the softness ever
+ *  needs fixing, the way to afford w342 is to mount FEWER cards (cut the
+ *  per-rail cap), not to raise this constant and hope — redo the arithmetic
+ *  above against the current rail count first. */
 const CARD_POSTER_SIZE = "w185";
 const CARD_BACKDROP_SIZE = "w300";
 
@@ -74,8 +83,8 @@ function cardArt(url: string, isPoster: boolean): string {
 /**
  * Portrait 2:3 poster card for the 10-foot UI — the same art, aspect and shape
  * as the web/mobile PosterCard, scaled up for a TV viewed from a couch and
- * driven by a remote instead of a thumb. 200×300 is what the 40vh hero split
- * leaves room for; see the height budget in TvBrowseScreen.
+ * driven by a remote instead of a thumb. 280×420 — the largest tile the 40vh
+ * hero split still leaves room for; see the height budget in TvBrowseScreen.
  *
  * No title caption by design: a poster IS the title treatment, and the row of
  * captions under 16:9 cards was costing a whole card row of vertical space.
@@ -129,7 +138,7 @@ export default function TvPosterCard({
       if (!onSelect) prewarmVod(kind, tmdbId, season, episode);
       onCardFocus?.();
     },
-    className: `block focus:outline-none ${fluid ? "w-full" : "w-[200px] shrink-0"}`,
+    className: `block focus:outline-none ${fluid ? "w-full" : "w-[280px] shrink-0"}`,
   };
 
   const inner = (
@@ -141,7 +150,7 @@ export default function TvPosterCard({
           width, matching the web PosterCard. */}
       <div
         className={`tv-card-shadow relative rounded-lg bg-[#1a242f] ring-1 ring-white/10 ${
-          fluid ? "aspect-[2/3] overflow-hidden" : "h-[300px]"
+          fluid ? "aspect-[2/3] overflow-hidden" : "h-[420px]"
         }`}
         style={danger ? { opacity: 0.55 } : undefined}
       >
@@ -200,7 +209,7 @@ export default function TvPosterCard({
       </div>
 
       {sublabel && (
-        <p className={`mt-2 text-base text-[#8197a4] truncate ${fluid ? "" : "w-[200px]"}`}>
+        <p className={`mt-2 text-base text-[#8197a4] truncate ${fluid ? "" : "w-[280px]"}`}>
           {sublabel}
         </p>
       )}

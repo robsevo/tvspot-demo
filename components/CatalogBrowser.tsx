@@ -127,7 +127,12 @@ export default function CatalogBrowser({ items, kind, serviceLabel, onBack }: Pr
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3 px-4">
+        /* One column fewer at every breakpoint than this grid used to carry.
+           At 3-up a 375px phone gave (375 − 32 padding − 24 gaps) / 3 = 106px
+           of poster, small enough that titles on the art were unreadable; 2-up
+           is 165px. Same card, same 2:3 crop, same treatment — only the column
+           count moved. */
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 px-4">
           {shown.map((item) => (
             <PosterCard
               key={`${item.tmdb_id}-${kind}`}
