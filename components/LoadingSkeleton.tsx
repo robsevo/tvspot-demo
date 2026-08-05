@@ -21,7 +21,7 @@ export function PosterRailSkeleton() {
     // one reflows the whole rail the moment content lands.
     <div className="flex gap-2.5 overflow-hidden px-4">
       {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="flex-shrink-0 w-[56vw] sm:w-[240px] md:w-[272px] lg:w-[300px]">
+        <div key={i} className="flex-shrink-0 w-[48vw] sm:w-[210px] md:w-[236px] lg:w-[258px]">
           <LoadingSkeleton aspectRatio="poster" />
         </div>
       ))}
@@ -37,7 +37,7 @@ export function PageSkeleton() {
       <div className="h-48 bg-card rounded" />
       {/* Matches CatalogBrowser's column count so the grid doesn't re-flow
           under the user when the real posters arrive. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="aspect-[2/3] bg-card rounded" />
         ))}
