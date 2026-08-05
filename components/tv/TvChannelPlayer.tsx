@@ -353,7 +353,10 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   }
 
   return (
-    <div className="fixed inset-0 bg-black">
+    // tv-osd-open lifts the captions clear of the source overlay while it is up
+    // — both are bottom-anchored, so without it the panel sits on top of them.
+    // See .tv-osd-open .tv-cc-overlay in globals.css.
+    <div className={`fixed inset-0 bg-black ${overlayOpen ? "tv-osd-open" : ""}`}>
       {/* VideoPlayer renders a w-full aspect-video box — on a 16:9 panel that
           IS the screen; strip its mobile rounding and its touch chrome (the
           TV draws its own OSD; the webview synthesizes mouse events from

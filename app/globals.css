@@ -551,6 +551,26 @@ video::cue {
 .tv-fade-osd {
   background: linear-gradient(to top, rgba(8, 13, 18, 0.94) 0%, rgba(8, 13, 18, 0.72) 55%, rgba(8, 13, 18, 0) 100%);
 }
+
+/* Captions ride ABOVE the source overlay while it is open.
+ *
+ * Both are bottom-anchored: the OSD is a ~340px panel pinned to the bottom edge
+ * (pt-28 + logo row + chip row + key legend + pb-10 at the fixed 1920 viewport),
+ * and VideoPlayer bottom-anchors captions just inside the picture. So opening
+ * the source list buried the captions behind it — exactly when you are reading
+ * BOTH, because the overlay is what you open when something is wrong.
+ *
+ * `!important` is load-bearing: VideoPlayer sets `bottom` as an inline style
+ * (it computes the letterbox offset at runtime), and only !important outranks
+ * that from a stylesheet. Scoped to .tv-osd-open so it applies solely while the
+ * overlay is up — the class is toggled by TvChannelPlayer, and both TV shells
+ * (Samsung/Tizen and Fire TV) render that same component.
+ *
+ * 23rem clears the panel with a small margin. The transition already declared on
+ * the element (`transition-[bottom]`) makes this glide rather than jump. */
+.tv-osd-open .tv-cc-overlay {
+  bottom: 23rem !important;
+}
 .tv-event-art {
   background: linear-gradient(135deg, #1b2a44 0%, #101a2b 55%, #0a1119 100%);
 }
