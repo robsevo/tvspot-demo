@@ -44,9 +44,30 @@ import { bufferScore, verifyCandidateMap } from "./verifier";
 import { writeAtomic, readExisting } from "./store";
 import { scrapeVod } from "./vod";
 import { toPlayableUrl, slugify } from "./playable";
-import type { VerifiedSources, VerifiedChannel, Candidate } from "./types";
+import type { VerifiedSources, VerifiedChannel, VerifiedSource, Candidate } from "./types";
 
 const DRY_RUN = process.argv.includes("--dry-run");
+
+/**
+ * Skip DISCOVERY (Stage 1) and re-verify what we already know about.
+ *
+ * WHY: the full pipeline runs once a night, and these panels revoke credentials
+ * within HOURS of being verified. Measured 2026-08-04: 18 hours after a clean
+ * nightly, 4 of CBC's 10 verified sources were already 401/400 — so what the
+ * player shows in the evening is a list that was true at breakfast.
+ *
+ * The expensive, rate-limited, luck-dependent part of the run is scraping
+ * (Reddit/GitHub/iptv-org). The part that actually keeps the list HONEST is
+ * Stage 7: re-test everything, drop what died, and promote a working source off
+ * the waiting bench into the active set. That part is cheap and repeatable, so
+ * it runs several times a day on its own (see .github/workflows/verify-links.yml)
+ * while discovery stays nightly.
+ *
+ * Everything downstream is unchanged — same candidate pool minus the fresh
+ * scrape, same verification, same sticky-active/waiting split, same grace window.
+ */
+const VERIFY_ONLY =
+  process.argv.includes("--verify-only") || process.env.VERIFY_ONLY === "1";
 const INCLUDE_VOD = process.argv.includes("--vod");
 
 // The scrape hits hostile/malformed IPTV servers; some trip an assertion deep in
@@ -88,6 +109,7 @@ async function main(): Promise<void> {
 
   log("=== TVSpot Link Freshness Pipeline ===");
   if (DRY_RUN) log("DRY RUN — will not write output file");
+  if (VERIFY_ONLY) log("VERIFY-ONLY — no discovery; re-testing known links only");
 
   // Scraping is best-effort: if Reddit yields nothing (the common case — most
   // posted credentials are already dead), we still re-test the existing list and
@@ -95,12 +117,21 @@ async function main(): Promise<void> {
   // rather than aborting the whole nightly refresh.
 
   // Stage 1: Run all source adapters in parallel, best-effort.
-  log("Stage 1: Running source adapters (iptv-org, GitHub M3U, Reddit)...");
-  const sourceAdapters = [
-    { name: "iptv_org", label: "iptv-org", fetch: fetchIptvOrg },
-    { name: "github", label: "GitHub M3U", fetch: fetchGithubM3u },
-    { name: "reddit", label: "Reddit", fetch: fetchReddit },
-  ];
+  // Skipped entirely in verify-only mode — see VERIFY_ONLY. The candidate pool
+  // then comes from the existing store (active + waiting bench) and the
+  // backend's current links, which is exactly what a re-verification needs.
+  const sourceAdapters = VERIFY_ONLY
+    ? []
+    : [
+        { name: "iptv_org", label: "iptv-org", fetch: fetchIptvOrg },
+        { name: "github", label: "GitHub M3U", fetch: fetchGithubM3u },
+        { name: "reddit", label: "Reddit", fetch: fetchReddit },
+      ];
+  log(
+    VERIFY_ONLY
+      ? "Stage 1: SKIPPED (verify-only — re-testing the existing list + backend links)"
+      : "Stage 1: Running source adapters (iptv-org, GitHub M3U, Reddit)...",
+  );
 
   const results = await Promise.allSettled(
     sourceAdapters.map(async (s) => {
@@ -330,7 +361,68 @@ async function main(): Promise<void> {
   let activeTotal = 0;
   let waitingTotal = 0;
 
-  for (const [slug, loadable] of verified) {
+  // Per-SOURCE grace window.
+  //
+  // verifyCandidateMap returns only what loaded THIS run, so anything that
+  // blipped was previously deleted from the store outright — and these panels
+  // blip constantly. Measured across three nightlies: of 556 sources that
+  // vanished from Aug 2 to Aug 3, 237 (42.6%) were back on Aug 4. Nearly half of
+  // every night's "deaths" were transient, and re-finding them depended on the
+  // scraper getting lucky again.
+  //
+  // A source that verified within SOURCE_GRACE_DAYS but failed this run is now
+  // RETAINED on the waiting bench instead. It is never put back in the active set
+  // (it is broken right now, and the whole point is that the active list is
+  // honest) — it just stops being forgotten, so the next run can re-test it and
+  // promote it back the moment it recovers. That is what makes re-verifying more
+  // often SAFE: without this, extra runs would only multiply the chances of
+  // purging a source that was fine.
+  //
+  // Matches the existing per-CHANNEL grace window below, which covers a channel
+  // that produced nothing at all but never protected individual sources.
+  const SOURCE_GRACE_DAYS = 3;
+  const SOURCE_GRACE_MS = SOURCE_GRACE_DAYS * 24 * 60 * 60 * 1000;
+  const nowMsForGrace = Date.now();
+  const gracedBySlug = new Map<string, VerifiedSource[]>();
+  if (existing?.channels) {
+    let gracedTotal = 0;
+    for (const [slug, vc] of Object.entries(existing.channels)) {
+      const loadedNow = new Set((verified.get(slug) || []).map((s) => s.url));
+      const backendNow = backendUrlsBySlugNow.get(slug);
+      const keep: VerifiedSource[] = [];
+      for (const s of [...(vc.sources || []), ...(vc.waiting || [])]) {
+        if (loadedNow.has(s.url)) continue; // verified this run — nothing to carry
+        // Never resurrect what the backend RETIRED. Same test as the candidate
+        // pool above, and it has to be repeated here or this window would quietly
+        // undo that rule: a retired link is excluded from the pool, so it can't
+        // be in `loadedNow`, and would look exactly like a transient failure.
+        // Those links are usually retired for a reason (e.g. the sub-brand
+        // mis-pooling fix), and the bench IS served as last-resort failover.
+        if (
+          s.url.includes("relay.example.com") &&
+          backendNow && backendNow.size > 0 && !backendNow.has(s.url)
+        ) continue;
+        const t = Date.parse(s.verifiedUtc || "");
+        if (!Number.isFinite(t) || nowMsForGrace - t >= SOURCE_GRACE_MS) continue;
+        // Carried, but explicitly NOT live: it failed this run, so it must sort to
+        // the bench and never take an active slot from something that works.
+        keep.push({ ...s, live: false, origin: "store" });
+      }
+      if (keep.length) {
+        gracedBySlug.set(slug, keep);
+        gracedTotal += keep.length;
+      }
+    }
+    if (gracedTotal) {
+      log(`  Bench: carried ${gracedTotal} recently-good sources that failed this run (${SOURCE_GRACE_DAYS}d grace)`);
+    }
+  }
+
+  for (const slug of new Set([...verified.keys(), ...gracedBySlug.keys()])) {
+    const loadable = verified.get(slug) || [];
+    const graced = gracedBySlug.get(slug) || [];
+    // A channel with nothing loadable this run is left to the per-channel grace
+    // window below, which restores its whole last-known-good active set.
     if (!loadable.length) continue;
 
     // URLs that were active in the previous run.
@@ -376,8 +468,10 @@ async function main(): Promise<void> {
     //    better new source in front of a mediocre incumbent — step 1 only decided
     //    WHO is in the set, not who the player reaches for first.
     active.sort((a, b) => rank(b) - rank(a) || a.latencyMs - b.latencyMs);
-    // 3) Everything else loadable → waiting bench (keep all).
-    const waiting = loadable.filter((s) => !taken.has(s.url));
+    // 3) Everything else loadable → waiting bench, PLUS the graced sources that
+    //    failed this run. Graced ones are appended last: the bench is re-tested
+    //    on every run, so this is the pool a recovery gets promoted out of.
+    const waiting = [...loadable.filter((s) => !taken.has(s.url)), ...graced];
 
     activeTotal += active.length;
     waitingTotal += waiting.length;
