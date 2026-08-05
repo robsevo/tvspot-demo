@@ -627,7 +627,22 @@ export default function VideoPlayer({
       // once a source is genuinely dead, and resets when playback recovers.
       let recoverAttempts = 0;
       let lastRecoverAt = 0;
+      // EARNED TRUST. A source that has held for a while is a different
+      // proposition from one that never worked, and the budget should say so:
+      // four fatal errors is a fair verdict on a source that just arrived, and a
+      // harsh one on a source that has been playing cleanly for ten minutes and
+      // hit a rough patch. Failing that source over costs a teardown and a ~30s
+      // re-buffer to reach a source with NO track record at all — strictly worse
+      // odds. FRAG_BUFFERED already resets the counter, so this only matters
+      // during a sustained bad patch, which is exactly when it should.
       const MAX_RECOVERS = 4;
+      const MAX_RECOVERS_PROVEN = 10;
+      const PROVEN_AFTER_MS = 60_000;
+      let firstPlayAt = 0;
+      const recoverBudget = () =>
+        firstPlayAt && Date.now() - firstPlayAt > PROVEN_AFTER_MS
+          ? MAX_RECOVERS_PROVEN
+          : MAX_RECOVERS;
 
       // Audio renditions this stream declares. ENGLISH IS THE DEFAULT: hls.js
       // otherwise honours the manifest's DEFAULT=YES rendition, which on these
@@ -685,6 +700,7 @@ export default function VideoPlayer({
       });
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
         recoverAttempts = 0;
+        if (!firstPlayAt) firstPlayAt = Date.now(); // clock for the earned-trust budget
         // If the INITIAL play() failed because segments weren't ready, retry now
         // that we have buffered content. Guarded by startedRef: hls keeps
         // buffering for ~60-90s AFTER a pause, and without this guard every one
@@ -700,7 +716,7 @@ export default function VideoPlayer({
         const now = Date.now();
         if (now - lastRecoverAt > 60000) recoverAttempts = 0; // healthy gap → reset
         if (
-          recoverAttempts < MAX_RECOVERS &&
+          recoverAttempts < recoverBudget() &&
           (data.type === Hls.ErrorTypes.NETWORK_ERROR ||
             data.type === Hls.ErrorTypes.MEDIA_ERROR)
         ) {
@@ -980,8 +996,13 @@ export default function VideoPlayer({
         v.play().catch(() => {});
         return;
       }
-      // Second strike → genuine drop, fail over once.
+      // Second strike → report it, so the parent can decide. It may well NOT
+      // fail over: during a relay-wide blip every source is stalled and
+      // switching is futile, so lib/sourceFailover keeps us here on purpose.
+      // Re-arm the in-place recovery either way — if we stay on this source the
+      // next cycle should try startLoad again rather than just re-reporting.
       lastProgressAt = Date.now(); // avoid re-firing every tick before src swaps
+      recovering = false;
       onStallRef.current?.();
     }, 1000);
 

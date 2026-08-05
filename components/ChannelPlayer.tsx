@@ -8,6 +8,7 @@ import { previewSourceFor } from "@/lib/previewHandoff";
 import {
   recordFailure, inCooldown, isCondemned, byOldestFailure, type FailureMap,
 } from "@/lib/sourceFailover";
+import { notePlayback, reputationOf, reputationTable } from "@/lib/sourceReputation";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, X, Loader2, RefreshCw, Info, ExternalLink } from "lucide-react";
@@ -125,6 +126,14 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // again. This is what turns "held for a while then stopped" into auto-recovery.
   const [failedAt, setFailedAt] = useState<FailureMap>({});
 
+  // What these sources DID last time we played them. Read once per source set —
+  // a localStorage hit inside a sort comparator would be O(n log n) reads.
+  // See lib/sourceReputation: the probe predicts, this remembers.
+  const repTable = useMemo(() => reputationTable(), [allUrls]);
+  // When the source on screen started playing, so a drop can be scored by how
+  // long it actually held. Reset on every source change.
+  const playStartRef = useRef(0);
+
   // Re-evaluate cooldowns on a tick so a recovered source comes back on its own,
   // even when no other state changed.
   const [, setTick] = useState(0);
@@ -234,9 +243,17 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // Now the stick holds only while nothing is STRICTLY better. Once playback is
   // confirmed, pickRank returns -1 for that source, so a healthy connect can
   // never be displaced — which is the property the stickiness existed for.
+  // Within a rank tier, prefer what has actually worked here before. Bounded
+  // and small on purpose (see reputationOf): it refines the order among sources
+  // the probe already considers viable, it never overrides a live verdict, and an
+  // unplayed source scores 0 so a fresh nightly link still gets its first chance.
   const ranked = allUrls
     .filter((u) => !isDead(u))
-    .sort((a, b) => pickRank(a) - pickRank(b));
+    .sort(
+      (a, b) =>
+        pickRank(a) - pickRank(b) ||
+        reputationOf(b, repTable) - reputationOf(a, repTable),
+    );
   const autoRef = useRef<string | null>(null);
   const stick = autoRef.current;
   const best = ranked[0];
@@ -260,6 +277,10 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // but the source can return once the relay recovers.
   const handleSourceFailure = useCallback(() => {
     if (!src) return;
+    // Score the source by how long it actually held before dropping — the
+    // signal no pre-playback probe can produce.
+    if (playStartRef.current) notePlayback(src, Date.now() - playStartRef.current);
+    playStartRef.current = 0;
     setFailedAt((prev) => recordFailure(prev, src, Date.now()));
   }, [src]);
 
@@ -313,7 +334,11 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
         isLive
         channelUp={channelUp}
         channelDown={channelDown}
-        onPlay={() => setConfirmedUrl(src)}
+        onPlay={() => {
+            setConfirmedUrl(src);
+            // Start the clock that scores this source (lib/sourceReputation).
+            if (!playStartRef.current) playStartRef.current = Date.now();
+          }}
         onStall={handleSourceFailure}
         onError={handleSourceFailure}
       />

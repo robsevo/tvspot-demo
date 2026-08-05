@@ -18,13 +18,17 @@
  *
  * THE RULE
  * --------
- * A failure that arrives ALONE is evidence about that source: full cooldown, and
- * badge it ✗. Failures that arrive TOGETHER are evidence about the relay: keep
- * them eligible after a short pause, and do not badge them at all — there is
- * nothing wrong with them, and the probe (which keeps saying "working") is right.
+ * A failure that arrives ALONE is evidence about that source: stand it down for a
+ * full cooldown and badge it ✗. Failures that arrive TOGETHER are evidence about
+ * the RELAY: don't cool them, don't badge them, and — the part that matters most
+ * — don't switch away at all. When every source is stalled by the same upstream,
+ * failing over is futile: it costs a teardown and a ~30s re-buffer to land
+ * somewhere equally stuck. Holding still lets VideoPlayer's in-place recovery
+ * ride the outage out, which is what the deep buffer was sized for.
  *
- * Correlated failures still fail OVER — another source might genuinely be fine —
- * they just are not condemned for it.
+ * MAX_BLIP_EXCUSES stops that leniency becoming a trap: a source that drops in
+ * every single blip is not a victim of them, and after a few strikes it is
+ * treated as genuinely broken.
  */
 
 /** Two failures closer together than this are treated as one shared event. */
@@ -33,15 +37,20 @@ const BLIP_WINDOW_MS = 12_000;
 /** Cooldown for a source that dropped ALONE: it needs real time to recover. */
 export const FAIL_COOLDOWN_MS = 60_000;
 
-/** Cooldown for a source caught in a relay-wide blip. Long enough to let the
- *  relay come back, short enough that a working source returns almost at once. */
-const BLIP_COOLDOWN_MS = 10_000;
+/**
+ * How many times one source may be excused as "relay blip" before we stop
+ * believing it. Guards the case where a genuinely dead source keeps failing at
+ * the same moment as everything else and would otherwise never be dropped.
+ */
+const MAX_BLIP_EXCUSES = 3;
 
 export interface SourceFailure {
   /** When it dropped. */
   at: number;
   /** It dropped alongside others — the relay blipped, this source is likely fine. */
   blip: boolean;
+  /** Total drops recorded for this source on this channel visit. */
+  strikes: number;
 }
 
 export type FailureMap = Record<string, SourceFailure>;
@@ -57,19 +66,33 @@ export function recordFailure(prev: FailureMap, url: string, now: number): Failu
   const others = Object.entries(prev).filter(
     ([u, e]) => u !== url && now - e.at < BLIP_WINDOW_MS,
   );
-  const blip = others.length > 0;
-  const next: FailureMap = { ...prev, [url]: { at: now, blip } };
+  const strikes = (prev[url]?.strikes ?? 0) + 1;
+  // Excused as a blip only while the correlation still looks like the relay's
+  // fault. A source that keeps dropping in every blip is not a victim of them.
+  const blip = others.length > 0 && strikes <= MAX_BLIP_EXCUSES;
+  const next: FailureMap = { ...prev, [url]: { at: now, blip, strikes } };
   if (blip) {
-    for (const [u] of others) next[u] = { ...next[u], blip: true };
+    for (const [u] of others) {
+      if ((next[u].strikes ?? 0) <= MAX_BLIP_EXCUSES) next[u] = { ...next[u], blip: true };
+    }
   }
   return next;
 }
 
-/** Is this source still cooling down (and therefore not eligible to play)? */
+/**
+ * Is this source still cooling down (and therefore not eligible to play)?
+ *
+ * A blip does NOT cool a source down at all. That is the point: when the relay
+ * hiccups, every source stalls, so switching is futile — it just costs a full
+ * teardown and a ~30s re-buffer to land somewhere equally stalled. Staying put
+ * lets VideoPlayer's own in-place recovery (hls.startLoad) ride the outage out,
+ * which is what the buffer depth was sized for. Only a source that fails ALONE
+ * is stood down, because only then is there somewhere better to go.
+ */
 export function inCooldown(map: FailureMap, url: string, now: number): boolean {
   const e = map[url];
-  if (!e) return false;
-  return now - e.at < (e.blip ? BLIP_COOLDOWN_MS : FAIL_COOLDOWN_MS);
+  if (!e || e.blip) return false;
+  return now - e.at < FAIL_COOLDOWN_MS;
 }
 
 /**

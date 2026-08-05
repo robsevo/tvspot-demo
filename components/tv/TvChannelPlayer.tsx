@@ -10,6 +10,7 @@ import { previewSourceFor } from "@/lib/previewHandoff";
 import {
   recordFailure, inCooldown, isCondemned, byOldestFailure, type FailureMap,
 } from "@/lib/sourceFailover";
+import { notePlayback, reputationOf, reputationTable } from "@/lib/sourceReputation";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
 import VideoPlayer from "@/components/VideoPlayer";
 import { LogoImage } from "@/components/LogoImage";
@@ -124,6 +125,14 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   );
   const [failedAt, setFailedAt] = useState<FailureMap>({});
 
+  // What these sources DID last time we played them. Read once per source set —
+  // a localStorage hit inside a sort comparator would be O(n log n) reads.
+  // See lib/sourceReputation: the probe predicts, this remembers.
+  const repTable = useMemo(() => reputationTable(), [allUrls]);
+  // When the source on screen started playing, so a drop can be scored by how
+  // long it actually held. Reset on every source change.
+  const playStartRef = useRef(0);
+
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), 5000);
@@ -202,9 +211,17 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   // sources sat below it. The stick now yields to a strictly better rank, and
   // once playback is confirmed pickRank returns -1 so a healthy connect can
   // never be displaced.
+  // Within a rank tier, prefer what has actually worked here before. Bounded
+  // and small on purpose (see reputationOf): it refines the order among sources
+  // the probe already considers viable, it never overrides a live verdict, and an
+  // unplayed source scores 0 so a fresh nightly link still gets its first chance.
   const ranked = allUrls
     .filter((u) => !isDead(u))
-    .sort((a, b) => pickRank(a) - pickRank(b));
+    .sort(
+      (a, b) =>
+        pickRank(a) - pickRank(b) ||
+        reputationOf(b, repTable) - reputationOf(a, repTable),
+    );
   const autoRef = useRef<string | null>(null);
   const stick = autoRef.current;
   const best = ranked[0];
@@ -223,6 +240,10 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
 
   const handleSourceFailure = useCallback(() => {
     if (!src) return;
+    // Score the source by how long it actually held before dropping — the
+    // signal no pre-playback probe can produce.
+    if (playStartRef.current) notePlayback(src, Date.now() - playStartRef.current);
+    playStartRef.current = 0;
     setFailedAt((prev) => recordFailure(prev, src, Date.now()));
   }, [src]);
 
@@ -370,7 +391,11 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
           isLive
           hideControls
           videoElRef={videoElRef}
-          onPlay={() => setConfirmedUrl(src)}
+          onPlay={() => {
+            setConfirmedUrl(src);
+            // Start the clock that scores this source (lib/sourceReputation).
+            if (!playStartRef.current) playStartRef.current = Date.now();
+          }}
           onStall={handleSourceFailure}
           onError={handleSourceFailure}
         />
