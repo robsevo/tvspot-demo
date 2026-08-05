@@ -7,6 +7,9 @@ import { useEpg } from "@/hooks/useEpg";
 import { channelSlug } from "@/lib/sources";
 import { appendSources, channelSourceList } from "@/lib/liveSources";
 import { previewSourceFor } from "@/lib/previewHandoff";
+import {
+  recordFailure, inCooldown, isCondemned, byOldestFailure, type FailureMap,
+} from "@/lib/sourceFailover";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
 import VideoPlayer from "@/components/VideoPlayer";
 import { LogoImage } from "@/components/LogoImage";
@@ -119,8 +122,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   const [pickedUrl, setPickedUrl] = useState<string | null>(() =>
     previewSourceFor(channelName),
   );
-  const [failedAt, setFailedAt] = useState<Record<string, number>>({});
-  const FAIL_COOLDOWN_MS = 60000;
+  const [failedAt, setFailedAt] = useState<FailureMap>({});
 
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -140,7 +142,9 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   }
 
   const isDead = (u: string) => {
-    if (failedAt[u] !== undefined && Date.now() - failedAt[u] < FAIL_COOLDOWN_MS) return true;
+    // A drop caught in a relay-wide blip cools for seconds, not a minute — see
+    // lib/sourceFailover.
+    if (inCooldown(failedAt, u, Date.now())) return true;
     if (u === confirmedUrl) return false;
     return statusOf(u) === "dead";
   };
@@ -214,14 +218,12 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
     autoRef.current = firstAlive ?? null;
   }, [firstAlive]);
   const fallback =
-    firstAlive ??
-    [...allUrls].sort((a, b) => (failedAt[a] ?? 0) - (failedAt[b] ?? 0))[0] ??
-    "";
+    firstAlive ?? [...allUrls].sort(byOldestFailure(failedAt))[0] ?? "";
   const src = pickValid ? (pickedUrl as string) : fallback;
 
   const handleSourceFailure = useCallback(() => {
     if (!src) return;
-    setFailedAt((prev) => ({ ...prev, [src]: Date.now() }));
+    setFailedAt((prev) => recordFailure(prev, src, Date.now()));
   }, [src]);
 
   const recheckAll = useCallback(() => {
@@ -502,10 +504,11 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
               {revalidating ? "Checking…" : "Recheck"}
             </button>
             {displayUrls.map((url) => {
-              // badgeOf, not statusOf — chips hold at "checking" until the pass
-              // is complete, so they resolve together instead of one panel at a
-              // time. From a couch, progressive X's read as "it's all breaking".
-              const status = isDead(url) ? "dead" : badgeOf(url);
+              // isCondemned, not isDead: only a source that dropped ALONE earns
+              // the ✗. One caught in a relay-wide blip keeps its real badge —
+              // painting three healthy sources ✗ for one hiccup is the bug this
+              // fixes. badgeOf holds the chip at "checking" until the pass is in.
+              const status = isCondemned(failedAt, url, Date.now()) ? "dead" : badgeOf(url);
               const isCurrent = url === src;
               return (
                 <button

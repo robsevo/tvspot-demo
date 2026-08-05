@@ -5,6 +5,9 @@ import VideoPlayer from "./VideoPlayer";
 import { channelSlug } from "@/lib/sources";
 import { appendSources, channelSourceList } from "@/lib/liveSources";
 import { previewSourceFor } from "@/lib/previewHandoff";
+import {
+  recordFailure, inCooldown, isCondemned, byOldestFailure, type FailureMap,
+} from "@/lib/sourceFailover";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, X, Loader2, RefreshCw, Info, ExternalLink } from "lucide-react";
@@ -120,8 +123,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // (shared-relay) source 403s at once, then recovers — so a drop is a COOLDOWN,
   // not a permanent session ban: after FAIL_COOLDOWN_MS the source is eligible
   // again. This is what turns "held for a while then stopped" into auto-recovery.
-  const [failedAt, setFailedAt] = useState<Record<string, number>>({});
-  const FAIL_COOLDOWN_MS = 60000;
+  const [failedAt, setFailedAt] = useState<FailureMap>({});
 
   // Re-evaluate cooldowns on a tick so a recovered source comes back on its own,
   // even when no other state changed.
@@ -150,7 +152,9 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // cooldown window (after which the relay has likely recovered).
   const isDead = (u: string) => {
     // An actual mid-watch drop (cooldown) wins even over a confirmed source.
-    if (failedAt[u] !== undefined && Date.now() - failedAt[u] < FAIL_COOLDOWN_MS) return true;
+    // A drop that was part of a relay-wide blip cools down for seconds rather
+    // than a minute — see lib/sourceFailover.
+    if (inCooldown(failedAt, u, Date.now())) return true;
     // The source on screen is playing — a verify probe (which may hit a transient
     // 456/timeout) can't override reality. Busy sources are "unknown", not dead.
     if (u === confirmedUrl) return false;
@@ -249,16 +253,14 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // least-recently-failed one instead of blanking to "no stream" — it's the most
   // likely to have recovered, and the player's own recovery reconnects in place.
   const fallback =
-    firstAlive ??
-    [...allUrls].sort((a, b) => (failedAt[a] ?? 0) - (failedAt[b] ?? 0))[0] ??
-    "";
+    firstAlive ?? [...allUrls].sort(byOldestFailure(failedAt))[0] ?? "";
   const src = pickValid ? (pickedUrl as string) : fallback;
 
   // The current source dropped — start its cooldown so playback fails over now
   // but the source can return once the relay recovers.
   const handleSourceFailure = useCallback(() => {
     if (!src) return;
-    setFailedAt((prev) => ({ ...prev, [src]: Date.now() }));
+    setFailedAt((prev) => recordFailure(prev, src, Date.now()));
   }, [src]);
 
   // Recheck gives both verification AND playback-failed sources another chance.
@@ -368,10 +370,13 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
 
           <div className="flex gap-2 overflow-x-auto px-1">
             {displayUrls.map((url) => {
-              // Show a failed/cooling source as dead (✗). badgeOf, not statusOf:
-              // the chip holds at "checking" until the whole pass is in, so the
-              // badges resolve together instead of flickering panel by panel.
-              const status = isDead(url) ? "dead" : badgeOf(url);
+              // isCondemned, not isDead: a source that dropped ALONE gets the ✗,
+              // but one caught in a relay-wide blip keeps its real badge — it is
+              // not broken, and painting it ✗ is what turned one relay hiccup
+              // into a row of dead-looking sources. badgeOf (not statusOf) holds
+              // the chip at "checking" until the whole pass is in, so badges
+              // resolve together instead of flickering panel by panel.
+              const status = isCondemned(failedAt, url, Date.now()) ? "dead" : badgeOf(url);
               const isCurrent = url === src;
               // Number from the source's ORIGINAL position, never the display
               // position: the list re-orders as verdicts land, and a label that
