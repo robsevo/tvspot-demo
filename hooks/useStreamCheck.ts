@@ -20,8 +20,15 @@ const WATCH_MAX_ROUNDS = 15; // ~5 min, then stop to bound background load
  * A source that has EVER verified is reported "busy" (try later) rather than dead
  * until it has failed this many rounds in a row — as is any source whose failure
  * was `retryable` (timeout / connection limit), even on its first sighting.
+ *
+ * 3, not 2. Repeating one channel's probe three times over ~10s produced
+ * verdict sequences like `dead(timeout) | ok | ok` and `ok | dead(500) |
+ * dead(403)` on sources that were fine — two rounds is simply not enough
+ * evidence on panels that flap this hard, and calling one dead puts an ✗ on a
+ * source that plays. Permanent failures (401/403/400) are unaffected: they are
+ * neither `retryable` nor previously-ok, so they still badge dead on sight.
  */
-const DEAD_STREAK = 2;
+const DEAD_STREAK = 3;
 
 /**
  * Max simultaneous /api/stream-check requests per probe pass.
@@ -53,8 +60,25 @@ interface UseStreamCheck {
   results: Record<string, StreamCheck>;
   /** True while the FIRST probe pass for this URL set is still running. */
   loading: boolean;
-  /** Status for one URL, accounting for the in-flight state. */
+  /**
+   * LIVE status for one URL — updates as each shard lands.
+   *
+   * For the failover/auto-pick logic ONLY. Drive a badge off this and the UI
+   * flickers: verdicts now arrive per panel, so a source's chip would change
+   * up to a dozen times while one pass runs. Use `badgeOf` for anything the
+   * user looks at.
+   */
   statusOf: (url: string) => SourceStatus;
+  /**
+   * SETTLED status for one URL — what a chip should show.
+   *
+   * Holds every source at "checking" until the whole pass has finished, so the
+   * badges reveal together, once, instead of flickering in one panel at a time.
+   * Playback does NOT wait for this (see statusOf) — the point is that the auto-
+   * pick reacts to the first verdict while the list the user is reading stays
+   * still.
+   */
+  badgeOf: (url: string) => SourceStatus;
   /** How many of `urls` have verified as working. */
   workingCount: number;
   /** How many are BUSY (connection-limited) — not dead, just momentarily in use. */
@@ -274,6 +298,15 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
     [results, meta, current],
   );
 
+  // Badges wait for the pass; playback does not. `loading` is the first pass for
+  // this URL set — during it every chip reads "checking" and nothing moves. A
+  // manual recheck deliberately leaves `loading` false, so previous verdicts stay
+  // on screen (blanking them on every press was an older flicker bug).
+  const badgeOf = useCallback(
+    (url: string): SourceStatus => (loading ? "checking" : statusOf(url)),
+    [loading, statusOf],
+  );
+
   const workingCount = workingNow;
 
   const busyCount = useMemo(
@@ -290,5 +323,5 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
     setNonce((n) => n + 1);
   }, []);
 
-  return { results, loading, statusOf, workingCount, busyCount, recheck, revalidating };
+  return { results, loading, statusOf, badgeOf, workingCount, busyCount, recheck, revalidating };
 }

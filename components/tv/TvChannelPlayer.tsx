@@ -78,7 +78,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   // what you are watching asks for a second slot and manufactures the stall.
   const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
 
-  const { statusOf, workingCount, busyCount, loading, recheck, revalidating } =
+  const { statusOf, badgeOf, workingCount, busyCount, loading, recheck, revalidating } =
     useStreamCheck(allUrls, { skip: confirmedUrl });
 
   const channelSlugValue = channel ? channelSlug(channel.name) : "";
@@ -153,7 +153,17 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   // vanishing between probe rounds makes the remote land on a different source than
   // the one the user was aiming at. Verdicts change the badge and the ORDER only
   // (playing/picked → Online → Busy → unprobed → dead), stable within each tier.
-  const displayUrls = useMemo(() => {
+  // FROZEN BETWEEN PASSES, and it matters more here than on the web: this array
+  // also drives Left/Right source cycling, so a row that reshuffles mid-pass
+  // makes the remote land on a different source than the one being aimed at.
+  // Probing is sharded per panel now, so a pass lands a dozen times — re-sorting
+  // on each would move the row a dozen times. Re-sort only when the set changes
+  // or a pass settles (a manual Recheck counts: the viewer asked for it).
+  const orderRef = useRef<string[]>([]);
+  const orderKeyRef = useRef<string | null>(null);
+  const orderKey = `${allUrls.join("|")}|${loading || revalidating ? "probing" : "settled"}`;
+  if (orderKey !== orderKeyRef.current) {
+    orderKeyRef.current = orderKey;
     const tier = (u: string) => {
       if (u === confirmedUrl) return 0;   // on screen → reality outranks a probe
       if (u === pickedUrl) return 0;      // the user's explicit choice stays put
@@ -165,13 +175,13 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
         default: return 3;                // unknown / still checking
       }
     };
-    return allUrls
+    orderRef.current = allUrls
       .map((u, i) => ({ u, i, t: tier(u) }))
       .sort((a, b) => a.t - b.t || a.i - b.i)
       .map((x) => x.u)
       .slice(0, MAX_SOURCES);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allUrls, statusOf, pickedUrl, confirmedUrl, failedAt]);
+  }
+  const displayUrls = orderRef.current;
 
   const pickValid = pickedUrl != null && allUrls.includes(pickedUrl) && !isDead(pickedUrl);
   const pickRank = (u: string): number => {
@@ -492,7 +502,10 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
               {revalidating ? "Checking…" : "Recheck"}
             </button>
             {displayUrls.map((url) => {
-              const status = isDead(url) ? "dead" : statusOf(url);
+              // badgeOf, not statusOf — chips hold at "checking" until the pass
+              // is complete, so they resolve together instead of one panel at a
+              // time. From a couch, progressive X's read as "it's all breaking".
+              const status = isDead(url) ? "dead" : badgeOf(url);
               const isCurrent = url === src;
               return (
                 <button

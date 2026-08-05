@@ -56,7 +56,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // watching is how the watchdog used to cause the stalls it looks for.
   const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
 
-  const { statusOf, workingCount, busyCount, loading, recheck, revalidating } =
+  const { statusOf, badgeOf, workingCount, busyCount, loading, recheck, revalidating } =
     useStreamCheck(allUrls, { skip: confirmedUrl });
 
   // Reset expansion when the channel changes.
@@ -166,7 +166,20 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // that demonstrably flap probe-to-probe. Verdicts drive the badge and the ORDER
   // (Online → Busy → unprobed → dead), never the membership, and the sort is
   // stable within a tier so nothing jitters. What's playing is pinned first.
-  const displayUrls = useMemo(() => {
+  //
+  // THE ORDER IS FROZEN BETWEEN PASSES. It used to re-sort on every verdict,
+  // which was survivable when a pass produced ONE update — but probing is now
+  // sharded per panel, so a pass lands a dozen times and the row visibly
+  // reshuffled under the user's thumb each time. Re-sorting is allowed only when
+  // the source set changes or a pass settles, so the list moves at most once per
+  // probe instead of once per panel.
+  const orderRef = useRef<string[]>([]);
+  const orderKeyRef = useRef<string | null>(null);
+  // `revalidating` is in the key so a manual Recheck DOES re-sort when it lands —
+  // the user asked for a fresh verdict, so acting on it is the expected result.
+  const orderKey = `${allUrls.join("|")}|${loading || revalidating ? "probing" : "settled"}`;
+  if (orderKey !== orderKeyRef.current) {
+    orderKeyRef.current = orderKey;
     const tier = (u: string) => {
       if (u === confirmedUrl) return 0;   // on screen → reality outranks any probe
       if (u === pickedUrl) return 0;      // the user's explicit choice stays put
@@ -178,13 +191,13 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
         default: return 3;                // unknown / still checking
       }
     };
-    return allUrls
+    orderRef.current = allUrls
       .map((u, i) => ({ u, i, t: tier(u) }))
       .sort((a, b) => a.t - b.t || a.i - b.i)
       .map((x) => x.u)
       .slice(0, MAX_SOURCES);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allUrls, statusOf, pickedUrl, confirmedUrl, failedAt]);
+  }
+  const displayUrls = orderRef.current;
 
   // Playback: honor a manual pick (unless it has since dropped); otherwise the
   // BEST auto source. Preference cycles past busy (connection-limited) accounts to
@@ -355,8 +368,10 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
 
           <div className="flex gap-2 overflow-x-auto px-1">
             {displayUrls.map((url) => {
-              // Show a failed/cooling source as dead (✗).
-              const status = isDead(url) ? "dead" : statusOf(url);
+              // Show a failed/cooling source as dead (✗). badgeOf, not statusOf:
+              // the chip holds at "checking" until the whole pass is in, so the
+              // badges resolve together instead of flickering panel by panel.
+              const status = isDead(url) ? "dead" : badgeOf(url);
               const isCurrent = url === src;
               // Number from the source's ORIGINAL position, never the display
               // position: the list re-orders as verdicts land, and a label that
