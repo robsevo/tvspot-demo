@@ -123,23 +123,13 @@ export function useLiveSources(
   // watchdog exists to detect.
   const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
 
-  // `first`/`ready` keep the probe storm off the video's back on a channel
-  // change: the panel carrying the source about to play is probed immediately,
-  // the other ~9 wait for playback to start (see DEFER_REST_MS).
-  //
-  // `pendingSrcRef` is written further down, once `src` has actually been
-  // computed. The probe only reads it when a pass BEGINS, so going through a ref
-  // breaks what would otherwise be a circular dependency — the pick needs the
-  // probe's verdicts, and the probe wants to know the pick. On the very first
-  // pass it is empty, and allUrls[0] is exactly what the auto-pick will choose
-  // anyway (everything is "checking", so rank is decided by input order).
-  const pendingSrcRef = useRef<string>("");
+  // Probes every panel at once, on purpose. Staging it — lead with the playing
+  // source's panel, hold the rest — was tried and measured 5x WORSE on the
+  // Samsung (see the DO NOT DEFER note in useStreamCheck): the probe is what
+  // the auto-pick uses to skip a dead source, so withholding it just means
+  // starting on the dead one and waiting out the first-frame deadline.
   const { statusOf, badgeOf, workingCount, busyCount, loading, settled, recheck, revalidating } =
-    useStreamCheck(allUrls, {
-      skip: confirmedUrl,
-      first: pendingSrcRef.current || allUrls[0] || null,
-      ready: confirmedUrl != null,
-    });
+    useStreamCheck(allUrls, { skip: confirmedUrl });
 
   const channelSlugValue = channel ? channelSlug(channel.name) : "";
   const prevChannelSlug = useRef(channelSlugValue);
@@ -287,11 +277,6 @@ export function useLiveSources(
   // most likely to have recovered, and the player reconnects in place.
   const fallback = firstAlive ?? [...allUrls].sort(byOldestFailure(failedAt))[0] ?? "";
   const src = pickValid ? (pickedUrl as string) : fallback;
-  // Tell the next probe pass which panel to lead with (see the useStreamCheck
-  // call above). Written during render on purpose: the very next pass — the one
-  // triggered by a channel change growing/replacing allUrls — must see the
-  // source this render decided on, not the previous channel's.
-  pendingSrcRef.current = src;
 
   // The current source dropped — record it so playback fails over now, but the
   // source can return once the relay recovers.

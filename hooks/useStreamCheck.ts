@@ -81,20 +81,28 @@ function cachedFor(urls: string[]): Record<string, StreamCheck> {
 }
 
 /**
- * How long the NON-PLAYING sources wait before they are probed.
+ * DO NOT DEFER THE PROBE. Tried 2026-08-06, reverted the same hour.
  *
- * A zap fires the probe pass, an EPG fetch and hls.js's manifest+segment loads
- * in the same tick. Only the last of those puts a picture on screen, and on a
- * 2019 TV they are all competing for the same modest network and CPU. The probe
- * is informational — it drives badges and the failover bench — so nothing about
- * it needs to happen in the first second of a channel change.
+ * The reasoning was that a zap fires ~10 probe requests, an EPG fetch and
+ * hls.js's manifest load in one tick, all competing for a 2019 TV's modest
+ * network — so the probe should lead with the panel carrying the source about
+ * to play and hold the other ~9 until playback starts.
  *
- * The source about to PLAY is exempt: its panel is probed immediately, because
- * "is the thing I'm about to show you dead?" is the one verdict that changes
- * what happens next. Everything else waits for playback to start, or for this
- * cap if it never does.
+ * MEASURED ON THE DEVICE, and it was much worse: zap-to-first-frame went from
+ * a 3.6s mean (4681/3831/2726/3050/3717ms) to 2732ms, a total failure, then
+ * 16114/19646/24550ms.
+ *
+ * WHY: the probe storm is not overhead, it is the information the auto-pick
+ * runs on. With every panel probed up front, a dead source 1 is known in
+ * ~400ms and skipped. With the rest deferred, the picker is blind — it starts
+ * on a dead source and only leaves via the 10s first-frame deadline, and the
+ * deferred shards then take another 2.5s to arrive because `ready` never turns
+ * true (playback never started). That is the 16-24s.
+ *
+ * The bandwidth saved was real and irrelevant; the information lost was not.
+ * If tune-in contention is revisited, cut the COST of the probe (fewer panels,
+ * cheaper per-probe) — never its TIMELINESS.
  */
-const DEFER_REST_MS = 2500;
 
 /**
  * Consecutive failed probes before a source is reported "dead".
@@ -206,17 +214,6 @@ interface Options {
    * detect. Playback is also better evidence than any probe could be.
    */
   skip?: string | null;
-  /**
-   * The source about to play. Its panel is probed FIRST and alone; every other
-   * panel waits (see DEFER_REST_MS) so the probe storm stops competing with the
-   * video load on a channel change.
-   */
-  first?: string | null;
-  /**
-   * Playback has started, so the deferred shards may go now. Ignored once the
-   * DEFER_REST_MS cap has already released them.
-   */
-  ready?: boolean;
 }
 
 /** Update per-URL history from one probe pass: reset the streak on success,
@@ -247,8 +244,6 @@ function foldMeta(
 export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
   const mode = opts?.mode ?? "live";
   const skip = opts?.skip ?? null;
-  const first = opts?.first ?? null;
-  const ready = opts?.ready ?? false;
   // Seeded from the cross-mount cache so a re-zap starts with what we already
   // learned instead of a blank slate — the auto-pick can then land on a
   // known-good source immediately rather than guessing while the pass runs.
@@ -272,30 +267,6 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
   const loading = key !== "" && revealedKey !== key;
   // The pass genuinely finished, as opposed to merely having revealed early.
   const settled = key !== "" && checkedKey === key;
-
-  // Playback-started flag, read by the gate without re-arming the probe effect.
-  const readyRef = useRef(ready);
-  readyRef.current = ready;
-  // Which source we're about to play. Read once when a pass starts, never as a
-  // dependency: it changes as the auto-pick settles, and re-arming the pass on
-  // each change would restart probing over and over during exactly the window
-  // this is meant to keep quiet.
-  const firstRef = useRef(first);
-  firstRef.current = first;
-
-  /**
-   * Resolves when the deferred shards may run: as soon as playback has started,
-   * or after DEFER_REST_MS if it never does. Polled rather than event-driven
-   * because `ready` is a prop that changes by re-render, and making it an effect
-   * dependency would restart the whole pass every time it flipped.
-   */
-  const gate = useCallback(async () => {
-    if (readyRef.current) return;
-    const until = Date.now() + DEFER_REST_MS;
-    while (!readyRef.current && Date.now() < until) {
-      await new Promise((r) => setTimeout(r, 150));
-    }
-  }, []);
 
   /** Merge one shard's verdicts into state. Called as each shard lands. */
   const absorb = useCallback((batch: StreamCheck[]) => {
@@ -329,33 +300,15 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
    * panel's verdicts land in ~400ms regardless of what the slow one is doing.
    */
   const runProbe = useCallback(
-    async (list: string[], alive: () => boolean, priority?: string | null) => {
+    async (list: string[], alive: () => boolean) => {
       if (list.length === 0) return;
       // VOD sources are probed concurrently server-side already (no per-panel
       // chain to break up), and the set is capped small — one request is right.
-      const all = mode === "vod" ? [list] : groupByHost(list);
-
-      // Split the panel carrying the source about to play from the rest. Its
-      // verdict is the only one that changes what happens in the next second —
-      // everything else is badges and bench-ranking, and firing all ten at once
-      // takes bandwidth from the video load on a channel change. See
-      // DEFER_REST_MS.
-      const lead = priority ? all.findIndex((s) => s.includes(priority)) : -1;
-      const shards = lead > 0 ? [all[lead], ...all.filter((_, i) => i !== lead)] : all;
-      // Only the lead shard runs before the gate; with no priority, nothing is
-      // held back and this behaves exactly as before.
-      const holdFrom = lead >= 0 ? 1 : shards.length;
-
+      const shards = mode === "vod" ? [list] : groupByHost(list);
       let next = 0;
       const worker = async () => {
         while (next < shards.length) {
-          const idx = next++;
-          if (idx >= holdFrom) {
-            // Wait for playback (or the cap) before touching the other panels.
-            await gate();
-            if (!alive()) return;
-          }
-          const shard = shards[idx];
+          const shard = shards[next++];
           try {
             // fetchJson, not fetchWithDeadline + res.json(): the body read has to
             // be INSIDE the deadline. Headers can land while the body stalls, and
@@ -388,7 +341,7 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
         Array.from({ length: Math.min(PROBE_CONCURRENCY, shards.length) }, worker),
       );
     },
-    [mode, absorb, gate],
+    [mode, absorb],
   );
 
   useEffect(() => {
@@ -401,10 +354,7 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
       if (active) setRevealedKey(key);
     }, PASS_REVEAL_MS);
     (async () => {
-      // `first` is read once per pass on purpose: it is which source we are
-      // ABOUT to play, and re-arming the pass when it changes would restart
-      // probing on every auto-pick adjustment.
-      await runProbe(urls, () => active, firstRef.current);
+      await runProbe(urls, () => active);
       if (!active) return;
       // Pass complete — whatever landed is what we know.
       setCheckedKey(key);
