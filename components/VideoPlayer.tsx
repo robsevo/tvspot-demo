@@ -614,14 +614,34 @@ export default function VideoPlayer({
         // consistent across 3s-segment (transmux) and 10s-segment (passthrough)
         // sources. Resync forward only if >50s behind (stay off the 60s-window back
         // edge of passthrough sources).
-        liveSyncDuration: 36,
-        liveMaxLatencyDuration: 50,
-        // Catch up to the live edge by GENTLY speeding playback (≤1.1×, barely
-        // audible) instead of hard-seeking. Without this hls.js does nothing until
-        // latency crosses liveMaxLatencyDuration, then jumps forward ~14s+ mid-watch
-        // (the "big forward jumps"). The rate nudge holds latency near the 36s target
-        // so a hard seek only fires on a genuine outage that blows past 50s behind.
-        maxLiveSyncPlaybackRate: 1.1,
+        //
+        // LIVE ONLY. A VOD relay remux is ALSO a rolling, live-style playlist —
+        // the relay's ffmpeg is `-re` paced, so it keeps producing whether or
+        // not anyone is watching, and hls.js therefore classifies it as live.
+        // Applying live-edge chasing to it is actively wrong: pause a movie and
+        // the "live edge" runs away from the playhead, so on resume hls.js
+        // speeds up (maxLiveSyncPlaybackRate) and then hard-seeks forward once
+        // latency crosses liveMaxLatencyDuration — the movie SKIPS AHEAD in
+        // chunks and the viewer loses the part they paused on.
+        //
+        // There is no live edge worth chasing in a film. Omitting these leaves
+        // hls.js's defaults, which do not force a resync, so a paused VOD stream
+        // resumes where it was left. If the relay's window has genuinely rolled
+        // past the playhead, the stall watchdog recovers it — the correct
+        // outcome, and one that costs no silently-skipped content.
+        ...(isLive
+          ? {
+              liveSyncDuration: 36,
+              liveMaxLatencyDuration: 50,
+              // Catch up to the live edge by GENTLY speeding playback (≤1.1×,
+              // barely audible) instead of hard-seeking. Without this hls.js does
+              // nothing until latency crosses liveMaxLatencyDuration, then jumps
+              // forward ~14s+ mid-watch (the "big forward jumps"). The rate nudge
+              // holds latency near the 36s target so a hard seek only fires on a
+              // genuine outage that blows past 50s behind.
+              maxLiveSyncPlaybackRate: 1.1,
+            }
+          : {}),
         fragLoadPolicy: resilient(dc.fragLoadPolicy),
         playlistLoadPolicy: resilient(dc.playlistLoadPolicy),
         manifestLoadPolicy: resilient(dc.manifestLoadPolicy),

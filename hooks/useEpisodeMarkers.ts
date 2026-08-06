@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AUTO_NEXT_SECONDS,
   introEndFor,
@@ -42,24 +42,42 @@ export interface EpisodeMarkers {
  * @param sourceIndex current failover position — dismissals are scoped to it, so
  *                    a card waved away on a source that then DIED comes back on
  *                    the replacement rather than staying hidden for the episode
- * @param reliableTimeline false for rolling/live sources (the relay remux),
- *                    whose `video.duration` tracks just AHEAD of the playhead
- *                    instead of being the episode's real length. On those, the
- *                    "50s from the end" credit-window test is true almost the
- *                    whole time, so "Next up" pops up randomly mid-episode (and
- *                    would auto-advance you out of it). All markers are
- *                    suppressed there — Skip intro can't seek a remux anyway,
- *                    and the end genuinely can't be detected on a live stream.
+ * @param reliableTimeline false when the element's own clock can't be trusted AND
+ *                    no `timeline` override is supplied. See `timeline`.
+ * @param timeline    OPTIONAL true (position, duration) for sources whose element
+ *                    clock lies — i.e. the relay remux, whose playlist is rolling,
+ *                    so `video.duration` tracks just ahead of the playhead and
+ *                    `currentTime` restarts from 0 at the baked `&start=` offset.
+ *
+ *                    This is what lets "Next up" work on remux at all. Remux
+ *                    leads most VOD titles on purpose (it is the only source
+ *                    whose audio we control — see lib/vod-resolve), so
+ *                    suppressing markers on rolling timelines meant the feature
+ *                    was effectively OFF for most episodes: the shells passed
+ *                    reliableTimeline=false and nothing ever appeared. But the
+ *                    real runtime IS known — both shells already fetch it from
+ *                    /api/vod-audio-tracks to drive their scrubbers — and the
+ *                    absolute position is remuxStart + currentTime, which they
+ *                    already compute for continue-watching. Feeding those in
+ *                    makes the ordinary credit-window math correct again.
+ *
+ *                    Return null while the runtime is still unknown; markers stay
+ *                    suppressed until it lands, which is the safe direction.
  */
 export function useEpisodeMarkers(
   videoElRef: React.MutableRefObject<HTMLVideoElement | null>,
   onNext?: (() => void) | null,
   sourceIndex = 0,
   reliableTimeline = true,
+  timeline?: (() => { position: number; duration: number } | null) | null,
 ): EpisodeMarkers {
   const [marks, setMarks] = useState({ skip: false, next: false });
   const [dismissed, setDismissed] = useState({ src: -1, skip: false, next: false });
   const [countdown, setCountdown] = useState<number | null>(null);
+  // Read through a ref so a caller can pass an inline arrow without re-arming
+  // the polling interval on every render.
+  const timelineRef = useRef(timeline);
+  timelineRef.current = timeline;
 
   // Poll rather than drive off timeupdate: timeupdate stops firing while
   // paused, and the card must stay put if someone pauses on the credits. The
@@ -69,11 +87,23 @@ export function useEpisodeMarkers(
     const tick = () => {
       const v = videoElRef.current;
       if (!v) return;
-      // Rolling/live source → no reliable episode length, so never offer either
-      // marker (see reliableTimeline). Keeps "Next up" from appearing — and
-      // auto-advancing — at random points through a remux-played episode.
-      const skip = reliableTimeline && showSkipIntro(v.currentTime, v.duration);
-      const next = reliableTimeline && showNextUp(v.currentTime, v.duration);
+      // A supplied timeline OVERRIDES the element's clock — that is the whole
+      // point of it, since on a remux the element's clock is what's wrong.
+      const t = timelineRef.current?.() ?? null;
+      const position = t ? t.position : v.currentTime;
+      const duration = t ? t.duration : v.duration;
+      // No override and a rolling source → no trustworthy episode length, so
+      // offer nothing rather than popping "Next up" (and auto-advancing) at a
+      // random point mid-episode.
+      const usable = t !== null || reliableTimeline;
+      const skip =
+        usable &&
+        // Skip intro SEEKS. A remux can't be seeked natively (position is baked
+        // into the URL), so it is offered only on a genuinely seekable source,
+        // regardless of how good the timeline is.
+        reliableTimeline &&
+        showSkipIntro(position, duration);
+      const next = usable && showNextUp(position, duration);
       setMarks((m) => (m.skip === skip && m.next === next ? m : { skip, next }));
     };
     tick();
@@ -114,24 +144,37 @@ export function useEpisodeMarkers(
     else if (skipVisible) dismissOne("skip");
   }, [nextVisible, skipVisible, dismissOne]);
 
-  // Deadline-based rather than a decrementing counter: the remaining value is
-  // computed from wall-clock inside the tick, so nothing is written to state
-  // from the effect body (this repo's React-compiler lint rejects that), and a
-  // webview that throttles background timers can't stretch 15s into 40s.
+  // Counts down WALL-CLOCK time, but only while playback is actually running.
+  //
+  // Measuring elapsed time per tick (rather than counting ticks) keeps the
+  // original protection: a webview that throttles background timers reports one
+  // big delta instead of many small ones, so it can't stretch 15s into 40s.
+  //
+  // Pausing HOLDS it. Someone who hits pause on the credits is deciding whether
+  // to keep going — advancing out from under them is precisely the "it moved on
+  // without me" failure, and it is worse here than on a normal player because a
+  // remux advance re-spawns a transcode that takes seconds to undo. This also
+  // covers backgrounding for free: VideoPlayer pauses the element when the tab
+  // is hidden, so a phone in a pocket can't burn through a season.
   useEffect(() => {
     if (!nextVisible) return;
-    const deadline = Date.now() + AUTO_NEXT_SECONDS * 1000;
+    let remainingMs = AUTO_NEXT_SECONDS * 1000;
+    let last = Date.now();
     const id = setInterval(() => {
-      const left = Math.ceil((deadline - Date.now()) / 1000);
-      if (left <= 0) {
+      const now = Date.now();
+      const delta = now - last;
+      last = now;
+      if (videoElRef.current?.paused) return; // held — see above
+      remainingMs -= delta;
+      if (remainingMs <= 0) {
         clearInterval(id);
         playNext();
       } else {
-        setCountdown(left);
+        setCountdown(Math.ceil(remainingMs / 1000));
       }
     }, 250);
     return () => clearInterval(id);
-  }, [nextVisible, playNext]);
+  }, [nextVisible, playNext, videoElRef]);
 
   return {
     skipVisible,

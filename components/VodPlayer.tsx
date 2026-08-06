@@ -41,6 +41,19 @@ interface Props {
   videoElRef?: React.MutableRefObject<HTMLVideoElement | null>;
   /** Passed through to VideoPlayer — TV mode, no touch chrome. */
   hideControls?: boolean;
+  /**
+   * Reports the remux timeline — the second the relay's ffmpeg was told to
+   * start reading (`base`) and the file's true runtime (`duration`) — or null
+   * for a normal seekable source.
+   *
+   * Exists so the parent can compute ABSOLUTE position (`base +
+   * video.currentTime`) against a real duration. On a rolling remux the media
+   * element's own clock describes the streaming window, not the file, which is
+   * why episode markers ("Next up") had to be suppressed on remux entirely —
+   * and remux leads most VOD titles, so that turned the feature off for most
+   * episodes. Fires when the runtime resolves and on every offset change.
+   */
+  onRemuxTimeline?: (t: { base: number; duration: number } | null) => void;
   /** Passed through to VideoPlayer — TV OSD caption toggle. */
   ccRef?: React.MutableRefObject<TvCcHandle | null>;
   /** Passed through to VideoPlayer — TV OSD in-stream audio-language control,
@@ -112,6 +125,7 @@ export default function VodPlayer({
   subtitles,
   videoElRef,
   hideControls,
+  onRemuxTimeline,
   ccRef,
   audioRef,
 }: Props) {
@@ -256,6 +270,19 @@ export default function VodPlayer({
     setSeekTarget(at > 5 ? at : 0);
     setAudioUrl(url);
   }, []);
+  // Publish the remux timeline so the parent can place itself in the FILE
+  // rather than in the streaming window. Kept in an effect (not called during
+  // render) so it can safely drive parent state.
+  const timelineCbRef = useRef(onRemuxTimeline);
+  timelineCbRef.current = onRemuxTimeline;
+  useEffect(() => {
+    timelineCbRef.current?.(
+      isRemux && remuxDuration && remuxDuration > 0
+        ? { base: remuxStart, duration: remuxDuration }
+        : null,
+    );
+  }, [isRemux, remuxStart, remuxDuration]);
+
   // Hand the scrubber a virtual timeline when this is a remux with a known
   // runtime and the touch controls are live. Dragging sets seekTarget, which
   // moves remuxStart, which rewrites effectiveSrc → VideoPlayer reloads at the

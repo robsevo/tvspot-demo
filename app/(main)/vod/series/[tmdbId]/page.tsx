@@ -213,13 +213,16 @@ export default function VodSeriesPage() {
     const ep = episodeByKey(playingEpisode);
     return ep ? getEpisodeSources(playingEpisode, ep) : [];
   }, [playingEpisode, episodeByKey, getEpisodeSources]);
+  // A remux-only episode probes NOTHING, deliberately — see the movie page. The
+  // old fallback spun up a relay ffmpeg session per probe (12-14.5s cold each)
+  // to produce a verdict we never act on, while competing with the stream the
+  // viewer is waiting for.
   const probeUrls = useMemo(
-    () => {
-      const cheap = playingSources.filter((s) => !s.url.includes("remux"));
-      return (cheap.length > 0 ? cheap : playingSources)
+    () =>
+      playingSources
+        .filter((s) => !s.url.includes("remux"))
         .slice(0, MAX_PROBE_SOURCES)
-        .map((s) => s.url);
-    },
+        .map((s) => s.url),
     [playingSources]
   );
   // `skip`: never re-probe the episode source on screen — a remux source is one
@@ -227,9 +230,6 @@ export default function VodSeriesPage() {
   // same file to learn something playback has already proven.
   const { statusOf, workingCount, busyCount, loading: checking, recheck, revalidating } =
     useStreamCheck(probeUrls, { mode: "vod", skip: confirmedUrl });
-  // Ref mirror for handleSourceFailure, which reads it inside a state updater.
-  const checkingRef = useRef(checking);
-  useEffect(() => { checkingRef.current = checking; }, [checking]);
 
   // Cooldown tick so cooled-down sources come back on their own.
   useEffect(() => {
@@ -308,19 +308,41 @@ export default function VodSeriesPage() {
     };
   }, [detail?.seasons, playSeason, playEpisode, openEpisode]);
 
+  // The remux timeline (baked start offset + the file's real runtime), reported
+  // by VodPlayer once it resolves. Lets the markers below work on remux, which
+  // leads most episodes — without it "Next up" was effectively never shown.
+  const [remuxTimeline, setRemuxTimeline] = useState<{ base: number; duration: number } | null>(
+    null,
+  );
+
   const markers = useEpisodeMarkers(
     videoElRef,
     nextUp?.play ?? null,
     playingIndex,
-    // Suppress Skip/Next on rolling relay-remux sources — their duration tracks
-    // just ahead of the playhead, so "Next up" would fire mid-episode (see
-    // useEpisodeMarkers).
+    // Skip intro SEEKS, so it stays limited to genuinely seekable sources — a
+    // remux bakes its position into the URL and can't be seeked natively.
     !/remux\.m3u8/.test(playingSources[playingIndex]?.url ?? ""),
+    // "Next up" DOES work on remux, using the real runtime plus the absolute
+    // position (base + the element's clock, which restarts at the baked offset).
+    useCallback(
+      () =>
+        remuxTimeline
+          ? {
+              position: remuxTimeline.base + (videoElRef.current?.currentTime ?? 0),
+              duration: remuxTimeline.duration,
+            }
+          : null,
+      [remuxTimeline],
+    ),
   );
 
   // Player pronounced the playing source dead: cool it down and advance.
-  // Mid-probe (checking), record the cooldown but hold position — the effect
-  // above jumps once to a verified source when verdicts land.
+  //
+  // Advances EVEN WHILE PROBING — same reversal as the movie page. The player
+  // reporting an error is ground truth about the source on screen; an
+  // unfinished probe round is not evidence yet, and holding for it left the
+  // viewer on a known-broken source for the rest of the round. VodPlayer's
+  // FAIL_DWELL_MS already paces the advance so it can't strobe.
   const handleSourceFailure = useCallback((epKey: string) => (_lastTime: number) => {
     setEpState((prev) => {
       const state = prev[epKey] ?? EMPTY_EP_STATE;
@@ -331,9 +353,6 @@ export default function VodSeriesPage() {
       const current = sources[idx];
       if (!current) return prev;
       const failedAt = { ...state.failedAt, [current.url]: Date.now() };
-      if (checkingRef.current) {
-        return { ...prev, [epKey]: { ...state, failedAt } };
-      }
       const usable = (s: PlayableSource) =>
         s.url !== current.url && !(failedAt[s.url] && Date.now() - failedAt[s.url] < FAIL_COOLDOWN_MS);
       const after = sources.findIndex((s, i) => i > idx && usable(s));
@@ -543,6 +562,7 @@ export default function VodSeriesPage() {
                               onProgress={handleProgress(season.season_number, ep.episode_number)}
                               onSourceFail={handleSourceFailure(epKey)}
                               onPlay={() => setConfirmedUrl(currentSource.url)}
+                              onRemuxTimeline={setRemuxTimeline}
                               onEnded={nextUp ? nextUp.play : undefined}
                               subtitles={subtitles}
                             />
