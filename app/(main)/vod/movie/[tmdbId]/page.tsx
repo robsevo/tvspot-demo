@@ -142,10 +142,18 @@ export default function VodMoviePage() {
   // watching. Direct files/embeds answer in ms; remux sources stay in the list, just
   // unprobed (⇒ never judged dead) until a recheck. The `includes("remux")` test
   // still holds now that the URL is the relay's directly (see lib/vod-resolve).
+  // A remux-only title probes NOTHING, deliberately. The old `: sources`
+  // fallback meant such a title spun up a relay ffmpeg session per probe — the
+  // measured 12-14.5s cold start, several at once — competing with the very
+  // stream the viewer is waiting on, to produce a verdict we would not act on
+  // anyway (remux rows are never judged dead; the relay re-validates at play
+  // time). Unprobed sources stay listed and selectable.
   const probeUrls = useMemo(() => {
     const isRemux = (u: string) => u.includes("remux");
-    const cheap = sources.filter((s) => !isRemux(s.url));
-    return (cheap.length > 0 ? cheap : sources).slice(0, MAX_PROBE_SOURCES).map((s) => s.url);
+    return sources
+      .filter((s) => !isRemux(s.url))
+      .slice(0, MAX_PROBE_SOURCES)
+      .map((s) => s.url);
   }, [sources]);
   // `skip` keeps the background watcher off the source currently playing: a
   // remux source is one ffmpeg session on the relay, so re-probing it asks for a
@@ -219,23 +227,27 @@ export default function VodMoviePage() {
 
   // Player pronounced the current source dead (stall / error / never started):
   // cool it down and advance, resuming the next source where this one died.
-  // While a probe is in flight, record the failure but DON'T advance — the
-  // auto-failover effect jumps once to a verified-working source when verdicts
-  // land, instead of walking the unverified list.
+  //
+  // This ADVANCES EVEN WHILE PROBING, and that reversal is the point. The player
+  // saying "this errored" is ground truth about the source on screen; a probe
+  // round that has not finished is not evidence of anything yet. Waiting for it
+  // meant the viewer sat watching a source already known to be broken for the
+  // rest of the round — up to 20s on a slow VOD pass. The strobing this guard
+  // was added to stop is handled properly by VodPlayer's FAIL_DWELL_MS, which
+  // paces the advance itself rather than blocking it on unrelated work.
   const handleSourceFailure = useCallback(
     (_lastTime: number) => {
       if (!currentSource) return;
       const failedUrl = currentSource.url;
       setConfirmedUrl((c) => (c === failedUrl ? null : c));
       setFailedAt((prev) => ({ ...prev, [failedUrl]: Date.now() }));
-      if (checking) return;
       const after = sources.findIndex(
         (s, i) => i > validIndex && s.url !== failedUrl && !isDead(s)
       );
       const idx = after >= 0 ? after : sources.findIndex((s) => s.url !== failedUrl && !isDead(s));
       if (idx >= 0 && idx !== validIndex) setSourceIndex(idx);
     },
-    [currentSource, sources, validIndex, isDead, checking]
+    [currentSource, sources, validIndex, isDead]
   );
 
   // Save progress to Continue Watching. VideoPlayer already throttles this

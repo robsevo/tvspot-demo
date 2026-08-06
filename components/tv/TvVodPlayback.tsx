@@ -18,6 +18,11 @@ import { useEpisodeMarkers } from "@/hooks/useEpisodeMarkers";
 const SEEK_STEP_S = 15;
 const OSD_MS = 3500;
 
+/** How many non-remux sources the probe round covers. Matches the web pages'
+ *  cap — the verdict is only used to skip a dead source during failover, and
+ *  sources past this point are ones playback realistically never reaches. */
+const MAX_PROBE_SOURCES = 5;
+
 interface Props {
   /** Failover chain, best first (stream sources only — embeds are unusable
    *  with a remote, so TV never surfaces them). */
@@ -97,11 +102,26 @@ export default function TvVodPlayback({
   // Remux URLs are therefore NOT probed at all — a probe of one costs a relay
   // ffmpeg session for no verdict we'd act on. Unprobed sources are never judged
   // dead, so they stay exactly where the resolver put them.
+  //
+  // Capped, like the web pages: the probe only earns its keep by letting
+  // failover SKIP a dead source, and the sources far down the list are ones we
+  // will never reach before the viewer gives up. Probing all of them just holds
+  // connections open on connection-limited panels — including, without `skip`
+  // below, the very source on screen.
   const probeUrls = useMemo(
-    () => sources.filter((x) => !x.url.includes("remux")).map((x) => x.url),
+    () =>
+      sources
+        .filter((x) => !x.url.includes("remux"))
+        .slice(0, MAX_PROBE_SOURCES)
+        .map((x) => x.url),
     [sources],
   );
-  const { statusOf } = useStreamCheck(probeUrls, { mode: "vod" });
+  // Never re-probe what is playing. These panels are connection-limited, so
+  // asking for a second slot on the file currently streaming is how a watchdog
+  // manufactures the stall it exists to detect — the live players learned this
+  // and the TV VOD path never got the same treatment.
+  const currentUrl = sources[index]?.url ?? null;
+  const { statusOf } = useStreamCheck(probeUrls, { mode: "vod", skip: currentUrl });
 
   // Playback order is the RESOLVER's order, untouched.
   const ordered = sources;
@@ -299,6 +319,19 @@ export default function TvVodPlayback({
     nextUp ? nextUp.play : null,
     index,
     !/remux\.m3u8/.test(ordered[index]?.url ?? ""),
+    // Remux DOES get "Next up" — via the real runtime we already fetched for
+    // the OSD scrubber plus the absolute position we already track. Without
+    // this the feature was effectively off for most episodes, since remux
+    // leads most VOD titles by design. Skip intro stays suppressed (it seeks,
+    // and a remux can't be). Null until the runtime lands → markers stay off,
+    // which is the safe direction.
+    useCallback(
+      () =>
+        isRemux && remuxDuration && remuxDuration > 0
+          ? { position: absolutePosition(), duration: remuxDuration }
+          : null,
+      [isRemux, remuxDuration, absolutePosition],
+    ),
   );
   const actionVisible = skipVisible || nextVisible;
 
