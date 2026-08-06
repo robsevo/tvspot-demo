@@ -44,6 +44,16 @@ export const DEADLINE = {
   /** Background/best-effort work nobody is waiting on. */
   background: 20_000,
   /**
+   * A VOD probe round. MUST stay above lib/stream-verify's VOD_TIMEOUT_MS
+   * (20s), or the client gives up before the server can answer and the round's
+   * verdicts are thrown away — every source stays "checking" forever, which on
+   * mobile ALSO froze auto-failover for the whole round. It was 15s against a
+   * 20s server budget, so any probe that took the slow path lost its answer.
+   *
+   * Live rounds don't need this: their per-URL budget is 6s.
+   */
+  vodProbe: 25_000,
+  /**
    * Stream resolution, which gates "Finding streams…". Sits just under
    * VodPlayer's 35s never-started-remux watchdog so a doomed resolve surfaces
    * before the player's own timer would have, not after.

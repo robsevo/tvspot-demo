@@ -247,7 +247,11 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ urls: shard, mode }),
               },
-              DEADLINE.normal,
+              // A VOD round needs headroom over the server's own 20s per-source
+              // budget; at DEADLINE.normal (15s) the client abandoned rounds the
+              // server was still legitimately working on, and their verdicts
+              // never landed at all.
+              mode === "vod" ? DEADLINE.vodProbe : DEADLINE.normal,
             );
             if (!alive()) return;
             absorb(data?.results || []);
