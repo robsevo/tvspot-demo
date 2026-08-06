@@ -111,10 +111,94 @@ const SNAPSHOT = `(() => {
     // the WHOLE expression, which is exactly how this script failed first run.
     // Nothing evaluated here is transpiled the way the app's own bundle is.
     buffered: vids.map(v => { try { return v.buffered.length; } catch (e) { return -1; } }),
+    // The two numbers that explain a wedge after the fact: was the playhead
+    // still advancing, and was there buffer left ahead of it? A freeze with a
+    // full buffer and a stopped playhead is a different failure from one that
+    // starved. Without these the run-up samples say nothing useful.
+    t: vids.map(v => +(v.currentTime || 0).toFixed(1)),
+    ahead: vids.map(v => {
+      try {
+        var b = v.buffered;
+        return b.length ? +(b.end(b.length - 1) - v.currentTime).toFixed(1) : 0;
+      } catch (e) { return -1; }
+    }),
     readyState: vids.map(v => v.readyState),
     paused: vids.map(v => v.paused),
+    dropped: vids.map(v => {
+      try {
+        var q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
+        return q ? q.droppedVideoFrames : -1;
+      } catch (e) { return -1; }
+    }),
     ts: Date.now(),
   };
+})()`;
+
+/**
+ * Event recorder, injected into the page.
+ *
+ * WHY: a 50-minute steady-state watch of the channel that freezes twice showed
+ * ZERO stalls, ZERO dropped frames, readyState 4 throughout and a heap that
+ * plateaued. So the freeze is not decay — it is triggered by an EVENT, and
+ *3-second polling cannot see events. This records them as they happen into a
+ * ring buffer the poller drains, so the wedge log carries what the app was
+ * doing in the seconds before it stopped.
+ *
+ * Chromium-63 safe: no arrow functions in the injected body, no `catch {}`, no
+ * optional chaining. This is NOT transpiled the way the app bundle is.
+ */
+const ARM = `(function () {
+  if (window.__tvlog) return "already armed";
+  window.__tvlog = [];
+  var push = function (kind, detail) {
+    window.__tvlog.push(
+      new Date().toLocaleTimeString([], { hour12: false }) + " " + kind + (detail ? " " + detail : "")
+    );
+    // Bounded: we only ever want the tail before a wedge.
+    if (window.__tvlog.length > 200) window.__tvlog.shift();
+  };
+  window.__tvpush = push;
+
+  window.addEventListener("error", function (e) {
+    push("js-error", (e && e.message ? e.message : "?").slice(0, 120));
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e && e.reason;
+    push("rejection", String(r && r.message ? r.message : r).slice(0, 120));
+  });
+
+  // Media events on whatever <video> is current, re-bound when it is replaced.
+  var bound = null;
+  var bind = function () {
+    var v = document.querySelector("video");
+    if (!v || v === bound) return;
+    bound = v;
+    push("video-new", (v.src || "").slice(0, 40));
+    var names = ["error", "stalled", "waiting", "emptied", "abort", "ended", "pause", "playing"];
+    for (var i = 0; i < names.length; i++) {
+      (function (n) {
+        v.addEventListener(n, function () {
+          var extra = "";
+          if (n === "error" && v.error) extra = "code=" + v.error.code;
+          push("video:" + n, extra);
+        });
+      })(names[i]);
+    }
+  };
+  bind();
+  setInterval(bind, 1000);
+
+  // Route changes (a zap is client-side, so this is the only signal).
+  var route = location.pathname;
+  setInterval(function () {
+    if (location.pathname !== route) {
+      push("route", route + " -> " + location.pathname);
+      route = location.pathname;
+    }
+  }, 500);
+
+  push("armed", location.pathname);
+  return "armed";
 })()`;
 
 async function main() {
@@ -159,8 +243,15 @@ async function main() {
   if (cmd === "watch") {
     const secs = Number(arg) || 300;
     const until = Date.now() + secs * 1000;
+    // Arm the event recorder first — the steady-state numbers alone proved
+    // insufficient (50 clean minutes on the channel that freezes).
+    try {
+      console.log("recorder:", await evaluate(cdp, ARM));
+    } catch (e) {
+      console.log("recorder: FAILED to arm —", e.message);
+    }
     console.log(`watching ${pageUrl} for ${secs}s — zap channels, open the guide, reproduce the freeze\n`);
-    console.log("time   route                heap   nodes  foc  img vid buffered  state");
+    console.log("time     route                 heap  nodes  vid   playhead  ahead  rs  dropped");
     let first = null;
     while (Date.now() < until) {
       let s;
@@ -174,13 +265,21 @@ async function main() {
       }
       first ??= s;
       const t = new Date().toLocaleTimeString([], { hour12: false });
+      // A stuck playhead with `ahead` still healthy is the signature worth
+      // catching: buffer present, nothing consuming it.
       console.log(
-        `${t} ${String(s.url).slice(0, 20).padEnd(20)} ` +
-          `${String(s.heapMB).padStart(5)}MB ${String(s.domNodes).padStart(6)} ` +
-          `${String(s.focusables).padStart(4)} ${String(s.images).padStart(4)} ` +
-          `${String(s.videos).padStart(3)} ${JSON.stringify(s.buffered).padEnd(9)} ` +
-          `${JSON.stringify(s.readyState)}`,
+        `${t} ${String(s.url).slice(0, 21).padEnd(21)} ` +
+          `${String(s.heapMB).padStart(5)}MB ${String(s.domNodes).padStart(5)} ` +
+          `${String(s.videos).padStart(3)} ${JSON.stringify(s.t).padStart(10)} ` +
+          `${JSON.stringify(s.ahead).padStart(7)} ${JSON.stringify(s.readyState).padStart(4)} ` +
+          `${JSON.stringify(s.dropped)}`,
       );
+      // Drain anything the recorder captured since the last poll, so events
+      // appear inline with the numbers rather than only at the end.
+      try {
+        const evs = await evaluate(cdp, "(function(){var a=window.__tvlog||[];window.__tvlog=[];return a})()");
+        for (const line of evs || []) console.log("   * " + line);
+      } catch (e) { /* renderer going down — the next poll reports it */ }
       await new Promise((r) => setTimeout(r, 3000));
     }
     cdp.close();
