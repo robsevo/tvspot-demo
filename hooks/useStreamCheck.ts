@@ -3,12 +3,35 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { StreamCheck } from "@/lib/stream-verify";
 import { groupByHost } from "@/lib/liveSources";
-import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
+import { fetchJson, DEADLINE } from "@/lib/fetchDeadline";
 
 /** Keep probing until at least this many sources verify working + non-busy. */
 const TARGET_WORKING = 3;
 const WATCH_POLL_MS = 20000;
 const WATCH_MAX_ROUNDS = 15; // ~5 min, then stop to bound background load
+
+/**
+ * How long the badges may stay blank waiting for the WHOLE pass.
+ *
+ * A pass finishes no sooner than its slowest panel, and one bad panel decides
+ * that for everyone. Measured on production 2026-08-05: CBC fans out to 10
+ * panels; nine answered in 135-1726ms and three sources had VERIFIED by 1.7s,
+ * but `bgdc.live` black-holes and burns the full 6s probe budget, so the pass
+ * took 6183ms. For 4.5 of those seconds the row read "Checking sources…" while
+ * the answer was already known. CNN's whole pass, by contrast, is 1037ms.
+ *
+ * So: reveal what has landed at this cap, and let the stragglers fill in. They
+ * still read "checking" individually (statusOf returns that for a URL with no
+ * verdict while the pass is incomplete), so nothing is claimed that isn't
+ * known — the difference is that the nine panels that answered are no longer
+ * held hostage by the one that didn't.
+ *
+ * This is deliberately NOT the gate for the /api/extra-sources expansion or the
+ * display re-sort. Both key off `settled` (the real end of the pass) because
+ * both are expensive to get wrong: expansion re-probes the whole grown set, and
+ * re-sorting moves rows under the viewer's thumb.
+ */
+const PASS_REVEAL_MS = 2500;
 
 /**
  * Consecutive failed probes before a source is reported "dead".
@@ -58,8 +81,24 @@ export type SourceStatus = "checking" | "working" | "dead" | "busy" | "unknown";
 interface UseStreamCheck {
   /** Verdict per source URL, for the currently-probed set. */
   results: Record<string, StreamCheck>;
-  /** True while the FIRST probe pass for this URL set is still running. */
+  /**
+   * True while the badges should still read "checking".
+   *
+   * Capped at PASS_REVEAL_MS rather than running to the end of the pass — one
+   * black-holing panel must not hold every other panel's verdict off screen.
+   * For "is the pass actually finished?" use `settled`.
+   */
   loading: boolean;
+  /**
+   * The FULL pass for this URL set has completed — every shard has landed (or
+   * been dropped). Distinct from `loading`, which reveals early.
+   *
+   * Gate anything EXPENSIVE on this, not on `loading`: the /api/extra-sources
+   * expansion (which re-probes the whole grown set) and the display re-sort
+   * (which moves rows under the viewer). Acting on a half-finished pass makes
+   * both fire on evidence that was about to arrive.
+   */
+  settled: boolean;
   /**
    * LIVE status for one URL — updates as each shard lands.
    *
@@ -70,13 +109,13 @@ interface UseStreamCheck {
    */
   statusOf: (url: string) => SourceStatus;
   /**
-   * SETTLED status for one URL — what a chip should show.
+   * REVEALED status for one URL — what a chip should show.
    *
-   * Holds every source at "checking" until the whole pass has finished, so the
-   * badges reveal together, once, instead of flickering in one panel at a time.
-   * Playback does NOT wait for this (see statusOf) — the point is that the auto-
-   * pick reacts to the first verdict while the list the user is reading stays
-   * still.
+   * Holds every source at "checking" until the pass finishes OR PASS_REVEAL_MS
+   * elapses, whichever comes first, so the badges reveal together, once,
+   * instead of flickering in one panel at a time — without one dead panel
+   * keeping nine good verdicts off screen for six seconds. Playback does NOT
+   * wait for this (see statusOf).
    */
   badgeOf: (url: string) => SourceStatus;
   /** How many of `urls` have verified as working. */
@@ -139,6 +178,10 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
   const [meta, setMeta] = useState<Record<string, UrlMeta>>({});
   // The URL-set key that a completed pass covered. "" = nothing probed yet.
   const [checkedKey, setCheckedKey] = useState("");
+  // The URL-set key whose badges have been REVEALED — either because the pass
+  // finished or because PASS_REVEAL_MS elapsed and we stopped waiting on the
+  // slowest panel. Always <= checkedKey in progress terms.
+  const [revealedKey, setRevealedKey] = useState("");
   const [nonce, setNonce] = useState(0);
   // A manual recheck keeps the old verdicts visible; this flags the pass instead.
   const [revalidating, setRevalidating] = useState(false);
@@ -147,7 +190,9 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
   // `loading` = the FIRST pass for this URL set only. A recheck must NOT set it:
   // callers use it to gate one-shot work, and blanking every badge on every
   // recheck is exactly the flicker this hook used to cause.
-  const loading = key !== "" && checkedKey !== key;
+  const loading = key !== "" && revealedKey !== key;
+  // The pass genuinely finished, as opposed to merely having revealed early.
+  const settled = key !== "" && checkedKey === key;
 
   /** Merge one shard's verdicts into state. Called as each shard lands. */
   const absorb = useCallback((batch: StreamCheck[]) => {
@@ -189,7 +234,13 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
         while (next < shards.length) {
           const shard = shards[next++];
           try {
-            const res = await fetchWithDeadline(
+            // fetchJson, not fetchWithDeadline + res.json(): the body read has to
+            // be INSIDE the deadline. Headers can land while the body stalls, and
+            // a shard whose body never arrives would otherwise pin this worker —
+            // and therefore the whole pass — forever. lib/fetchDeadline's own
+            // header calls that out as a mistake already shipped twice; this was
+            // the third instance.
+            const { data } = await fetchJson<{ results?: StreamCheck[] }>(
               "/api/stream-check",
               {
                 method: "POST",
@@ -198,9 +249,8 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
               },
               DEADLINE.normal,
             );
-            const data: { results?: StreamCheck[] } = await res.json();
             if (!alive()) return;
-            absorb(data.results || []);
+            absorb(data?.results || []);
           } catch {
             // This shard's panel is our problem, not evidence its sources died:
             // leave their prior verdicts (or "checking") alone.
@@ -217,15 +267,23 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
   useEffect(() => {
     if (urls.length === 0) return;
     let active = true;
+    // Reveal whatever has landed once the cap expires, without waiting for the
+    // slowest panel. Stragglers keep their own "checking" badge and fill in as
+    // they arrive; `settled` still waits for the real end of the pass.
+    const reveal = setTimeout(() => {
+      if (active) setRevealedKey(key);
+    }, PASS_REVEAL_MS);
     (async () => {
       await runProbe(urls, () => active);
       if (!active) return;
       // Pass complete — whatever landed is what we know.
       setCheckedKey(key);
+      setRevealedKey(key);
       setRevalidating(false);
     })();
     return () => {
       active = false;
+      clearTimeout(reveal);
     };
     // `key`/`nonce`/`mode` capture the meaningful inputs; `urls` identity is excluded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -233,7 +291,12 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
 
   const current = checkedKey === key;
 
-  const workingNow = current ? urls.reduce((n, u) => (results[u]?.ok ? n + 1 : n), 0) : 0;
+  // Counted from the verdicts actually in hand, NOT gated on the pass finishing.
+  // These drive the "N online · M busy" line, and holding them at zero until the
+  // slowest panel reports is the same hostage-taking PASS_REVEAL_MS exists to
+  // end — on CBC three sources are verified at 1.7s and the pass ends at 6.2s.
+  // Nothing is over-claimed: a URL with no verdict simply isn't counted.
+  const workingNow = urls.reduce((n, u) => (results[u]?.ok ? n + 1 : n), 0);
 
   // Layer 2 watcher: soft-reprobe (merge results, NO loading flash) so a busy
   // source that frees up — or a dead one that recovers — is detected and the
@@ -298,10 +361,13 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
     [results, meta, current],
   );
 
-  // Badges wait for the pass; playback does not. `loading` is the first pass for
-  // this URL set — during it every chip reads "checking" and nothing moves. A
-  // manual recheck deliberately leaves `loading` false, so previous verdicts stay
-  // on screen (blanking them on every press was an older flicker bug).
+  // Badges wait for the REVEAL; playback does not, and neither waits for the
+  // slowest panel. While `loading` every chip reads "checking" and nothing
+  // moves; at PASS_REVEAL_MS the verdicts in hand appear together and any panel
+  // still outstanding keeps its own spinner (statusOf gives "checking" for a URL
+  // with no verdict while the pass is incomplete). A manual recheck deliberately
+  // leaves `loading` false, so previous verdicts stay on screen (blanking them
+  // on every press was an older flicker bug).
   const badgeOf = useCallback(
     (url: string): SourceStatus => (loading ? "checking" : statusOf(url)),
     [loading, statusOf],
@@ -309,10 +375,12 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
 
   const workingCount = workingNow;
 
+  // Ungated for the same reason as workingNow — a source already known to be
+  // connection-limited is worth saying so before the pass ends.
   const busyCount = useMemo(
-    () => (current ? urls.filter((u) => statusOf(u) === "busy").length : 0),
+    () => urls.filter((u) => statusOf(u) === "busy").length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [current, key, statusOf],
+    [key, statusOf],
   );
 
   const recheck = useCallback(() => {
@@ -323,5 +391,5 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
     setNonce((n) => n + 1);
   }, []);
 
-  return { results, loading, statusOf, badgeOf, workingCount, busyCount, recheck, revalidating };
+  return { results, loading, settled, statusOf, badgeOf, workingCount, busyCount, recheck, revalidating };
 }

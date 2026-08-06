@@ -12,6 +12,7 @@ import {
 } from "@/lib/sourceFailover";
 import { notePlayback, reputationOf, reputationTable } from "@/lib/sourceReputation";
 import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
+import { useFirstFrameDeadline } from "@/hooks/useFirstFrameDeadline";
 import VideoPlayer from "@/components/VideoPlayer";
 import { LogoImage } from "@/components/LogoImage";
 import { useTvBack } from "@/components/tv/TvNav";
@@ -82,7 +83,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   // what you are watching asks for a second slot and manufactures the stall.
   const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
 
-  const { statusOf, badgeOf, workingCount, busyCount, loading, recheck, revalidating } =
+  const { statusOf, badgeOf, workingCount, busyCount, loading, settled, recheck, revalidating } =
     useStreamCheck(allUrls, { skip: confirmedUrl });
 
   const channelSlugValue = channel ? channelSlug(channel.name) : "";
@@ -95,8 +96,11 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   }, [channelSlugValue]);
 
   // Probe settled short of 2 working sources → pull the waiting-bench URLs.
+  // Gated on `settled`, NOT `loading`: badges reveal early now (PASS_REVEAL_MS),
+  // and expanding off a half-finished pass re-probes the whole grown set on
+  // evidence that was about to arrive anyway.
   useEffect(() => {
-    if (loading || workingCount >= 2 || expansionFired.current || probedUrls.length === 0) return;
+    if (!settled || workingCount >= 2 || expansionFired.current || probedUrls.length === 0) return;
     expansionFired.current = true;
     const controller = new AbortController();
     (async () => {
@@ -114,7 +118,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
     })();
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, workingCount, channelSlugValue]);
+  }, [settled, workingCount, channelSlugValue]);
 
   // Seeded from the guide preview — the source it had ON SCREEN counts as a
   // pick, so Enter-to-watch opens the feed you were just looking at instead of
@@ -174,7 +178,9 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
   // or a pass settles (a manual Recheck counts: the viewer asked for it).
   const orderRef = useRef<string[]>([]);
   const orderKeyRef = useRef<string | null>(null);
-  const orderKey = `${allUrls.join("|")}|${loading || revalidating ? "probing" : "settled"}`;
+  // Keyed on `settled`, not `loading` — badges may reveal early, but this array
+  // also drives Left/Right source cycling, so the row must move at most once.
+  const orderKey = `${allUrls.join("|")}|${!settled || revalidating ? "probing" : "settled"}`;
   if (orderKey !== orderKeyRef.current) {
     orderKeyRef.current = orderKey;
     const tier = (u: string) => {
@@ -205,23 +211,35 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
     if (s === "busy") return 2;
     return 3;
   };
-  // STICKY auto-pick, but only while sticking is still defensible — same rule as
-  // the web player, and the same reason: "busy" is not "dead", so a source at its
-  // panel's connection limit used to hold the pick indefinitely while verified
-  // sources sat below it. The stick now yields to a strictly better rank, and
-  // once playback is confirmed pickRank returns -1 so a healthy connect can
-  // never be displaced.
-  // Within a rank tier, prefer what has actually worked here before. Bounded
-  // and small on purpose (see reputationOf): it refines the order among sources
-  // the probe already considers viable, it never overrides a live verdict, and an
-  // unplayed source scores 0 so a fresh nightly link still gets its first chance.
+  // THE ATTEMPT OWNS THE PLAYER — same rule as the web player, and it matters
+  // more here. This used to release the pick whenever any OTHER source ranked
+  // strictly better, so the first probe verdict (measured 89-450ms) yanked a
+  // channel that was connecting fine, tearing down hls.js and re-buffering. The
+  // TV is the slowest device to reach a first frame, so it lost that race every
+  // time. A verdict about a different source is not evidence about this one.
+  //
+  // Releases only on evidence about ITSELF: isDead (own dead verdict, or a drop
+  // cooling down — which now includes missing its first-frame deadline), or its
+  // own verdict being `busy`, since a connection-limited panel will not start
+  // and waiting out the budget is pure dead time.
+  //
+  // The ORIGINAL-INDEX tiebreak is not cosmetic: at tune-in every pickRank is 1
+  // and reputationOf is 0, so the comparator returns 0 for every pair, and
+  // Array.prototype.sort is only guaranteed stable from ES2019 (V8 7.0 /
+  // Chrome 70). This webview is older than that — Chromium 63 on the RU7100,
+  // 69/76/85 across Tizen model years — and below TimSort V8 uses an unstable
+  // quicksort above 10 elements, which 105 of our 126 channels exceed. Without
+  // the tiebreak the source this player starts on is engine-defined.
   const ranked = allUrls
     .filter((u) => !isDead(u))
+    .map((u, i) => ({ u, i }))
     .sort(
       (a, b) =>
-        pickRank(a) - pickRank(b) ||
-        reputationOf(b, repTable) - reputationOf(a, repTable),
-    );
+        pickRank(a.u) - pickRank(b.u) ||
+        reputationOf(b.u, repTable) - reputationOf(a.u, repTable) ||
+        a.i - b.i,
+    )
+    .map((x) => x.u);
   const autoRef = useRef<string | null>(null);
   const stick = autoRef.current;
   const best = ranked[0];
@@ -229,7 +247,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
     stick != null &&
     allUrls.includes(stick) &&
     !isDead(stick) &&
-    (best === undefined || pickRank(stick) <= pickRank(best));
+    !(stick !== confirmedUrl && statusOf(stick) === "busy");
   const firstAlive = stickHolds ? stick : best;
   useEffect(() => {
     autoRef.current = firstAlive ?? null;
@@ -246,6 +264,18 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
     playStartRef.current = 0;
     setFailedAt((prev) => recordFailure(prev, src, Date.now()));
   }, [src]);
+
+  // Bounded chance to produce a frame. Previously a live source that connected
+  // and then delivered nothing was only caught by the stall watchdog's SECOND
+  // strike, ~20s in — the single longest avoidable wait on this device. A miss
+  // is recorded like a mid-playback drop, so the blip/cooldown logic still holds
+  // position during a relay-wide outage instead of walking the list.
+  useFirstFrameDeadline({
+    src,
+    started: confirmedUrl === src,
+    status: statusOf(src),
+    onMiss: handleSourceFailure,
+  });
 
   const recheckAll = useCallback(() => {
     setFailedAt({});
@@ -391,7 +421,11 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
           isLive
           hideControls
           videoElRef={videoElRef}
-          onPlay={() => {
+          onStarted={() => {
+            // onStarted (frames rendering), NOT onPlay — `play` fires on the
+            // play() call, which on the HLS path is MANIFEST_PARSED. Confirming
+            // there pinned a source as immune to every probe verdict, and
+            // counted it in "N online", before it had rendered anything.
             setConfirmedUrl(src);
             // Start the clock that scores this source (lib/sourceReputation).
             if (!playStartRef.current) playStartRef.current = Date.now();

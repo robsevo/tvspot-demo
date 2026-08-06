@@ -9,7 +9,9 @@ import {
   recordFailure, inCooldown, isCondemned, byOldestFailure, type FailureMap,
 } from "@/lib/sourceFailover";
 import { notePlayback, reputationOf, reputationTable } from "@/lib/sourceReputation";
+import { useFirstFrameDeadline } from "@/hooks/useFirstFrameDeadline";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
+import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, X, Loader2, RefreshCw, Info, ExternalLink } from "lucide-react";
 
@@ -60,7 +62,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   // watching is how the watchdog used to cause the stalls it looks for.
   const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
 
-  const { statusOf, badgeOf, workingCount, busyCount, loading, recheck, revalidating } =
+  const { statusOf, badgeOf, workingCount, busyCount, loading, settled, recheck, revalidating } =
     useStreamCheck(allUrls, { skip: confirmedUrl });
 
   // Reset expansion when the channel changes.
@@ -75,8 +77,11 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
 
   // After the initial probe settles with < 2 working sources, fetch the
   // waiting-bench URLs for this channel and re-probe the grown set.
+  // Gated on `settled`, NOT `loading`: badges now reveal early (see
+  // PASS_REVEAL_MS), and expanding the bench off a half-finished pass would
+  // re-probe the whole grown set on evidence that was about to arrive anyway.
   useEffect(() => {
-    if (loading) return;
+    if (!settled) return;
     if (workingCount >= 2) return;
     if (expansionFired.current) return;
     if (probedUrls.length === 0) return;
@@ -87,25 +92,28 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
 
     (async () => {
       try {
-        const res = await fetch("/api/extra-sources", {
+        // Deadlined, like the TV twin already was. A bare fetch's `signal` is a
+        // no-op on the Samsung webview (see lib/fetchDeadline), so a request
+        // that never settles would leave the bench permanently un-expanded.
+        const res = await fetchWithDeadline("/api/extra-sources", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ slug, exclude: probedUrls }),
           signal: controller.signal,
-        });
+        }, DEADLINE.normal);
         if (!res.ok) return;
         const data: { urls?: string[] } = await res.json();
         if (Array.isArray(data.urls) && data.urls.length > 0) {
           setExtraUrls(data.urls);
         }
       } catch {
-        // Aborted (channel changed) or network error — silently ignore.
+        // Aborted (channel changed), timed out, or network error — ignore.
       }
     })();
 
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, workingCount, channelSlugValue]);
+  }, [settled, workingCount, channelSlugValue]);
 
   // A user-chosen source pins playback. Tracked by URL (not index) so reordering
   // the list as verdicts arrive never changes what the user selected.
@@ -190,7 +198,11 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
   const orderKeyRef = useRef<string | null>(null);
   // `revalidating` is in the key so a manual Recheck DOES re-sort when it lands —
   // the user asked for a fresh verdict, so acting on it is the expected result.
-  const orderKey = `${allUrls.join("|")}|${loading || revalidating ? "probing" : "settled"}`;
+  // Keyed on `settled`, not `loading`: badges may reveal early, but the ROW must
+  // not move until the pass is genuinely in — re-sorting twice (once at the
+  // reveal, once at the end) would move the list under the user's thumb exactly
+  // as the per-panel sharding used to.
+  const orderKey = `${allUrls.join("|")}|${!settled || revalidating ? "probing" : "settled"}`;
   if (orderKey !== orderKeyRef.current) {
     orderKeyRef.current = orderKey;
     const tier = (u: string) => {
@@ -226,34 +238,49 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     if (s === "busy") return 2;                // connection-limited → last resort
     return 3;                                   // dead
   };
-  // STICKY auto-pick, but only while sticking is still defensible.
+  // THE ATTEMPT OWNS THE PLAYER.
   //
-  // Re-sorting on every verdict yanked a channel that was connecting fine on
-  // Source 1 over to Source 2 the instant that one verified — a needless reload
-  // (black frame, audio restart) mid-tune. So the pick sticks.
+  // This used to release the pick whenever ANY other source ranked strictly
+  // better. That reads as reasonable and was the single biggest source of
+  // tune-in delay. At tune-in every source is "checking" (rank 1), so playback
+  // starts on allUrls[0] — then the first probe shard lands (measured on
+  // production: 89-450ms) with a `working` verdict, that source becomes rank 0,
+  // the stick loses, and `src` changes. VideoPlayer tears down hls.js,
+  // re-imports it, re-attaches and re-buffers. On a TV the first frame always
+  // arrives well after the first verdict, so this fired on essentially every
+  // tune-in, and the slower the device the more certain it was.
   //
-  // It used to stick until the source was judged DEAD, and that is the bug that
-  // made the ranking look broken: "busy" is not "dead". A source at its panel's
-  // connection limit is a source that will not start, yet it held the pick
-  // forever while verified-working sources sat below it. Measured on 24/7 Rick
-  // and Morty: 8 busy, 0 ok, and the player sat on a busy source until the stall
-  // watchdog eventually gave up — while other channels had working sources one
-  // rank down the whole time.
+  // A verdict about a DIFFERENT source is not evidence about the one currently
+  // connecting. So the stick now releases for exactly two reasons, both of them
+  // evidence about ITSELF:
+  //   - isDead: its own probe verdict is dead, or it dropped and is cooling
+  //     down (which now includes missing its first-frame deadline below);
+  //   - its own verdict is `busy`. A panel at its connection limit will not
+  //     start, so waiting out the budget is pure dead time. This is the case
+  //     the old "strictly better" rule got right and must be preserved —
+  //     measured on 24/7 Rick and Morty: 8 busy, 0 ok, and the player sat there
+  //     until the stall watchdog gave up.
+  // Once frames are rendering, confirmedUrl shields it from both.
   //
-  // Now the stick holds only while nothing is STRICTLY better. Once playback is
-  // confirmed, pickRank returns -1 for that source, so a healthy connect can
-  // never be displaced — which is the property the stickiness existed for.
-  // Within a rank tier, prefer what has actually worked here before. Bounded
-  // and small on purpose (see reputationOf): it refines the order among sources
-  // the probe already considers viable, it never overrides a live verdict, and an
-  // unplayed source scores 0 so a fresh nightly link still gets its first chance.
+  // The comparator ends in an ORIGINAL-INDEX tiebreak, and that is not
+  // cosmetic. On the first render every pickRank is 1 and reputationOf is 0 for
+  // unplayed sources, so the comparator returns 0 for every pair — and
+  // Array.prototype.sort is only guaranteed stable from ES2019 (V8 7.0 /
+  // Chrome 70). The Samsung webview is Chromium 63 (see lib/fetchDeadline) and
+  // Tizen ships 69/76/85 by model year; below TimSort, V8 falls back to an
+  // unstable quicksort above 10 elements, and 105 of our 126 channels carry
+  // more than 10 merged sources. Without this tiebreak the FIRST SOURCE THE TV
+  // PICKS is engine-defined rather than the best-ranked one.
   const ranked = allUrls
     .filter((u) => !isDead(u))
+    .map((u, i) => ({ u, i }))
     .sort(
       (a, b) =>
-        pickRank(a) - pickRank(b) ||
-        reputationOf(b, repTable) - reputationOf(a, repTable),
-    );
+        pickRank(a.u) - pickRank(b.u) ||
+        reputationOf(b.u, repTable) - reputationOf(a.u, repTable) ||
+        a.i - b.i,
+    )
+    .map((x) => x.u);
   const autoRef = useRef<string | null>(null);
   const stick = autoRef.current;
   const best = ranked[0];
@@ -261,7 +288,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     stick != null &&
     allUrls.includes(stick) &&
     !isDead(stick) &&
-    (best === undefined || pickRank(stick) <= pickRank(best));
+    !(stick !== confirmedUrl && statusOf(stick) === "busy");
   const firstAlive = stickHolds ? stick : best;
   useEffect(() => {
     autoRef.current = firstAlive ?? null;
@@ -283,6 +310,20 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     playStartRef.current = 0;
     setFailedAt((prev) => recordFailure(prev, src, Date.now()));
   }, [src]);
+
+  // Give the source on screen a bounded chance to produce a frame. Without this
+  // a live source that connects and then delivers nothing was only caught by the
+  // stall watchdog's SECOND strike, ~20s in. A miss is recorded exactly like a
+  // mid-playback drop, so the existing cooldown/blip logic decides whether to
+  // move — which means a relay-wide outage still holds position instead of
+  // walking the whole list. See hooks/useFirstFrameDeadline for why a
+  // verified-working source is deliberately held past the budget instead.
+  useFirstFrameDeadline({
+    src,
+    started: confirmedUrl === src,
+    status: statusOf(src),
+    onMiss: handleSourceFailure,
+  });
 
   // Recheck gives both verification AND playback-failed sources another chance.
   const recheckAll = useCallback(() => {
@@ -334,7 +375,14 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
         isLive
         channelUp={channelUp}
         channelDown={channelDown}
-        onPlay={() => {
+        onStarted={() => {
+            // onStarted (frames rendering), NOT onPlay. `play` fires on the
+            // play() call, which on the HLS path happens at MANIFEST_PARSED —
+            // so this used to confirm a source the moment its playlist parsed,
+            // pinning it as immune to any probe verdict and counting it in
+            // "N online" before it had rendered anything. It also meant the
+            // reputation clock below started during buffering, crediting a
+            // source for time nobody watched.
             setConfirmedUrl(src);
             // Start the clock that scores this source (lib/sourceReputation).
             if (!playStartRef.current) playStartRef.current = Date.now();
