@@ -51,10 +51,21 @@ function connect(url) {
     ws.onerror = () => reject(new Error("websocket error — is the debug port still open?"));
     ws.onopen = () =>
       resolve({
-        send: (method, params = {}) =>
+        // Every send is bounded. Chromium 63 predates chunks of the protocol
+        // (Performance.enable among them) and simply NEVER ANSWERS an unknown
+        // method rather than returning an error — so an unbounded send hangs
+        // forever against exactly the device this tool exists for.
+        send: (method, params = {}, timeoutMs = 15000) =>
           new Promise((res, rej) => {
             const myId = ++id;
-            pending.set(myId, { resolve: res, reject: rej });
+            const timer = setTimeout(() => {
+              pending.delete(myId);
+              rej(new Error(`${method}: no reply in ${timeoutMs}ms (unsupported on this webview?)`));
+            }, timeoutMs);
+            pending.set(myId, {
+              resolve: (v) => { clearTimeout(timer); res(v); },
+              reject: (e) => { clearTimeout(timer); rej(e); },
+            });
             ws.send(JSON.stringify({ id: myId, method, params }));
           }),
         close: () => ws.close(),
@@ -112,6 +123,28 @@ async function main() {
 
   if (cmd === "eval") {
     console.log(JSON.stringify(await evaluate(cdp, arg), null, 2));
+    cdp.close();
+    return;
+  }
+
+  if (cmd === "metrics") {
+    // Performance.getMetrics sees what the page cannot: Documents, Frames,
+    // JSEventListeners, LayoutObjects. A renderer that dies with a FLAT JS heap
+    // — which is what this TV does — is leaking one of those, or native memory
+    // behind them. Counting them across zaps is the only view we get, since the
+    // retail firmware blocks both a shell and dlog.
+    // Performance.getMetrics is too NEW for this webview (it never replies).
+    // Memory.getDOMCounters is old enough and carries the three numbers that
+    // matter for a leak the JS heap can't see: retained Documents, live Nodes,
+    // and JS event listeners.
+    const out = {};
+    try {
+      Object.assign(out, await cdp.send("Memory.getDOMCounters", {}, 8000));
+    } catch (e) {
+      out.domCountersError = e.message;
+    }
+    Object.assign(out, await evaluate(cdp, SNAPSHOT));
+    console.log(JSON.stringify(out, null, 2));
     cdp.close();
     return;
   }
