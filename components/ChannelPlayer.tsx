@@ -423,7 +423,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
                 progress that was just made visible. */}
             <span>
               {shownWorking > 0
-                ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}${loading ? " · checking…" : ""}`
+                ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}${!settled ? " · checking…" : ""}`
                 : loading
                   ? "Checking sources…"
                   : busyCount > 0

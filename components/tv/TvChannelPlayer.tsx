@@ -527,7 +527,7 @@ export default function TvChannelPlayer({ channelName }: { channelName: string }
                 the first one is ~0.5s in and the couch should see that. */}
             <p className="text-base text-[#8197a4] shrink-0">
               {shownWorking > 0
-                ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}${loading ? " · checking…" : ""}`
+                ? `${shownWorking} online${busyCount > 0 ? ` · ${busyCount} busy` : ""} of ${allUrls.length}${!settled ? " · checking…" : ""}`
                 : loading
                   ? "Checking sources…"
                   : busyCount > 0
