@@ -31,6 +31,25 @@ interface Props {
   poster?: string;
   autoPlay?: boolean;
   onPlay?: () => void;
+  /**
+   * Fired when FRAMES ARE ACTUALLY RENDERING (the `playing` event).
+   *
+   * Not the same thing as `onPlay`, and the difference is load-bearing. `onPlay`
+   * rides the `play` event, which fires on the play() CALL — and on the HLS path
+   * that call happens at MANIFEST_PARSED, i.e. as soon as a playlist parses and
+   * before a single segment has been fetched or decoded. A source that serves a
+   * valid manifest and then delivers nothing fires `onPlay` and looks alive.
+   *
+   * That broke every consumer that treated "playing" as ground truth: the live
+   * players pinned such a source as confirmed-working (immune to any probe
+   * verdict, and counted in "N online"), and VodPlayer CLEARED its own
+   * never-started watchdog on it — which is why "press play and nothing
+   * happens" survived a watchdog written specifically for it.
+   *
+   * Use this for anything that means "it really is playing". Use `onPlay` only
+   * for UI that should react to the intent (spinners, play/pause state).
+   */
+  onStarted?: () => void;
   onPause?: () => void;
   onError?: (err: string) => void;
   /** Fired when playback makes no progress for too long (the "plays then drops"
@@ -162,6 +181,7 @@ export default function VideoPlayer({
   src,
   poster,
   autoPlay = true,
+  onStarted,
   onPlay,
   onPause,
   onError,
@@ -839,7 +859,7 @@ export default function VideoPlayer({
     // `playing` (frames actually rendering), not `play` (which fires on the play()
     // CALL, before the initial autostart has really taken) — this is the point
     // after which FRAG_BUFFERED must stop resuming a paused element.
-    const onPlayingHandler = () => { startedRef.current = true; setStarted(true); };
+    const onPlayingHandler = () => { startedRef.current = true; setStarted(true); onStarted?.(); };
     const onTimeHandler = () => {
       // A rolling remux has no finite video.duration, so the bar would sit empty
       // and never fill. With virtualSeek we know the file's real runtime and the
@@ -890,7 +910,7 @@ export default function VideoPlayer({
       // pause event firing.
       setPlaybackActive(false);
     };
-  }, [onPlay, onPause, onTimeUpdate, onEnded, onError]);
+  }, [onPlay, onStarted, onPause, onTimeUpdate, onEnded, onError]);
 
   // Rebuffer feedback + recovery. Some sources play, then freeze while the edge
   // restocks, then resume. Drive the ring/notice off ACTUAL playback progress

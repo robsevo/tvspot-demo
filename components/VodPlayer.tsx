@@ -308,9 +308,21 @@ export default function VodPlayer({
         lastTime.current = remuxStart + t;
       }}
       onPlayIntent={arm}
-      onPlay={() => {
+      onStarted={() => {
+        // The never-started watchdog is disarmed HERE, on frames actually
+        // rendering — not in onPlay. `play` fires on the play() call, which on
+        // the HLS path is MANIFEST_PARSED, so clearing there cancelled the
+        // timer the instant a playlist parsed. Any source that served a valid
+        // manifest and then delivered nothing disarmed its own watchdog: the
+        // exact "press play and nothing happens" case NEVER_STARTED_MS exists
+        // for was the one case it could never catch.
         setStarted(true);
         clear();
+      }}
+      onPlay={() => {
+        // Parent-facing signal stays on `play` for now — the VOD pages use it
+        // for confirmedUrl, and moving that to first-frame belongs with the
+        // rest of the VOD source-selection rework, not here.
         onPlayProp?.();
       }}
       onEnded={onEnded}
