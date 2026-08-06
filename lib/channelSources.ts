@@ -53,6 +53,28 @@ function urlsFor(data: VerifiedSources, channelName: string): string[] {
   return Array.from(new Set([...overrides, ...active, ...waiting]));
 }
 
+/**
+ * Best nightly score among a channel's ACTIVE sources, or 0 when unknown.
+ *
+ * This is the pipeline's own confidence in the links it is handing over —
+ * bufferScore from scripts/link-freshness/verifier.ts (playlist window vs our
+ * 36s liveSync, bitrate vs the TV's buffer cap, segment length, tier, latency).
+ *
+ * WHY THE PLAYER WANTS IT: measured across 24 channels on 2026-08-05, the first
+ * verified source answered HTTP 200 for 21 of them (88%) — and BOTH failures
+ * carried the lowest scores in the sample (25 and 23, against 50-80 for
+ * everything that worked). So a weak score is a usable advance warning that this
+ * channel's links are thin, available before a single probe has run.
+ *
+ * The waiting bench is deliberately excluded: it is lower-priority failover, and
+ * a strong bench does not make a weak active set any better to lead with.
+ */
+function confidenceFor(data: VerifiedSources, channelName: string, limit: number): number {
+  const entry = data.channels?.[channelSlug(channelName)];
+  const scores = (entry?.sources || []).slice(0, limit).map((s) => s.score ?? 0);
+  return scores.length ? Math.max(...scores) : 0;
+}
+
 /** Verified URLs for one channel, best-first. Never throws. */
 export async function getChannelSources(channelName: string): Promise<string[]> {
   try {
@@ -69,17 +91,21 @@ export async function getChannelSources(channelName: string): Promise<string[]> 
 export async function getChannelSourcesMap(
   channelNames: string[],
   limit = INLINE_PER_CHANNEL,
-): Promise<Record<string, string[]>> {
-  const out: Record<string, string[]> = {};
+): Promise<{ urls: Record<string, string[]>; confidence: Record<string, number> }> {
+  const urls: Record<string, string[]> = {};
+  const confidence: Record<string, number> = {};
   try {
     const data = await loadVerifiedSources();
     for (const name of channelNames) {
-      const urls = urlsFor(data, name).slice(0, limit);
-      if (urls.length) out[name] = urls;
+      const list = urlsFor(data, name).slice(0, limit);
+      if (list.length) {
+        urls[name] = list;
+        confidence[name] = confidenceFor(data, name, limit);
+      }
     }
   } catch {
     // Fall through with whatever we have — the backend's own primary/backup
     // links still reach the player, so the grid is never empty because of this.
   }
-  return out;
+  return { urls, confidence };
 }

@@ -48,6 +48,10 @@ const TTL_MS = 5 * 60_000;
 
 export interface VerifiedSourceEntry {
   url: string;
+  /** bufferScore from the nightly verifier (0-100). Named explicitly because
+   *  the player ranks on it — under the index signature alone it typed as
+   *  `unknown` and every read needed a cast. */
+  score?: number;
   [k: string]: unknown;
 }
 export interface VerifiedSourcesChannel {

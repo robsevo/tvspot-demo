@@ -28,7 +28,7 @@ async function main() {
 
   const names = Object.keys(vs.channels || {});
   const sample = names.slice(0, 3);
-  const map = await getChannelSourcesMap(sample);
+  const { urls: map, confidence } = await getChannelSourcesMap(sample);
   check(
     "getChannelSourcesMap resolves slugs to URLs",
     sample.every((n) => (map[n]?.length ?? 0) > 0),
@@ -38,6 +38,13 @@ async function main() {
     "inline list is capped",
     Object.values(map).every((u) => u.length <= 10),
     `max=${Math.max(0, ...Object.values(map).map((u) => u.length))}`,
+  );
+  // The player pulls the waiting bench up front on a weak channel, so a missing
+  // or nonsense confidence would silently disable that path.
+  check(
+    "confidence accompanies every resolved channel",
+    Object.keys(map).every((n) => typeof confidence[n] === "number" && confidence[n] >= 0),
+    Object.keys(map).map((n) => `${n}=${confidence[n]}`).join(" "),
   );
 
   // Display-name lookup must survive slugging ("24/7 South Park" -> 24-7-...).

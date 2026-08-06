@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     const channels = data?.channels;
     if (!Array.isArray(channels)) return respond(body);
 
-    const sources = await getChannelSourcesMap(
+    const { urls, confidence } = await getChannelSourcesMap(
       channels.map((c: { name?: string }) => c?.name).filter((n: unknown): n is string => typeof n === "string"),
     );
 
@@ -59,7 +59,16 @@ export async function GET(request: NextRequest) {
       JSON.stringify({
         ...data,
         channels: channels.map((c: { name?: string }) =>
-          c?.name && sources[c.name] ? { ...c, verified_sources: sources[c.name] } : c,
+          c?.name && urls[c.name]
+            ? {
+                ...c,
+                verified_sources: urls[c.name],
+                // The pipeline's own confidence in those links. Lets the player
+                // pull the waiting bench IMMEDIATELY on a thin channel instead of
+                // discovering it the slow way — see useLiveSources.
+                source_confidence: confidence[c.name],
+              }
+            : c,
         ),
       }),
     );

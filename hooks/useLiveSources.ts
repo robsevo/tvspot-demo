@@ -46,6 +46,26 @@ const PROBE_CAP = 20;
 const EXPANDED_CAP = 24;
 /** Below this many verified-working sources, pull the waiting bench. */
 const EXPANSION_THRESHOLD = 2;
+/**
+ * Nightly bufferScore below which we pull the bench IMMEDIATELY, without
+ * waiting for a probe pass to prove the channel is thin.
+ *
+ * Measured across 24 channels on 2026-08-05: the first verified source answered
+ * HTTP 200 for 21 of them, and BOTH failures carried the lowest scores in the
+ * sample — 25 and 23, against 50-80 for everything that worked. So the pipeline
+ * already knows which channels are shaky; the player just never asked.
+ *
+ * Doing it up front is also strictly CHEAPER than the reactive path it
+ * short-circuits. That one probes, waits for the pass to settle, fetches the
+ * bench, and then re-probes the whole grown set — two full passes. Expanding
+ * before the first probe starts means one larger pass instead.
+ *
+ * 40 sits in the empty band between the two clusters. Channels with no score at
+ * all (0) are NOT treated as weak: an unscored channel is usually one the
+ * nightly hasn't reached, not a bad one, and punishing unknowns would expand
+ * every channel on a cold pipeline.
+ */
+const WEAK_CONFIDENCE = 40;
 /** Cooldown re-evaluation tick, so a recovered source returns on its own. */
 const COOLDOWN_TICK_MS = 5000;
 
@@ -115,13 +135,18 @@ export function useLiveSources(
     setExtraUrls([]);
   }, [channelSlugValue]);
 
-  // Probe settled short of the threshold → pull the waiting-bench URLs and
-  // re-probe the grown set. Gated on `settled`, not `loading`: badges reveal
-  // early now, and expanding off a half-finished pass would re-probe everything
-  // on evidence that was about to arrive anyway.
+  // Pull the waiting bench, either because the pipeline already told us this
+  // channel is thin (source_confidence — immediate, before any probe) or
+  // because the probe settled short of the threshold (reactive, the old path).
+  //
+  // The reactive path is gated on `settled`, not `loading`: badges reveal early
+  // now, and expanding off a half-finished pass would re-probe everything on
+  // evidence that was about to arrive anyway.
+  const confidence = channel?.source_confidence ?? 0;
+  const weakUpFront = confidence > 0 && confidence < WEAK_CONFIDENCE;
   useEffect(() => {
-    if (!settled) return;
-    if (workingCount >= EXPANSION_THRESHOLD) return;
+    if (!weakUpFront && !settled) return;
+    if (!weakUpFront && workingCount >= EXPANSION_THRESHOLD) return;
     if (expansionFired.current) return;
     if (probedUrls.length === 0) return;
 
@@ -150,7 +175,7 @@ export function useLiveSources(
 
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settled, workingCount, channelSlugValue]);
+  }, [settled, workingCount, channelSlugValue, weakUpFront]);
 
   // A user-chosen source pins playback. Tracked by URL (not index) so reordering
   // the list as verdicts arrive never changes what the user selected.

@@ -65,6 +65,15 @@ export interface Channel {
    * lib/channelSources.ts. Absent when the channel has no verified links.
    */
   verified_sources?: string[];
+  /**
+   * Best nightly bufferScore among those verified sources (0-100), attached by
+   * the same route. A LOW value is advance warning that this channel's links are
+   * thin — measured 2026-08-05, the only two channels whose first source failed
+   * carried the lowest scores in the sample (25 and 23, vs 50-80 for the rest).
+   * The player uses it to pull the waiting bench up front instead of waiting for
+   * a full probe pass to come up short.
+   */
+  source_confidence?: number;
   /** Sports game-guide entries the backend attaches per channel on live-channels. */
   programs?: EpgProgram[];
 }
