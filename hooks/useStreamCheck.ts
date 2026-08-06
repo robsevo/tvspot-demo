@@ -34,6 +34,69 @@ const WATCH_MAX_ROUNDS = 15; // ~5 min, then stop to bound background load
 const PASS_REVEAL_MS = 2500;
 
 /**
+ * How long a verdict stays usable across mounts.
+ *
+ * WHY: zapping is a route change, so every channel switch remounts the player
+ * and threw away everything the last probe learned — including for the channel
+ * you were watching ten seconds ago. Flipping between two channels re-ran two
+ * full 10-shard passes each way, and until they landed the auto-pick was
+ * choosing blind (everything "checking") on the device least able to absorb a
+ * bad first guess.
+ *
+ * A verdict is about a URL, not about a channel, so it survives the remount
+ * perfectly well. 60s is short enough that these flappy panels get re-judged
+ * often, and playback still overrides any verdict for the source on screen.
+ *
+ * Module-level and unbounded-by-time but bounded by size: the whole lineup is
+ * ~1,600 URLs and entries are tiny, but a long session shouldn't grow forever.
+ */
+const VERDICT_TTL_MS = 60_000;
+const VERDICT_MAX = 400;
+const verdictCache = new Map<string, { at: number; r: StreamCheck }>();
+
+function cacheVerdicts(batch: StreamCheck[]): void {
+  const now = Date.now();
+  for (const r of batch) verdictCache.set(r.url, { at: now, r });
+  if (verdictCache.size > VERDICT_MAX) {
+    // Oldest-first eviction; Map preserves insertion order and re-set moves to
+    // the end, so the head is the least recently written.
+    const excess = verdictCache.size - VERDICT_MAX;
+    let n = 0;
+    for (const k of verdictCache.keys()) {
+      if (n++ >= excess) break;
+      verdictCache.delete(k);
+    }
+  }
+}
+
+/** Still-valid cached verdicts for these URLs. */
+function cachedFor(urls: string[]): Record<string, StreamCheck> {
+  const now = Date.now();
+  const out: Record<string, StreamCheck> = {};
+  for (const u of urls) {
+    const hit = verdictCache.get(u);
+    if (hit && now - hit.at < VERDICT_TTL_MS) out[u] = hit.r;
+  }
+  return out;
+}
+
+/**
+ * How long the NON-PLAYING sources wait before they are probed.
+ *
+ * A zap fires the probe pass, an EPG fetch and hls.js's manifest+segment loads
+ * in the same tick. Only the last of those puts a picture on screen, and on a
+ * 2019 TV they are all competing for the same modest network and CPU. The probe
+ * is informational — it drives badges and the failover bench — so nothing about
+ * it needs to happen in the first second of a channel change.
+ *
+ * The source about to PLAY is exempt: its panel is probed immediately, because
+ * "is the thing I'm about to show you dead?" is the one verdict that changes
+ * what happens next. Everything else waits for playback to start, or for this
+ * cap if it never does.
+ */
+const DEFER_REST_MS = 2500;
+
+/**
  * Consecutive failed probes before a source is reported "dead".
  *
  * These panels are connection-limited and demonstrably flap probe-to-probe (see
@@ -143,6 +206,17 @@ interface Options {
    * detect. Playback is also better evidence than any probe could be.
    */
   skip?: string | null;
+  /**
+   * The source about to play. Its panel is probed FIRST and alone; every other
+   * panel waits (see DEFER_REST_MS) so the probe storm stops competing with the
+   * video load on a channel change.
+   */
+  first?: string | null;
+  /**
+   * Playback has started, so the deferred shards may go now. Ignored once the
+   * DEFER_REST_MS cap has already released them.
+   */
+  ready?: boolean;
 }
 
 /** Update per-URL history from one probe pass: reset the streak on success,
@@ -173,7 +247,12 @@ function foldMeta(
 export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
   const mode = opts?.mode ?? "live";
   const skip = opts?.skip ?? null;
-  const [results, setResults] = useState<Record<string, StreamCheck>>({});
+  const first = opts?.first ?? null;
+  const ready = opts?.ready ?? false;
+  // Seeded from the cross-mount cache so a re-zap starts with what we already
+  // learned instead of a blank slate — the auto-pick can then land on a
+  // known-good source immediately rather than guessing while the pass runs.
+  const [results, setResults] = useState<Record<string, StreamCheck>>(() => cachedFor(urls));
   // Probe history per URL — what makes a verdict a trend instead of a coin flip.
   const [meta, setMeta] = useState<Record<string, UrlMeta>>({});
   // The URL-set key that a completed pass covered. "" = nothing probed yet.
@@ -194,6 +273,30 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
   // The pass genuinely finished, as opposed to merely having revealed early.
   const settled = key !== "" && checkedKey === key;
 
+  // Playback-started flag, read by the gate without re-arming the probe effect.
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
+  // Which source we're about to play. Read once when a pass starts, never as a
+  // dependency: it changes as the auto-pick settles, and re-arming the pass on
+  // each change would restart probing over and over during exactly the window
+  // this is meant to keep quiet.
+  const firstRef = useRef(first);
+  firstRef.current = first;
+
+  /**
+   * Resolves when the deferred shards may run: as soon as playback has started,
+   * or after DEFER_REST_MS if it never does. Polled rather than event-driven
+   * because `ready` is a prop that changes by re-render, and making it an effect
+   * dependency would restart the whole pass every time it flipped.
+   */
+  const gate = useCallback(async () => {
+    if (readyRef.current) return;
+    const until = Date.now() + DEFER_REST_MS;
+    while (!readyRef.current && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }, []);
+
   /** Merge one shard's verdicts into state. Called as each shard lands. */
   const absorb = useCallback((batch: StreamCheck[]) => {
     if (batch.length === 0) return;
@@ -203,6 +306,8 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
     // verdict rather than reverting to "unknown" and churning the list.
     setResults((prev) => ({ ...prev, ...map }));
     setMeta((prev) => foldMeta(prev, map));
+    // Survive the remount a channel zap causes — see VERDICT_TTL_MS.
+    cacheVerdicts(batch);
   }, []);
 
   /**
@@ -224,15 +329,33 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
    * panel's verdicts land in ~400ms regardless of what the slow one is doing.
    */
   const runProbe = useCallback(
-    async (list: string[], alive: () => boolean) => {
+    async (list: string[], alive: () => boolean, priority?: string | null) => {
       if (list.length === 0) return;
       // VOD sources are probed concurrently server-side already (no per-panel
       // chain to break up), and the set is capped small — one request is right.
-      const shards = mode === "vod" ? [list] : groupByHost(list);
+      const all = mode === "vod" ? [list] : groupByHost(list);
+
+      // Split the panel carrying the source about to play from the rest. Its
+      // verdict is the only one that changes what happens in the next second —
+      // everything else is badges and bench-ranking, and firing all ten at once
+      // takes bandwidth from the video load on a channel change. See
+      // DEFER_REST_MS.
+      const lead = priority ? all.findIndex((s) => s.includes(priority)) : -1;
+      const shards = lead > 0 ? [all[lead], ...all.filter((_, i) => i !== lead)] : all;
+      // Only the lead shard runs before the gate; with no priority, nothing is
+      // held back and this behaves exactly as before.
+      const holdFrom = lead >= 0 ? 1 : shards.length;
+
       let next = 0;
       const worker = async () => {
         while (next < shards.length) {
-          const shard = shards[next++];
+          const idx = next++;
+          if (idx >= holdFrom) {
+            // Wait for playback (or the cap) before touching the other panels.
+            await gate();
+            if (!alive()) return;
+          }
+          const shard = shards[idx];
           try {
             // fetchJson, not fetchWithDeadline + res.json(): the body read has to
             // be INSIDE the deadline. Headers can land while the body stalls, and
@@ -265,7 +388,7 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
         Array.from({ length: Math.min(PROBE_CONCURRENCY, shards.length) }, worker),
       );
     },
-    [mode, absorb],
+    [mode, absorb, gate],
   );
 
   useEffect(() => {
@@ -278,7 +401,10 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
       if (active) setRevealedKey(key);
     }, PASS_REVEAL_MS);
     (async () => {
-      await runProbe(urls, () => active);
+      // `first` is read once per pass on purpose: it is which source we are
+      // ABOUT to play, and re-arming the pass when it changes would restart
+      // probing on every auto-pick adjustment.
+      await runProbe(urls, () => active, firstRef.current);
       if (!active) return;
       // Pass complete — whatever landed is what we know.
       setCheckedKey(key);
@@ -324,6 +450,8 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
       (u) => u !== skipRef.current && !resultsRef.current[u]?.ok,
     );
     if (candidates.length === 0) return;
+    // No priority here: this is the background watcher, nothing is waiting
+    // on it, and every candidate is by definition NOT the source on screen.
     await runProbe(candidates, () => true);
   }, [runProbe]);
 

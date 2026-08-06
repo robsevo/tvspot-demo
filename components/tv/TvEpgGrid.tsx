@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogoImage } from "@/components/LogoImage";
 import ChannelPreview from "@/components/ChannelPreview";
@@ -25,6 +25,31 @@ const MIN_BLOCK_W = 64;
 const CHAN_W = 208;
 /** Sticky time-ruler height — likewise shared with the NOW line's top offset. */
 const RULER_H = 48;
+
+/**
+ * Progressive row mounting.
+ *
+ * Measured on the actual UN58RU7100FXZC (Tizen 5.0 / Chromium 63) over CDP:
+ * rendering all 125 channel rows costs 2991 DOM nodes, 687 focusables and
+ * **3420ms to first paint**, against 2129ms for 40 rows. The heap never moved
+ * (10MB of a 368MB limit), so this was never a memory problem — it is pure
+ * layout/paint cost on a slow GPU-less webview, and it is why opening the guide
+ * feels like the app hung.
+ *
+ * Capping the list is NOT the answer and must not come back: a channel missing
+ * from the guide reads as the channel being gone, and it fails silently. So
+ * every row still mounts — just not all in the same frame. The first chunk
+ * paints, then the rest fill in over a few hundred milliseconds.
+ *
+ * Same shape as TvBrowseScreen's staggered rails, for the same reason and on the
+ * same device. The fill is deliberately much faster than the rails' 400ms step:
+ * nothing here is fetching, it is only laying out, and the D-pad must not be
+ * able to outrun it. At 25 rows per 120ms the full 125 are present in ~480ms —
+ * faster than a viewer can scroll past the first screenful.
+ */
+const ROWS_FIRST_PAINT = 25;
+const ROWS_PER_STEP = 25;
+const ROW_STEP_MS = 120;
 
 function fmtTick(d: Date): string {
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -56,6 +81,27 @@ export default function TvEpgGrid({
     return { start, end: start + WINDOW_HOURS * 3600_000, now: Date.now() };
   });
   const { start, end, now } = win;
+
+  // How many rows are mounted so far. Grows to cover every channel — see
+  // ROWS_FIRST_PAINT. Resets when the category filter changes the list length,
+  // so switching to a big category re-staggers instead of dumping 125 rows at
+  // once (which is the same stall by another route).
+  const [mounted, setMounted] = useState(ROWS_FIRST_PAINT);
+  useEffect(() => {
+    if (mounted >= channels.length) return;
+    const id = setTimeout(
+      () => setMounted((n) => Math.min(channels.length, n + ROWS_PER_STEP)),
+      ROW_STEP_MS,
+    );
+    return () => clearTimeout(id);
+  }, [mounted, channels.length]);
+  // A new filter is a new list: start the stagger over.
+  const listLen = channels.length;
+  const prevLen = useRef(listLen);
+  if (prevLen.current !== listLen) {
+    prevLen.current = listLen;
+    if (mounted > ROWS_FIRST_PAINT && listLen > ROWS_FIRST_PAINT) setMounted(ROWS_FIRST_PAINT);
+  }
   const width = ((end - start) / 60000) * PX_PER_MIN;
 
   const ticks = useMemo(() => {
@@ -187,7 +233,7 @@ export default function TvEpgGrid({
           />
         )}
 
-        {rows.map(({ channel: c, programs }, rowIdx) => (
+        {rows.slice(0, mounted).map(({ channel: c, programs }, rowIdx) => (
           <div key={c.name} className="flex" style={{ height: ROW_H }}>
             {/* Sticky channel cell */}
             <div
