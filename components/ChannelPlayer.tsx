@@ -1,22 +1,12 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useCallback } from "react";
 import { useChannels } from "@/hooks/useChannels";
-import { useStreamCheck, type SourceStatus } from "@/hooks/useStreamCheck";
+import { type SourceStatus } from "@/hooks/useStreamCheck";
+import { useLiveSources } from "@/hooks/useLiveSources";
 import VideoPlayer from "./VideoPlayer";
 import { channelSlug } from "@/lib/sources";
-import { appendSources, channelSourceList } from "@/lib/liveSources";
-import { previewSourceFor } from "@/lib/previewHandoff";
-import {
-  recordFailure, inCooldown, isCondemned, byOldestFailure, type FailureMap,
-} from "@/lib/sourceFailover";
-import { notePlayback, reputationOf, reputationTable } from "@/lib/sourceReputation";
-import { useFirstFrameDeadline } from "@/hooks/useFirstFrameDeadline";
 import { SourceTroubleHint } from "@/components/SourceTroubleHint";
-import { fetchWithDeadline, DEADLINE } from "@/lib/fetchDeadline";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, X, Loader2, RefreshCw, Info, ExternalLink } from "lucide-react";
-
-/** How many sources to probe / show at most. */
-const MAX_SOURCES = 10; // raised from 6 — more failover depth + manual picks; only the chosen source streams
 
 /** Small status indicator for a source button. */
 function StatusDot({ status }: { status: SourceStatus }) {
@@ -38,298 +28,13 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
     (c) => channelSlug(c.name) === channelName
   );
 
-  // Sources, best-first: nightly-verified links first, then the backend's live
-  // links — deduped by STREAM identity (the same feed arrives in two encodings;
-  // see lib/liveSources) and capped so we never probe an unbounded set. Shared
-  // with the guide preview so both start on the same source.
-  const probedUrls = useMemo(() => channelSourceList(channel, 20), [channel]);
-
-  // Extra sources fetched dynamically when the initial probe comes up mostly dead.
-  // Declared before allUrls so the memo can reference it without hoisting issues.
-  const [extraUrls, setExtraUrls] = useState<string[]>([]);
-  const expansionFired = useRef(false);
-
-  // Merge extra sources into the probe pool, deduped, capped at 24.
-  const allUrls = useMemo(
-    () => (extraUrls.length > 0 ? appendSources(probedUrls, extraUrls, 24) : probedUrls),
-    [probedUrls, extraUrls],
-  );
-
-  // The source ACTUALLY playing — playback is ground truth, so the verifier can
-  // never mark it dead or claim "no sources online" while it's on screen.
-  // Declared before the probe so it can be excluded from background re-probes:
-  // asking a max_connections=1 panel for a second slot on the stream you are
-  // watching is how the watchdog used to cause the stalls it looks for.
-  const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null);
-
-  const { statusOf, badgeOf, workingCount, busyCount, loading, settled, recheck, revalidating } =
-    useStreamCheck(allUrls, { skip: confirmedUrl });
-
-  // Reset expansion when the channel changes.
-  const channelSlugValue = channel ? channelSlug(channel.name) : "";
-  const prevChannelSlug = useRef(channelSlugValue);
-  useEffect(() => {
-    if (channelSlugValue === prevChannelSlug.current) return;
-    prevChannelSlug.current = channelSlugValue;
-    expansionFired.current = false;
-    setExtraUrls([]);
-  }, [channelSlugValue]);
-
-  // After the initial probe settles with < 2 working sources, fetch the
-  // waiting-bench URLs for this channel and re-probe the grown set.
-  // Gated on `settled`, NOT `loading`: badges now reveal early (see
-  // PASS_REVEAL_MS), and expanding the bench off a half-finished pass would
-  // re-probe the whole grown set on evidence that was about to arrive anyway.
-  useEffect(() => {
-    if (!settled) return;
-    if (workingCount >= 2) return;
-    if (expansionFired.current) return;
-    if (probedUrls.length === 0) return;
-
-    expansionFired.current = true;
-    const slug = channelSlugValue;
-    const controller = new AbortController();
-
-    (async () => {
-      try {
-        // Deadlined, like the TV twin already was. A bare fetch's `signal` is a
-        // no-op on the Samsung webview (see lib/fetchDeadline), so a request
-        // that never settles would leave the bench permanently un-expanded.
-        const res = await fetchWithDeadline("/api/extra-sources", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug, exclude: probedUrls }),
-          signal: controller.signal,
-        }, DEADLINE.normal);
-        if (!res.ok) return;
-        const data: { urls?: string[] } = await res.json();
-        if (Array.isArray(data.urls) && data.urls.length > 0) {
-          setExtraUrls(data.urls);
-        }
-      } catch {
-        // Aborted (channel changed), timed out, or network error — ignore.
-      }
-    })();
-
-    return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settled, workingCount, channelSlugValue]);
-
-  // A user-chosen source pins playback. Tracked by URL (not index) so reordering
-  // the list as verdicts arrive never changes what the user selected.
-  //
-  // Seeded from the guide preview: whatever the preview had ON SCREEN counts as
-  // a choice, because on channels that pool two different feeds under one name
-  // (24/7 Pokemon carries the modern series on one source and the 1997 series on
-  // the other) the player's own probe could otherwise open a different show than
-  // the one you just previewed. Pinned, not forced — isDead() still drops it and
-  // fails over. See lib/previewHandoff.
-  const [pickedUrl, setPickedUrl] = useState<string | null>(() =>
-    previewSourceFor(channelName),
-  );
-  // Sources that dropped DURING playback (stall watchdog / fatal error), mapped
-  // to WHEN they dropped. The relay has ~30-40s GLOBAL outage windows where every
-  // (shared-relay) source 403s at once, then recovers — so a drop is a COOLDOWN,
-  // not a permanent session ban: after FAIL_COOLDOWN_MS the source is eligible
-  // again. This is what turns "held for a while then stopped" into auto-recovery.
-  const [failedAt, setFailedAt] = useState<FailureMap>({});
-
-  // What these sources DID last time we played them. Read once per source set —
-  // a localStorage hit inside a sort comparator would be O(n log n) reads.
-  // See lib/sourceReputation: the probe predicts, this remembers.
-  const repTable = useMemo(() => reputationTable(), [allUrls]);
-  // When the source on screen started playing, so a drop can be scored by how
-  // long it actually held. Reset on every source change.
-  const playStartRef = useRef(0);
-
-  // Re-evaluate cooldowns on a tick so a recovered source comes back on its own,
-  // even when no other state changed.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Reset selection + playback-failure state when the channel changes (render-time
-  // reset pattern — avoids a setState-in-effect and a stale-source flash).
-  const [prevName, setPrevName] = useState(channel?.name);
-  if (channel?.name !== prevName) {
-    setPrevName(channel?.name);
-    // Re-seed rather than clear: the lineup often resolves a beat AFTER mount
-    // (cached-first useChannels), and this branch fires on that first resolve —
-    // a bare null here would throw away the preview's handoff on exactly the
-    // cold-load path it's needed for. previewSourceFor is a pure, TTL-bounded
-    // read, so it returns null for any channel the preview didn't just play.
-    setPickedUrl(channel ? previewSourceFor(channelSlug(channel.name)) : null);
-    setFailedAt({});
-    setConfirmedUrl(null);
-  }
-
-  // A source is unusable if verification marked it dead OR it dropped within the
-  // cooldown window (after which the relay has likely recovered).
-  const isDead = (u: string) => {
-    // An actual mid-watch drop (cooldown) wins even over a confirmed source.
-    // A drop that was part of a relay-wide blip cools down for seconds rather
-    // than a minute — see lib/sourceFailover.
-    if (inCooldown(failedAt, u, Date.now())) return true;
-    // The source on screen is playing — a verify probe (which may hit a transient
-    // 456/timeout) can't override reality. Busy sources are "unknown", not dead.
-    if (u === confirmedUrl) return false;
-    return statusOf(u) === "dead";
-  };
-
-  // Working count that trusts playback: if the on-screen source plays but the probe
-  // didn't verify it, still count it — so we never say "0 online" while it's playing.
-  const shownWorking = workingCount + (confirmedUrl && statusOf(confirmedUrl) !== "working" ? 1 : 0);
-
-  // Buttons: EVERY source stays listed — hiding a source because one probe round
-  // said "dead" is what made sources vanish and reappear on their own, on panels
-  // that demonstrably flap probe-to-probe. Verdicts drive the badge and the ORDER
-  // (Online → Busy → unprobed → dead), never the membership, and the sort is
-  // stable within a tier so nothing jitters. What's playing is pinned first.
-  //
-  // THE ORDER IS FROZEN BETWEEN PASSES. It used to re-sort on every verdict,
-  // which was survivable when a pass produced ONE update — but probing is now
-  // sharded per panel, so a pass lands a dozen times and the row visibly
-  // reshuffled under the user's thumb each time. Re-sorting is allowed only when
-  // the source set changes or a pass settles, so the list moves at most once per
-  // probe instead of once per panel.
-  const orderRef = useRef<string[]>([]);
-  const orderKeyRef = useRef<string | null>(null);
-  // `revalidating` is in the key so a manual Recheck DOES re-sort when it lands —
-  // the user asked for a fresh verdict, so acting on it is the expected result.
-  // Keyed on `settled`, not `loading`: badges may reveal early, but the ROW must
-  // not move until the pass is genuinely in — re-sorting twice (once at the
-  // reveal, once at the end) would move the list under the user's thumb exactly
-  // as the per-panel sharding used to.
-  const orderKey = `${allUrls.join("|")}|${!settled || revalidating ? "probing" : "settled"}`;
-  if (orderKey !== orderKeyRef.current) {
-    orderKeyRef.current = orderKey;
-    const tier = (u: string) => {
-      if (u === confirmedUrl) return 0;   // on screen → reality outranks any probe
-      if (u === pickedUrl) return 0;      // the user's explicit choice stays put
-      if (isDead(u)) return 4;
-      switch (statusOf(u)) {
-        case "working": return 1;
-        case "busy": return 2;
-        case "dead": return 4;
-        default: return 3;                // unknown / still checking
-      }
-    };
-    orderRef.current = allUrls
-      .map((u, i) => ({ u, i, t: tier(u) }))
-      .sort((a, b) => a.t - b.t || a.i - b.i)
-      .map((x) => x.u)
-      .slice(0, MAX_SOURCES);
-  }
-  const displayUrls = orderRef.current;
-
-  // Playback: honor a manual pick (unless it has since dropped); otherwise the
-  // BEST auto source. Preference cycles past busy (connection-limited) accounts to
-  // a free one: confirmed-working non-busy first, then still-checking/unknown, then
-  // busy last (only if nothing better). During probing nothing is verified yet, so
-  // source 1 plays instantly; verdicts then promote a non-busy working source.
-  const pickValid = pickedUrl != null && allUrls.includes(pickedUrl) && !isDead(pickedUrl);
-  const pickRank = (u: string): number => {
-    if (u === confirmedUrl) return -1;         // already playing → never displace it
-    const s = statusOf(u);
-    if (s === "working") return 0;             // verified free + playable
-    if (s === "checking" || s === "unknown") return 1; // not yet judged — worth trying
-    if (s === "busy") return 2;                // connection-limited → last resort
-    return 3;                                   // dead
-  };
-  // THE ATTEMPT OWNS THE PLAYER.
-  //
-  // This used to release the pick whenever ANY other source ranked strictly
-  // better. That reads as reasonable and was the single biggest source of
-  // tune-in delay. At tune-in every source is "checking" (rank 1), so playback
-  // starts on allUrls[0] — then the first probe shard lands (measured on
-  // production: 89-450ms) with a `working` verdict, that source becomes rank 0,
-  // the stick loses, and `src` changes. VideoPlayer tears down hls.js,
-  // re-imports it, re-attaches and re-buffers. On a TV the first frame always
-  // arrives well after the first verdict, so this fired on essentially every
-  // tune-in, and the slower the device the more certain it was.
-  //
-  // A verdict about a DIFFERENT source is not evidence about the one currently
-  // connecting. So the stick now releases for exactly two reasons, both of them
-  // evidence about ITSELF:
-  //   - isDead: its own probe verdict is dead, or it dropped and is cooling
-  //     down (which now includes missing its first-frame deadline below);
-  //   - its own verdict is `busy`. A panel at its connection limit will not
-  //     start, so waiting out the budget is pure dead time. This is the case
-  //     the old "strictly better" rule got right and must be preserved —
-  //     measured on 24/7 Rick and Morty: 8 busy, 0 ok, and the player sat there
-  //     until the stall watchdog gave up.
-  // Once frames are rendering, confirmedUrl shields it from both.
-  //
-  // The comparator ends in an ORIGINAL-INDEX tiebreak, and that is not
-  // cosmetic. On the first render every pickRank is 1 and reputationOf is 0 for
-  // unplayed sources, so the comparator returns 0 for every pair — and
-  // Array.prototype.sort is only guaranteed stable from ES2019 (V8 7.0 /
-  // Chrome 70). The Samsung webview is Chromium 63 (see lib/fetchDeadline) and
-  // Tizen ships 69/76/85 by model year; below TimSort, V8 falls back to an
-  // unstable quicksort above 10 elements, and 105 of our 126 channels carry
-  // more than 10 merged sources. Without this tiebreak the FIRST SOURCE THE TV
-  // PICKS is engine-defined rather than the best-ranked one.
-  const ranked = allUrls
-    .filter((u) => !isDead(u))
-    .map((u, i) => ({ u, i }))
-    .sort(
-      (a, b) =>
-        pickRank(a.u) - pickRank(b.u) ||
-        reputationOf(b.u, repTable) - reputationOf(a.u, repTable) ||
-        a.i - b.i,
-    )
-    .map((x) => x.u);
-  const autoRef = useRef<string | null>(null);
-  const stick = autoRef.current;
-  const best = ranked[0];
-  const stickHolds =
-    stick != null &&
-    allUrls.includes(stick) &&
-    !isDead(stick) &&
-    !(stick !== confirmedUrl && statusOf(stick) === "busy");
-  const firstAlive = stickHolds ? stick : best;
-  useEffect(() => {
-    autoRef.current = firstAlive ?? null;
-  }, [firstAlive]);
-  // If every source is cooling down (a global relay outage), keep trying the
-  // least-recently-failed one instead of blanking to "no stream" — it's the most
-  // likely to have recovered, and the player's own recovery reconnects in place.
-  const fallback =
-    firstAlive ?? [...allUrls].sort(byOldestFailure(failedAt))[0] ?? "";
-  const src = pickValid ? (pickedUrl as string) : fallback;
-
-  // The current source dropped — start its cooldown so playback fails over now
-  // but the source can return once the relay recovers.
-  const handleSourceFailure = useCallback(() => {
-    if (!src) return;
-    // Score the source by how long it actually held before dropping — the
-    // signal no pre-playback probe can produce.
-    if (playStartRef.current) notePlayback(src, Date.now() - playStartRef.current);
-    playStartRef.current = 0;
-    setFailedAt((prev) => recordFailure(prev, src, Date.now()));
-  }, [src]);
-
-  // Give the source on screen a bounded chance to produce a frame. Without this
-  // a live source that connects and then delivers nothing was only caught by the
-  // stall watchdog's SECOND strike, ~20s in. A miss is recorded exactly like a
-  // mid-playback drop, so the existing cooldown/blip logic decides whether to
-  // move — which means a relay-wide outage still holds position instead of
-  // walking the whole list. See hooks/useFirstFrameDeadline for why a
-  // verified-working source is deliberately held past the budget instead.
-  useFirstFrameDeadline({
-    src,
-    started: confirmedUrl === src,
-    status: statusOf(src),
-    onMiss: handleSourceFailure,
-  });
-
-  // Recheck gives both verification AND playback-failed sources another chance.
-  const recheckAll = useCallback(() => {
-    setFailedAt({});
-    recheck();
-  }, [recheck]);
+  // The whole source pipeline — candidate list, probing, auto-pick, failover,
+  // reputation — lives in the shared hook so this component and its TV twin
+  // cannot drift. Everything below is touch presentation.
+  const {
+    allUrls, src, displayUrls, badgeOf, condemned, shownWorking, busyCount,
+    loading, settled, revalidating, pick, recheckAll, onStarted, onFailure,
+  } = useLiveSources(channel, channelName);
 
   const channelUp = useCallback(() => {
     if (!channel) return;
@@ -375,20 +80,9 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
         isLive
         channelUp={channelUp}
         channelDown={channelDown}
-        onStarted={() => {
-            // onStarted (frames rendering), NOT onPlay. `play` fires on the
-            // play() call, which on the HLS path happens at MANIFEST_PARSED —
-            // so this used to confirm a source the moment its playlist parsed,
-            // pinning it as immune to any probe verdict and counting it in
-            // "N online" before it had rendered anything. It also meant the
-            // reputation clock below started during buffering, crediting a
-            // source for time nobody watched.
-            setConfirmedUrl(src);
-            // Start the clock that scores this source (lib/sourceReputation).
-            if (!playStartRef.current) playStartRef.current = Date.now();
-          }}
-        onStall={handleSourceFailure}
-        onError={handleSourceFailure}
+        onStarted={onStarted}
+        onStall={onFailure}
+        onError={onFailure}
       />
 
       {/* Open the current source directly in a new tab — the same escape hatch as
@@ -449,7 +143,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
               // into a row of dead-looking sources. badgeOf (not statusOf) holds
               // the chip at "checking" until the whole pass is in, so badges
               // resolve together instead of flickering panel by panel.
-              const status = isCondemned(failedAt, url, Date.now()) ? "dead" : badgeOf(url);
+              const status = condemned(url) ? "dead" : badgeOf(url);
               const isCurrent = url === src;
               // Number from the source's ORIGINAL position, never the display
               // position: the list re-orders as verdicts land, and a label that
@@ -458,7 +152,7 @@ export default function ChannelPlayer({ channelName }: { channelName: string }) 
               return (
                 <button
                   key={url}
-                  onClick={() => setPickedUrl(url)}
+                  onClick={() => pick(url)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
                     isCurrent
                       ? "bg-brand text-white"
