@@ -177,6 +177,17 @@ function nativeAudioList(video: HTMLVideoElement | null): NativeAudioTrackList |
   return list && typeof list.length === "number" ? list : null;
 }
 
+/**
+ * Minimum gap between two hls.js/MediaSource attaches.
+ *
+ * Below this, a new source waits (see the attach effect). Sized from the
+ * measured failure: the 2019 Samsung wedges when zaps arrive back to back, and
+ * survived indefinitely at a 3s cadence. 450ms is comfortably longer than the
+ * hold-the-button repeat rate that caused it, and short enough that a single
+ * deliberate channel change never notices — the first attach is never delayed.
+ */
+const SWAP_GUARD_MS = 450;
+
 export default function VideoPlayer({
   src,
   poster,
@@ -213,6 +224,11 @@ export default function VideoPlayer({
   // Declared up here (not down with the other player refs) because the audio
   // track selector below closes over it.
   const hlsRef = useRef<Hls | null>(null);
+  // When the last hls/MediaSource attach happened, plus a nonce that re-runs the
+  // attach effect once a coalesced swap's guard window expires. See
+  // SWAP_GUARD_MS — this is the Samsung freeze fix.
+  const lastAttachRef = useRef(0);
+  const [attachNonce, setAttachNonce] = useState(0);
 
   // Mirror the video element out to a TV parent (see Props.videoElRef).
   useEffect(() => {
@@ -476,6 +492,35 @@ export default function VideoPlayer({
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
+
+    // COALESCE RAPID SOURCE SWAPS — this is what fixes the Samsung freeze.
+    //
+    // Reproduced over CDP on the UN58RU7100FXZC 2026-08-06: ~10 channel zaps
+    // with NO gap between them wedges the renderer inside 6 presses. The
+    // renderer's main thread stops executing JS entirely and never recovers —
+    // Runtime.evaluate goes unanswered indefinitely while the BROWSER process
+    // still answers in milliseconds. The control is in the same session: ~15
+    // zaps spaced 3-5s apart never wedged it once. It is the RATE, not zapping.
+    //
+    // The mechanism is this effect. Every source change runs hls.destroy() and
+    // then builds a fresh Hls + MediaSource + SourceBuffers. Platform teardown
+    // is asynchronous, so slamming create/destroy deadlocks the media stack and
+    // takes the main thread with it. That matches every measurement: main
+    // thread dead, browser process fine, JS heap flat at 9.5MB of 368MB, zero
+    // dropped frames, and never a wedge in ~107 minutes of steady playback.
+    //
+    // So a source that arrives hard on the heels of the previous one WAITS.
+    // The first attach is immediate — normal tuning pays nothing — and only a
+    // swap within SWAP_GUARD_MS of the last one is delayed, which is exactly
+    // the hold-the-button case. It also matches how a real set-top box behaves:
+    // the banner flips as you press, the picture arrives when you stop.
+    const sinceLast = Date.now() - lastAttachRef.current;
+    if (sinceLast < SWAP_GUARD_MS) {
+      const wait = SWAP_GUARD_MS - sinceLast;
+      const t = setTimeout(() => setAttachNonce((n) => n + 1), wait);
+      return () => clearTimeout(t);
+    }
+    lastAttachRef.current = Date.now();
 
     // Guard against the source-swap race: when the resolved "HD" sources arrive,
     // the parent swaps `src`, tearing down this effect. Without this flag a pending
@@ -816,7 +861,7 @@ export default function VideoPlayer({
         hlsRef.current = null;
       }
     };
-  }, [src, autoPlay, isLive, hideControls]);
+  }, [src, autoPlay, isLive, hideControls, attachNonce]);
 
   // Audio tracks carried by the ELEMENT rather than by hls.js: Safari/iOS native
   // HLS, and the native-handover fallback above. Same contract as the hls.js
