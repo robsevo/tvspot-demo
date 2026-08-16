@@ -65,12 +65,6 @@ export async function middleware(request: NextRequest) {
     // unreachable, since middleware runs first.
     pathname.startsWith("/api/vod-stream")
   ) {
-    // Debug: add header to confirm middleware is running
-    if (pathname === "/api/events") {
-      const response = NextResponse.next();
-      response.headers.set("x-middleware-debug", "hit");
-      return response;
-    }
     return NextResponse.next();
   }
 

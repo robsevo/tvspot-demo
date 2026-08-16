@@ -7,8 +7,9 @@
  * Query: ?date=YYYYMMDD (the client passes its LOCAL date; defaults to UTC today).
  */
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { LEAGUES, type GameEvent, type LeagueEvents } from "@/lib/leagues";
+import { verifyToken, SESSION_COOKIE } from "@/lib/auth";
 
 const UA = "Mozilla/5.0 (compatible; tvspot/1.0)";
 // ESPN scoreboard is public + fast; refetch at most every 60s per date.
@@ -194,8 +195,15 @@ async function fetchLeague(date: string, espnPath: string): Promise<{ logo?: str
   }
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const payload = token ? await verifyToken(token) : null;
+
+  if (!payload) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   let date = (searchParams.get("date") || "").replace(/[^0-9]/g, "");
   if (date.length !== 8) {
     const now = new Date();
