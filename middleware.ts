@@ -56,6 +56,8 @@ export async function middleware(request: NextRequest) {
     // rolling 401 stream and blinded deploy detection exactly where a stale
     // build is most likely to be sitting.
     pathname === "/api/version" ||
+    // Events API is public: the live events page shows games without login.
+    pathname === "/api/events" ||
     // The media proxy authenticates ITSELF (cookie OR a signed, target-bound
     // token) — see app/api/vod-stream. It has to: the TV's <video> element does
     // not send cookies on media requests, so a middleware cookie gate 401s every

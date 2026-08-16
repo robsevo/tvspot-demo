@@ -152,10 +152,16 @@ function mmaGames(ev: any): GameEvent[] {
 async function fetchLeague(date: string, espnPath: string): Promise<{ logo?: string; games: GameEvent[] } | null> {
   const url = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${date}`;
   const isMma = espnPath.startsWith("mma/");
+  console.log("[fetchLeague] Fetching:", url);
   try {
     const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12000) });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.log("[fetchLeague] Request failed for", url, res.status, res.statusText);
+      return null;
+    }
     const data = await res.json();
+    console.log("[fetchLeague] Response for", url, JSON.stringify(data));
+    console.log("[fetchLeague] Response for", url, "has events:", !!data?.events?.length);
     const leagueLogo = data?.leagues?.[0]?.logos?.[0]?.href as string | undefined;
     const games: GameEvent[] = [];
     for (const ev of data?.events || []) {
@@ -182,7 +188,8 @@ async function fetchLeague(date: string, espnPath: string): Promise<{ logo?: str
       });
     }
     return { logo: leagueLogo, games };
-  } catch {
+  } catch (e) {
+    console.error("[fetchLeague] Error fetching", url, e);
     return null;
   }
 }

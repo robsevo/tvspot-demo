@@ -99,7 +99,7 @@ export default async function RootLayout({
             TV webview (Chromium 63) lacks. Feature-detected — a no-op on
             phones. Inlined because React hoists src-scripts as async and they
             can lose the race against Next's chunks (see tvPolyfills above). */}
-        <script dangerouslySetInnerHTML={{ __html: tvPolyfills }} />
+        <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: tvPolyfills }} />
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48" />
         <link rel="shortcut icon" href="/favicon-48.png" type="image/png" />
