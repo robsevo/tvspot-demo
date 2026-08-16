@@ -103,6 +103,40 @@ interface CarrierChannel {
  * the Canadian broadcaster(s) for a game and to filter the Live grid to "what's
  * carrying this game". Returns [] if we carry none.
  */
+/**
+ * Does `slug` name a FEED of the brand `key`, rather than a different channel
+ * that merely starts with the same letters?
+ *
+ * `slug.startsWith(key)` alone is the defect that made MTV serve MTV Lebanon and
+ * TSN serve ESPN8 on the backend (fixed there 2026-07-28 via feed-qualifier
+ * tokens). The same bare prefix test was still here, and measured against the
+ * live 126-channel lineup it handed sports leagues their NEWS siblings:
+ *   cbc -> CBC News Network            (NHL)
+ *   ctv -> CTV News, CTV News Network  (NFL, FIFA World Cup)
+ *   rds -> RDS INFO                    (nine leagues)
+ * So the Events "Watch" deep-link could send a viewer to a news channel.
+ *
+ * The tail after the brand must be feed qualifiers ONLY. Numbered and regional
+ * feeds are deliberately KEPT: Canadian networks carry the same event across
+ * TSN1-5 and Sportsnet East/West/Ontario/Pacific, and dropping them would leave
+ * real carriers unlisted — the opposite failure.
+ */
+const FEED_QUALIFIER_TOKENS = new Set([
+  // numbered feeds
+  "1", "2", "3", "4", "5", "6", "one", "two", "360",
+  // regional feeds
+  "east", "west", "ontario", "pacific", "atlantic", "central", "national",
+  // quality/format flags
+  "hd", "sd", "fhd", "uhd", "4k", "plus",
+]);
+
+export function isFeedOfBrand(slug: string, key: string): boolean {
+  if (!slug.startsWith(key)) return false;
+  const tail = slug.slice(key.length).replace(/^-+/, "");
+  if (tail === "") return true; // exact brand match
+  return tail.split("-").every((t) => FEED_QUALIFIER_TOKENS.has(t));
+}
+
 export function carriersForLeague<T extends CarrierChannel>(
   leagueKey: string,
   channels: T[],
@@ -112,7 +146,7 @@ export function carriersForLeague<T extends CarrierChannel>(
   if (!lg) return [];
   const matches = channels.filter((c) => {
     const slug = slugify(c.name);
-    return lg.channels.some((k) => slug.startsWith(k));
+    return lg.channels.some((k) => isFeedOfBrand(slug, k));
   });
   // Online first, otherwise preserve lineup order (the player runtime-verifies
   // sources anyway, so an offline-flagged carrier is still worth offering).
@@ -148,7 +182,7 @@ export function broadcastersForLeague<T extends CarrierChannel>(
   const out: T[] = [];
   for (const c of carriersForLeague(leagueKey, channels, slugify)) {
     const slug = slugify(c.name);
-    const brand = lg.channels.find((k) => slug.startsWith(k)) || slug;
+    const brand = lg.channels.find((k) => isFeedOfBrand(slug, k)) || slug;
     if (seen.has(brand)) continue;
     seen.add(brand);
     out.push(c);
