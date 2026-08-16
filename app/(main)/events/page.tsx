@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useChannels } from "@/hooks/useChannels";
 import { useEvents } from "@/hooks/useEvents";
 import { channelSlug } from "@/lib/sources";
-import { carrierForLeague, broadcastersForLeague, type GameEvent, type LeagueEvents } from "@/lib/leagues";
+import { carrierForLeague, broadcastersForLeague, carriersForGame, type GameEvent, type LeagueEvents } from "@/lib/leagues";
 import type { Channel } from "@/lib/types";
 import { ChevronLeft, Tv, CalendarDays, Play } from "lucide-react";
 
@@ -40,7 +40,7 @@ function TeamRow({ name, logo, score, dim }: { name: string; logo?: string; scor
   );
 }
 
-function GameCard({ game, watchSlug, broadcasters }: { game: GameEvent; watchSlug: string | null; broadcasters: Channel[] }) {
+function GameCard({ game, watchSlug, broadcasters, exactCarrier = true }: { game: GameEvent; watchSlug: string | null; broadcasters: Channel[]; exactCarrier?: boolean }) {
   const live = game.state === "in";
   const final = game.state === "post";
   const showScore = live || final;
@@ -78,7 +78,12 @@ function GameCard({ game, watchSlug, broadcasters }: { game: GameEvent; watchSlu
           {broadcasters.map((c) => (
             <span
               key={c.name}
-              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-brand/20 text-white ring-1 ring-brand/30"
+              title={exactCarrier ? "Airing this game" : "Carries this league — not confirmed for this game"}
+              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                exactCarrier
+                  ? "bg-brand/20 text-white ring-1 ring-brand/30"
+                  : "bg-white/5 text-text-secondary ring-1 ring-white/10"
+              }`}
             >
               {c.name}
             </span>
@@ -102,9 +107,10 @@ function GameCard({ game, watchSlug, broadcasters }: { game: GameEvent; watchSlu
 }
 
 function LeagueSection({ league, channels }: { league: LeagueEvents; channels: ReturnType<typeof useChannels>["channels"] }) {
+  // League-wide fallback, used only for games ESPN gives no broadcaster for.
   const carrier = carrierForLeague(league.key, channels, channelSlug);
-  const watchSlug = carrier ? channelSlug(carrier.name) : null;
-  const broadcasters = broadcastersForLeague(league.key, channels, channelSlug);
+  const fallbackSlug = carrier ? channelSlug(carrier.name) : null;
+  const fallbackBroadcasters = broadcastersForLeague(league.key, channels, channelSlug);
   return (
     <section className="mb-6">
       <div className="flex items-center gap-2 px-4 mb-2">
@@ -114,9 +120,26 @@ function LeagueSection({ league, channels }: { league: LeagueEvents; channels: R
         <span className="text-text-muted text-[11px]">{league.games.length}</span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 px-4">
-        {league.games.map((g) => (
-          <GameCard key={g.id} game={g} watchSlug={watchSlug} broadcasters={broadcasters} />
-        ))}
+        {league.games.map((g) => {
+          // "Which channel carries this league" is NOT "where is this game on".
+          // Resolve from the game's OWN broadcasters first; fall back to the
+          // league list only when ESPN gave us nothing to match. See
+          // carriersForGame in lib/leagues.
+          const { carriers, exact } = carriersForGame(
+            league.key, g.broadcasts, channels, channelSlug,
+          );
+          const shown = exact ? carriers.slice(0, 4) : fallbackBroadcasters;
+          const slug = exact && carriers[0] ? channelSlug(carriers[0].name) : fallbackSlug;
+          return (
+            <GameCard
+              key={g.id}
+              game={g}
+              watchSlug={slug}
+              broadcasters={shown}
+              exactCarrier={exact}
+            />
+          );
+        })}
       </div>
     </section>
   );

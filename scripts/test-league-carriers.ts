@@ -27,7 +27,7 @@
  * CTV 2) must be KEPT — dropping those would leave real carriers unlisted, which
  * is the opposite bug and just as user-visible.
  */
-import { carriersForLeague, isFeedOfBrand } from "../lib/leagues";
+import { carriersForLeague, carriersForGame, isFeedOfBrand } from "../lib/leagues";
 import { channelSlug } from "../lib/sources";
 
 type Row = { name: string; online: boolean };
@@ -41,6 +41,9 @@ const LINEUP: Row[] = [
   "Sportsnet Ontario", "Sportsnet Pacific", "Sportsnet West",
   "TSN", "TSN1", "TSN2", "TSN3", "TSN4", "TSN5",
   "FS1", "FS2", "NFL Network",
+  // Real lineup entries that no league's `channels` list mentions — which is
+  // exactly why per-game matching was needed.
+  "ESPN", "ESPN2", "ESPN+", "MLS",
 ].map((name) => ({ name, online: true }));
 
 let failures = 0;
@@ -87,6 +90,35 @@ check("info sibling rejected", !isFeedOfBrand("rds-info", "rds"));
 check("unrelated channel rejected", !isFeedOfBrand("tsn-the-ocho", "tsn"),
   "ESPN8 branded as TSN The Ocho — the original backend symptom");
 check("different brand rejected", !isFeedOfBrand("citytv", "ctv"));
+
+console.log("\nper-GAME carriers: the channel airing THIS game, not the league's brands");
+const forGame = (league: string, broadcasts: string[]) => {
+  const { carriers, exact } = carriersForGame(league, broadcasts, LINEUP, channelSlug);
+  return { names: carriers.map((c) => c.name), exact };
+};
+
+// Measured live 2026-08-16: every MLS game reported Apple TV, every La Liga
+// game ESPN+ — while the league lists offered tsn/rds/fs1/fs2, so the Watch
+// button opened TSN1 for a match it was not airing.
+const mls = forGame("mls", ["Apple TV"]);
+check("Apple TV resolves to the MLS channel", mls.names.join(",") === "MLS", mls.names.join(","));
+check("...and is reported as an EXACT match", mls.exact, String(mls.exact));
+
+const laliga = forGame("la-liga", ["ESPN+"]);
+// slugify strips "+", so ESPN+ and ESPN collide on slug — exact name must win.
+check("ESPN+ resolves to ESPN+ ONLY (not ESPN/ESPN2)",
+  laliga.names.join(",") === "ESPN+", laliga.names.join(","));
+
+const both = forGame("la-liga", ["ESPN Deportes", "ESPN+"]);
+check("two broadcasters resolve to both channels",
+  both.names.includes("ESPN") && both.names.includes("ESPN+"), both.names.join(","));
+
+const none = forGame("nhl", []);
+check("no broadcast data falls back to the league brands", !none.exact && none.names.length > 0,
+  `exact=${none.exact} n=${none.names.length}`);
+const unknown = forGame("nhl", ["Some Regional Sports Net"]);
+check("an unmatchable broadcaster also falls back, flagged inexact", !unknown.exact,
+  String(unknown.exact));
 
 console.log(
   failures === 0

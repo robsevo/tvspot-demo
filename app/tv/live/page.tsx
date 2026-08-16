@@ -10,7 +10,7 @@ import { useChannelFavorites } from "@/hooks/useChannelFavorites";
 import { channelSlug } from "@/lib/sources";
 import { getChannelType } from "@/lib/logos";
 import { nowAndNext } from "@/lib/tvEpg";
-import { carriersForLeague } from "@/lib/leagues";
+import { carriersForGame } from "@/lib/leagues";
 import { listRecentChannels } from "@/lib/recentChannels";
 import TvBrowseScreen, { type TvBrowseItem, type TvBrowseRail } from "@/components/tv/TvBrowseScreen";
 import TvChannelPanel from "@/components/tv/TvChannelPanel";
@@ -92,10 +92,15 @@ export default function TvLivePage() {
     const out: TvBrowseItem[] = [];
     const seen = new Set<string>();
     for (const lg of events.leagues) {
-      const carriers = carriersForLeague(lg.key, channels, channelSlug);
-      if (carriers.length === 0) continue;
       for (const game of lg.games) {
         if (game.state === "post") continue;
+        // Per GAME, not per league: "TSN carries MLS" is not "this match is on
+        // TSN". Measured 2026-08-16 — every MLS game was on Apple TV and every
+        // La Liga game on ESPN+, both already in the lineup, while the league
+        // list pointed at TSN. carriersForGame prefers the game's own
+        // broadcasters and falls back to the league brands only if none match.
+        const { carriers } = carriersForGame(lg.key, game.broadcasts, channels, channelSlug);
+        if (carriers.length === 0) continue;
         const key = `ev-${lg.key}-${game.id}`;
         if (seen.has(key)) continue; // the feed can list a game twice → dup React key
         seen.add(key);
