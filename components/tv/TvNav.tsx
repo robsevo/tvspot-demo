@@ -10,6 +10,7 @@ import {
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { TVKEY, exitTvApp } from "@/lib/tv";
+import { pickNextIndex } from "@/lib/tvNavGeometry";
 
 /**
  * Remote-control (D-pad) navigation for the /tv experience.
@@ -61,44 +62,35 @@ function candidates(): HTMLElement[] {
 
 /** Nearest candidate in `dir` from `curEl`, by primary-axis distance with a
  *  cross-axis drift penalty; non-overlapping candidates only win when nothing
- *  in the same row/column exists (e.g. dropping from a hero button to a rail). */
+ *  in the same row/column exists (e.g. dropping from a hero button to a rail).
+ *
+ *  CROSS-AXIS DRIFT IS A GAP, NOT A CENTRE DISTANCE (fixed 2026-08-16). It used
+ *  to be `Math.abs(dx)` between centres, which punished WIDE candidates for
+ *  being wide — even when they fully CONTAINED the current element. The EPG
+ *  guide is where that bites: a channel row with no programme data renders ONE
+ *  full-width button spanning the whole timeline, so its centre sits hours away
+ *  from a narrow programme block sitting directly above it.
+ *
+ *  Measured with the guide's own geometry (PX_PER_MIN 8, ROW_H 112, 6h span),
+ *  pressing DOWN from a 30-minute block in row 0:
+ *      adjacent empty row 1 (contains it) ... 2748
+ *      row 2 with an aligned programme ......  224   <- won
+ *  so the remote skipped straight past every channel with no schedule. Scored as
+ *  a gap the same two are 112 and 224, the adjacent row wins, and that is what a
+ *  viewer means by "down". Overlapping candidates now cost 0 drift, so width is
+ *  no longer a penalty while alignment still breaks ties. */
 function pickNext(curEl: HTMLElement, dir: Dir, els: HTMLElement[]): HTMLElement | null {
-  const cur = curEl.getBoundingClientRect();
-  const cx = cur.left + cur.width / 2;
-  const cy = cur.top + cur.height / 2;
-  let best: HTMLElement | null = null;
-  let bestScore = Infinity;
-
-  for (const el of els) {
-    if (el === curEl) continue;
-    const r = el.getBoundingClientRect();
-    const ex = r.left + r.width / 2;
-    const ey = r.top + r.height / 2;
-    const dx = ex - cx;
-    const dy = ey - cy;
-
-    let primary: number;
-    let secondary: number;
-    let overlaps: boolean;
-    if (dir === "left" || dir === "right") {
-      if (dir === "left" ? dx >= -1 : dx <= 1) continue;
-      primary = Math.abs(dx);
-      secondary = Math.abs(dy);
-      overlaps = r.bottom > cur.top && r.top < cur.bottom;
-    } else {
-      if (dir === "up" ? dy >= -1 : dy <= 1) continue;
-      primary = Math.abs(dy);
-      secondary = Math.abs(dx);
-      overlaps = r.right > cur.left && r.left < cur.right;
-    }
-
-    const score = primary + secondary * 2 + (overlaps ? 0 : 10000);
-    if (score < bestScore) {
-      bestScore = score;
-      best = el;
-    }
-  }
-  return best;
+  // Scoring lives in lib/tvNavGeometry so it can be tested without a DOM,
+  // React, or jsdom (scripts/test-tv-nav.ts). This half owns only the element
+  // -> rectangle mapping; keeping a second copy of the maths here is how the
+  // two silently drift apart.
+  const others = els.filter((el) => el !== curEl);
+  const i = pickNextIndex(
+    curEl.getBoundingClientRect(),
+    others.map((el) => el.getBoundingClientRect()),
+    dir,
+  );
+  return i < 0 ? null : others[i]!;
 }
 
 function focusEl(el: HTMLElement): void {
