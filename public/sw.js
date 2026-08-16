@@ -11,7 +11,18 @@
  *
  * Bump VERSION to force-evict all caches on the next deploy.
  */
-const VERSION = "v7"; // v7 (2026-07-20): ship the navigation timeout below. The
+const VERSION = "v8"; // v8 (2026-08-16): force-evict. Navigations are
+// stale-while-revalidate (`return cached || network` below), so a cached shell
+// pins the OLD chunk hashes and a deploy is invisible until the NEXT launch.
+// Verified that day: the events fix was live and correct on the server — the
+// deployed chunk contained it, /api/version matched the commit, and the real
+// shipped function returned the right channel for every live game — while web,
+// Samsung and Fire TV all still rendered the previous build, through a hard
+// reload. DeployRefresh handles this properly (it deletes tvspot-shell* then
+// reloads) but only at background/foreground boundaries, never in the
+// foreground, so a viewer staring at the page never gets it.
+//
+// v7 (2026-07-20): ship the navigation timeout below. The
 // v6 bump is what EXPOSED that bug: evicting the shell cache meant every
 // navigation depended on an unbounded fetch, so the TV hung on the wrapper's
 // "Starting TVSpot…" splash — an app that had worked fine the day before, with
