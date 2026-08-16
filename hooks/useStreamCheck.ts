@@ -345,7 +345,14 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
   );
 
   useEffect(() => {
-    if (urls.length === 0) return;
+    if (urls.length === 0) {
+      // A recheck with nothing to probe still has to end. `recheck()` sets
+      // revalidating=true BEFORE this effect runs, so returning here without
+      // clearing it strands the spinner on forever — one of the two ways
+      // "recheck gets stuck" happened.
+      setRevalidating(false);
+      return;
+    }
     let active = true;
     // Reveal whatever has landed once the cap expires, without waiting for the
     // slowest panel. Stragglers keep their own "checking" badge and fill in as
@@ -354,12 +361,22 @@ export function useStreamCheck(urls: string[], opts?: Options): UseStreamCheck {
       if (active) setRevealedKey(key);
     }, PASS_REVEAL_MS);
     (async () => {
-      await runProbe(urls, () => active);
-      if (!active) return;
-      // Pass complete — whatever landed is what we know.
-      setCheckedKey(key);
-      setRevealedKey(key);
-      setRevalidating(false);
+      try {
+        await runProbe(urls, () => active);
+        if (!active) return;
+        // Pass complete — whatever landed is what we know.
+        setCheckedKey(key);
+        setRevealedKey(key);
+      } finally {
+        // MUST be in `finally`, and MUST NOT sit behind the `!active` guard.
+        // revalidating is a UI spinner, not pass state: it was only cleared on
+        // the happy path, so any pass that threw out of runProbe — or that was
+        // superseded and returned early — left the spinner running with no
+        // pass alive to ever turn it off. That is "recheck gets stuck".
+        // Clearing it when a pass ends is always right: a newer pass sets it
+        // true again for itself on the way in.
+        if (active) setRevalidating(false);
+      }
     })();
     return () => {
       active = false;

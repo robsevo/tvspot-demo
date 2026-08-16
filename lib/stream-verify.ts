@@ -260,7 +260,45 @@ export async function checkVodSource(url: string, origin: string, cookie = ""): 
   }
 }
 
-/** Probe many VOD sources concurrently. Order of results matches input order. */
+/**
+ * Budget for a whole VOD probe PASS, as opposed to VOD_TIMEOUT_MS which budgets
+ * a single source. Both are needed and they answer different questions.
+ *
+ * The per-source 20s is real and measured (a cold relay remux pays the full
+ * ffmpeg start — see VOD_TIMEOUT_MS above), but this function used to be a bare
+ * `Promise.all`, so the SLOWEST of five sources set the wall clock for all of
+ * them. One connection-limited panel sitting at its full budget made every
+ * verdict on the page arrive 20s late, which is why VOD source checking felt
+ * long while Live — which does no play-time verification at all — feels instant.
+ *
+ * lib/vod-resolve.ts already learned this one layer down and fixed it with
+ * collectWithin: "what stops ONE hung panel from defining how long the user
+ * waits." This is the same fix for the play-time path.
+ */
+const VOD_PASS_BUDGET_MS = 7000;
+
+/**
+ * Probe many VOD sources concurrently, returning whatever has SETTLED within
+ * VOD_PASS_BUDGET_MS. Unsettled probes keep running to completion (they still
+ * populate any server-side cache); they just no longer gate the response.
+ *
+ * Deliberately a SUBSET, not a padded full list: a source we have no verdict for
+ * is not a failed source, and reporting it as dead is the exact bug the
+ * retryable/hysteresis logic above exists to prevent. The client keys results by
+ * url (`absorb` in hooks/useStreamCheck), so a missing entry leaves that row on
+ * its previous badge or "checking" — the honest state — and order no longer
+ * needs to match input.
+ */
 export async function checkVodSources(urls: string[], origin: string, cookie = ""): Promise<StreamCheck[]> {
-  return Promise.all(urls.map((u) => checkVodSource(u, origin, cookie)));
+  const settled: StreamCheck[] = [];
+  const inFlight = urls.map((u) =>
+    checkVodSource(u, origin, cookie)
+      .then((r) => { settled.push(r); })
+      .catch(() => {}),
+  );
+  await Promise.race([
+    Promise.all(inFlight),
+    new Promise<void>((r) => setTimeout(r, VOD_PASS_BUDGET_MS)),
+  ]);
+  return settled;
 }
