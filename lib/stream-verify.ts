@@ -92,18 +92,47 @@ export async function checkStream(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): 
     const latencyMs = Date.now() - start;
 
     if (!res.ok) {
-      // 456 (upstream "connection limit reached") / 429 (rate limit) mean the source
-      // is BUSY, not dead — a shared IPTV account whose one slot is momentarily in
-      // use. Flag it so the UI keeps it as a candidate instead of badging it dead.
-      const busy = res.status === 456 || res.status === 429;
+      // 456 (upstream "connection limit reached") / 429 (rate limit) / 509 mean the
+      // source is BUSY, not dead — a shared IPTV account whose one slot is
+      // momentarily in use. Flag it so the UI keeps it as a candidate instead of
+      // badging it dead.
+      const busy = res.status === 456 || res.status === 429 || res.status === 509;
+
+      // 403 is the SAME "all my slots are taken" message from a panel that never
+      // learned 456, and it is not hypothetical: an upstream host.an upstream host.co serves one
+      // connection at a time and is the FIRST source for 23 of the 126 channels.
+      // Measured 2026-08-16 against the live relay — four of its channels probed
+      // together, three trials, identical every time:
+      //
+      //   alone       -> 200 200 200 200
+      //   concurrent  -> ['403','403','403','200']   (exactly one winner)
+      //
+      // So with two TV apps open (a Samsung and a Fire Stick is the reported
+      // case), whichever asks second is told 403 for a stream that is fine. It
+      // was landing here as a PERMANENT failure — neither busy nor retryable —
+      // which is the one verdict statusOf() badges dead on sight, with no
+      // hysteresis, condemning a working source for the rest of the session.
+      //
+      // Marked retryable but deliberately NOT busy: statusOf() returns "busy"
+      // for r.busy BEFORE it consults the fail streak, so a truly forbidden 403
+      // (geo-block, dead credentials) would sit at "busy" forever and never
+      // resolve. As retryable it takes the timeout path instead — held as a
+      // candidate while DEAD_STREAK rounds disagree, then badged dead once three
+      // consecutive probes agree it is gone. Capacity recovers; forbidden dies.
+      const contended = res.status === 403;
+
       return {
         url,
         ok: false,
         busy,
-        retryable: busy,
+        retryable: busy || contended,
         status: res.status,
         latencyMs,
-        reason: busy ? "busy (connection limit)" : httpReason(res.status),
+        reason: busy
+          ? "busy (connection limit)"
+          : contended
+            ? "refused (in use or forbidden)"
+            : httpReason(res.status),
       };
     }
 
@@ -244,14 +273,24 @@ export async function checkVodSource(url: string, origin: string, cookie = ""): 
       return { url, ok: true, status: res.status, latencyMs, reason: "ok" };
     }
     const busy = res.status === 456 || res.status === 429 || res.status === 509;
+    // Same connection-limit 403 as the live probe above, from the same panels —
+    // these hosts carry VOD and live side by side. Retryable, not busy, for the
+    // same reason: it must stay able to resolve to dead. Probes may only skip
+    // DEFINITIVELY dead sources here (see lib/vod-resolve), and "someone else is
+    // watching" is not that.
+    const contended = res.status === 403;
     return {
       url,
       ok: false,
       busy,
-      retryable: busy,
+      retryable: busy || contended,
       status: res.status,
       latencyMs,
-      reason: busy ? "busy (connection limit)" : httpReason(res.status),
+      reason: busy
+        ? "busy (connection limit)"
+        : contended
+          ? "refused (in use or forbidden)"
+          : httpReason(res.status),
     };
   } catch {
     // Same reasoning as the live probe: a cold relay remux can outrun the
