@@ -11,7 +11,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { LEAGUES, type GameEvent, type LeagueEvents } from "@/lib/leagues";
 import { verifyToken, SESSION_COOKIE } from "@/lib/auth";
 
-const UA = "Mozilla/5.0 (compatible; tvspot/1.0)";
+// DO NOT "fix" this to a branded or browser-like string. ESPN's edge 403s every
+// User-Agent except `curl/*`, and a 403 here is INVISIBLE: fetchLeague returns
+// null, the caller drops the league, and the response is a perfectly valid
+// `{ date, leagues: [] }` with HTTP 200 — which the UI renders as "no games".
+// That is how this endpoint served an empty events tab for days while ESPN was
+// returning a full schedule.
+//
+// Measured 2026-08-16, same IP, back-to-back, 2-3 requests each:
+//   curl/8.5.0 · curl/7.68.0 · curl/1.0 ............... 200  (any version works)
+//   Mozilla/5.0 (compatible; tvspot/1.0) .............. 403  ← what we had
+//   Chrome 120 UA, even with Accept/Accept-Language ... 403
+//   Mozilla/5.0 · tvspot/1.0 · tvspot-curl/1.0 ........ 403
+//   Wget/1.21 · PostmanRuntime/7.36.0 · node .......... 403
+// So it is an allowlist on the literal `curl/` prefix, not a bot heuristic and
+// not rate limiting. Verify with:
+//   curl -s -o /dev/null -w '%{http_code}' -H 'User-Agent: <candidate>' \
+//     'https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1/scoreboard?dates=YYYYMMDD'
+const UA = "curl/8.5.0";
 // ESPN scoreboard is public + fast; refetch at most every 60s per date.
 export const revalidate = 60;
 
