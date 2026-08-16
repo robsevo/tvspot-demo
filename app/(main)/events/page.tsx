@@ -124,7 +124,7 @@ function LeagueSection({ league, channels }: { league: LeagueEvents; channels: R
 
 export default function EventsPage() {
   const { channels } = useChannels();
-  const { data, loading } = useEvents();
+  const { data, loading, error } = useEvents();
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   const leagues = data?.leagues || [];
 
@@ -161,8 +161,22 @@ export default function EventsPage() {
           <div className="w-16 h-16 rounded-full bg-card mx-auto mb-4 flex items-center justify-center">
             <CalendarDays className="w-6 h-6 text-text-muted" />
           </div>
-          <p className="text-text-secondary text-sm">No games today</p>
-          <p className="text-text-muted text-xs mt-1">Check back tomorrow for the day&rsquo;s fixtures</p>
+          {error === "unauthorized" ? (
+            <>
+              <p className="text-text-secondary text-sm">Your session expired</p>
+              <p className="text-text-muted text-xs mt-1">Sign in again to see today&rsquo;s fixtures</p>
+            </>
+          ) : error === "failed" ? (
+            <>
+              <p className="text-text-secondary text-sm">Couldn&rsquo;t load fixtures</p>
+              <p className="text-text-muted text-xs mt-1">Something went wrong reaching the schedule &mdash; try again shortly</p>
+            </>
+          ) : (
+            <>
+              <p className="text-text-secondary text-sm">No games today</p>
+              <p className="text-text-muted text-xs mt-1">Check back tomorrow for the day&rsquo;s fixtures</p>
+            </>
+          )}
           <Link href="/live" className="inline-flex items-center gap-1.5 text-brand text-sm mt-4">
             <ChevronLeft className="w-4 h-4" /> Back to Live TV
           </Link>
