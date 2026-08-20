@@ -1,4 +1,4 @@
-import type { Viewport } from "next";
+import type { Metadata, Viewport } from "next";
 import { Roboto } from "next/font/google";
 import { cookies, headers } from "next/headers";
 import { readFileSync } from "fs";
@@ -27,6 +27,25 @@ import { TV_UA_RE } from "@/lib/tv";
  * (Seen in the deployed HTML: two viewport metas, ours first, so the TV kept
  * laying out at 960 even though the served markup "looked" correct.)
  */
+/**
+ * Site metadata. `title.template` gives every route a consistent suffix without
+ * each page repeating the app name, and `default` covers routes that set no
+ * title of their own — which, before this existed, meant the browser tab was
+ * simply blank.
+ */
+export const metadata: Metadata = {
+  title: {
+    default: "TVSpot",
+    template: "%s · TVSpot",
+  },
+  description:
+    "A streaming front-end with a mobile web UI and a 10-foot TV interface: " +
+    "live channels with source failover, an on-demand catalogue, and a TV guide.",
+  applicationName: "TVSpot",
+  // The app is behind a login and is not meant to be indexed.
+  robots: { index: false, follow: false },
+};
+
 export async function generateViewport(): Promise<Viewport> {
   const ua = (await headers()).get("user-agent") ?? "";
   const isTv = TV_UA_RE.test(ua);

@@ -59,6 +59,38 @@ function getUsers(): AuthUser[] {
   }
 }
 
+/**
+ * The signing secret for session tokens and stream tokens.
+ *
+ * In development an unset JWT_SECRET falls back to a fixed dev value so a fresh
+ * clone runs with no setup. In production that fallback is a vulnerability, not
+ * a convenience: every deployment of this code would share one publicly-known
+ * secret, and anyone could forge a session. So production refuses to start
+ * without a real one rather than defaulting to something guessable.
+ */
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConfigError";
+  }
+}
+
+export function signingSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === "production") {
+    // A distinct error type, because the difference matters to the caller: a
+    // bad password is the user's problem (401), a missing secret is the
+    // operator's (500). Collapsing both into one catch is how "it just says
+    // invalid request" bug reports happen.
+    throw new ConfigError(
+      "JWT_SECRET is not set. Refusing to sign tokens with the development " +
+        "fallback in production — generate one with: openssl rand -base64 32",
+    );
+  }
+  return "dev-secret-not-for-production";
+}
+
 async function hmacSign(data: string, secret: string): Promise<string> {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -80,7 +112,7 @@ function base64UrlDecode(s: string): string {
 }
 
 export async function signToken(username: string): Promise<string> {
-  const secret = process.env.JWT_SECRET || "dev-secret";
+  const secret = signingSecret();
   const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload = btoa(
     JSON.stringify({
@@ -98,7 +130,7 @@ export async function verifyToken(
   token: string
 ): Promise<TokenPayload | null> {
   try {
-    const secret = process.env.JWT_SECRET || "dev-secret";
+    const secret = signingSecret();
     const parts = token.split(".");
     if (parts.length !== 3) return null;
     const [header, payload, sig] = parts;

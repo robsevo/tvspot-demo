@@ -2,17 +2,26 @@
 /**
  * TVSpot Link Freshness Pipeline
  *
- * Daily automated pipeline that:
- * 1. Runs source adapters (iptv-org, GitHub M3U, Reddit) in parallel
- * 2. Fetches example.com channels and fuzzy-matches streams
- * 3. Verifies streams with tiered testing (existing list + backend + matched)
- * 4. Optionally verifies VOD links
- * 5. Writes verified-sources.json atomically
+ * A stateful nightly pipeline that keeps a per-channel list of *working* stream
+ * sources honest. It builds on the previous run rather than starting fresh:
+ *
+ * 1. Run source adapters in parallel (see `sources/`) to discover candidates
+ * 2. Load the canonical channel catalog and fuzzy-match candidates to channels
+ * 3. Verify every candidate — the existing list included — by actually pulling
+ *    the stream and measuring it (see `verifier.ts`)
+ * 4. Keep the best N per channel, drop what died, re-date what survived
+ * 5. Write the result atomically, refusing to overwrite good data with an
+ *    empty run (see `store.ts`)
+ *
+ * The important idea is that step 3 applies to links already in the file. A
+ * source verified last night is not assumed good tonight — link rot is the
+ * normal case, not the exception, so "known" and "working" are kept as separate
+ * facts and only measurement moves a link between them.
  *
  * Usage:
- *   npx tsx scripts/link-freshness/index.ts            # full pipeline
- *   npx tsx scripts/link-freshness/index.ts --dry-run  # no output file
- *   npx tsx scripts/link-freshness/index.ts --vod      # include VOD verification
+ *   npx tsx scripts/link-freshness/index.ts               # full pipeline
+ *   npx tsx scripts/link-freshness/index.ts --dry-run     # no output file
+ *   npx tsx scripts/link-freshness/index.ts --verify-only # skip discovery
  */
 
 import { readFileSync } from "node:fs";
@@ -36,13 +45,11 @@ try {
 }
 
 import { fetchIptvOrg } from "./sources/iptv-org";
-import { fetchGithubM3u } from "./sources/github-m3u";
-import { fetchReddit } from "./reddit";
-import { fetchChannels } from "./Origin";
+import { fetchPlaylistUrls } from "./sources/playlist-url";
+import { fetchChannels } from "./catalog";
 import { matchChannels } from "./matcher";
 import { bufferScore, verifyCandidateMap } from "./verifier";
 import { writeAtomic, readExisting } from "./store";
-import { scrapeVod } from "./vod";
 import { toPlayableUrl, slugify } from "./playable";
 import type { VerifiedSources, VerifiedChannel, VerifiedSource, Candidate } from "./types";
 
@@ -68,7 +75,6 @@ const DRY_RUN = process.argv.includes("--dry-run");
  */
 const VERIFY_ONLY =
   process.argv.includes("--verify-only") || process.env.VERIFY_ONLY === "1";
-const INCLUDE_VOD = process.argv.includes("--vod");
 
 // The scrape hits hostile/malformed IPTV servers; some trip an assertion deep in
 // Node's HTTP parser that surfaces as an uncaught exception and would otherwise
@@ -124,13 +130,12 @@ async function main(): Promise<void> {
     ? []
     : [
         { name: "iptv_org", label: "iptv-org", fetch: fetchIptvOrg },
-        { name: "github", label: "GitHub M3U", fetch: fetchGithubM3u },
-        { name: "reddit", label: "Reddit", fetch: fetchReddit },
+        { name: "playlist_url", label: "Playlist URLs", fetch: fetchPlaylistUrls },
       ];
   log(
     VERIFY_ONLY
       ? "Stage 1: SKIPPED (verify-only — re-testing the existing list + backend links)"
-      : "Stage 1: Running source adapters (iptv-org, GitHub M3U, Reddit)...",
+      : "Stage 1: Running source adapters...",
   );
 
   const results = await Promise.allSettled(
@@ -177,8 +182,8 @@ async function main(): Promise<void> {
   // Release adapter result arrays — the merged m3uEntries is all we need now.
   results.length = 0;
 
-  // Stage 4: Fetch example.com channels (the links currently on site).
-  log("Stage 4: Fetching example.com channels...");
+  // Stage 4: Load the canonical channel catalog to match candidates against.
+  log("Stage 4: Loading the channel catalog...");
   let channels: Awaited<ReturnType<typeof fetchChannels>> = [];
   try {
     channels = await fetchChannels();
@@ -262,7 +267,7 @@ async function main(): Promise<void> {
     nameBySlug.set(slug, ch.name); // backend name is authoritative
     const urls = [ch.primary_url, ...(ch.backup_urls || [])].filter((u): u is string => Boolean(u));
     for (const u of urls) {
-      add(slug, { verifyUrl: u, storeUrl: u, origin: "backend" });
+      add(slug, { verifyUrl: u, storeUrl: u, origin: "catalog" });
       backendCount++;
     }
   }
@@ -530,7 +535,7 @@ async function main(): Promise<void> {
       // Channel got no verified sources at all — seed it with Origin's URLs.
       const sources = toInject.slice(0, ACTIVE_CAP).map((u) => ({
         url: u, tier: 2, latencyMs: 0, verifiedUtc: catalogFallbackUtc,
-        origin: "backend" as const, live: false,
+        origin: "catalog" as const, live: false,
       }));
       channelsSection[slug] = { name: nameBySlug.get(slug) || slug, sources };
       activeTotal += sources.length;
@@ -541,7 +546,7 @@ async function main(): Promise<void> {
       if (openSlots <= 0) continue;
       const fill = toInject.slice(0, openSlots).map((u) => ({
         url: u, tier: 2, latencyMs: 0, verifiedUtc: catalogFallbackUtc,
-        origin: "backend" as const, live: false,
+        origin: "catalog" as const, live: false,
       }));
       existing_ch.sources = [...(existing_ch.sources ?? []), ...fill];
       activeTotal += fill.length;
@@ -571,39 +576,9 @@ async function main(): Promise<void> {
     channels: channelsSection,
   };
 
-  // Stage 8: VOD (optional, on-demand)
-  if (INCLUDE_VOD) {
-    log("Stage 8: Scraping VOD direct-stream links...");
-    try {
-      const vodResult = await scrapeVod();
-      output.meta.vod_verified = vodResult.totalVerified;
-      output.meta.last_vod_scrape_utc = now();
-
-      if (vodResult.items.length > 0) {
-        const scrapedMap: Record<string, any> = {};
-        for (const item of vodResult.items) {
-          const key = item.type === "movie"
-            ? `${item.tmdb_id}`
-            : `${item.tmdb_id}-s${item.season}-e${item.episode}`;
-          scrapedMap[key] = item;
-        }
-        output.vod = {
-          movies: existing?.vod?.movies ?? {},
-          scraped: scrapedMap,
-        };
-      }
-
-      log(
-        `  VOD: ${vodResult.totalExtracted} extracted, ${vodResult.totalVerified} verified across ${vodResult.items.length} items`,
-      );
-    } catch (err) {
-      error("VOD scrape failed (continuing without VOD links)", err);
-    }
-  }
-
   const elapsed = Math.round(performance.now() - started);
 
-  // Stage 9: Write output
+  // Stage 8: Write output
   const existingCount = existing?.channels ? Object.keys(existing.channels).length : 0;
   const newCount = Object.keys(channelsSection).length;
 
@@ -615,7 +590,7 @@ async function main(): Promise<void> {
     // accumulated list. Keep last night's list and try again tomorrow.
     error(`Refresh produced 0 working channels but the existing list has ${existingCount} — keeping the old list (likely a transient outage).`);
   } else {
-    log("Stage 9: Writing verified-sources.json...");
+    log("Stage 8: Writing verified-sources.json...");
     writeAtomic(output);
     log(`  Written ${newCount} channels to data/verified-sources.json`);
   }

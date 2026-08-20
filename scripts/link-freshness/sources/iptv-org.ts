@@ -73,7 +73,7 @@ async function fetchFromApi(): Promise<M3uEntry[]> {
     .map((s) => ({
       channelName: s.channel,
       streamUrl: s.url,
-      credentialSource: "iptv-org/api",
+      sourceName: "iptv-org/api",
       attrs: {
         ...(s.quality ? { quality: s.quality } : {}),
         ...(s.referrer ? { referrer: s.referrer } : {}),
@@ -84,15 +84,15 @@ async function fetchFromApi(): Promise<M3uEntry[]> {
     }));
 }
 
-/** Fetch an M3U country slice, parse, map credentialSource. */
+/** Fetch an M3U country slice, parse, map sourceName. */
 async function fetchM3uSlice(url: string, label: string): Promise<M3uEntry[]> {
   const text = await fetchText(url);
   if (!text) return [];
 
   const entries = parseM3u(text, `iptv-org/${label}`);
-  // Rewrite credentialSource to be consistent with the API path.
+  // Rewrite sourceName to be consistent with the API path.
   for (const e of entries) {
-    e.credentialSource = `iptv-org/${label}`;
+    e.sourceName = `iptv-org/${label}`;
     e.attrs.source = "iptv-org";
   }
   return entries.slice(0, MAX_STREAMS);

@@ -140,8 +140,8 @@ function VodPageInner() {
             </h1>
             <p className="text-text-muted text-[11px]">
               {selectedService
-                ? `${movies.length + series.length} titles`
-                : `${services.length} providers`}
+                ? `${movies.length + series.length} ${movies.length + series.length === 1 ? "title" : "titles"}`
+                : `${services.length} ${services.length === 1 ? "provider" : "providers"}`}
             </p>
           </div>
         </div>

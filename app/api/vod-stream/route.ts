@@ -5,7 +5,7 @@ import { verifyToken } from "@/lib/auth";
 // Same-origin VOD media proxy — handles BOTH:
 //  • HLS playlists (.m3u8): fetched, every inner URI (variant playlists, segments,
 //    keys) rewritten to route back through this same route, served with CORS so
-//    hls.js can play them. The provider-a CDNs (tik/vip/their CDN hosts) send NO CORS and
+//    hls.js can play them. The provider-a CDNs (their CDN hosts) send NO CORS and
 //    api.example.com/stream-proxy is flaky per-host, so we proxy them ourselves.
 //  • Byte streams (mp4/ts/segments): Range forwarded to the origin (IPTV panels
 //    are HTTP-only + send 206), capped per response so a function invocation stays

@@ -6,7 +6,7 @@
  * The chrome.cast namespace is provided by the external script loaded at runtime.
  */
 
-let castLoaded = false;
+const castLoaded = false;
 let castInitPromise: Promise<void> | null = null;
 
 declare global {

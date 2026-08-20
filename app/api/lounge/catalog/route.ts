@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { ALWAYS_INCLUDE_MOVIE_PICKS } from "@/lib/classic-picks";
+import { loadDemoVodCatalog, usingDemoCatalog } from "@/lib/demoCatalog";
 
 const BACKEND = process.env.BACKEND_API_URL || "https://api.example.com";
 
@@ -621,6 +622,28 @@ export async function GET(request: NextRequest) {
   const service = request.nextUrl.searchParams.get("service");
   const trending = request.nextUrl.searchParams.get("trending");
   const cookie = request.headers.get("cookie") || "";
+
+  // No upstream configured: answer from the bundled catalogue. Everything below
+  // this point — the TMDB region crawl, the per-title US/CA gate, the memo —
+  // exists to normalise a real provider's feed, and there is no feed to
+  // normalise here.
+  if (usingDemoCatalog()) {
+    const demo = await loadDemoVodCatalog();
+    if (trending === "true") {
+      return NextResponse.json({
+        movies: demo.movies,
+        series: demo.series,
+        sorted_by: "demo",
+      });
+    }
+    if (service) {
+      return NextResponse.json({
+        movies: demo.movies.filter((m) => m.service === service),
+        series: demo.series.filter((m) => m.service === service),
+      });
+    }
+    return NextResponse.json({ services: demo.services, summary: demo.summary });
+  }
 
   if (trending === "true") {
     const data = await getTrending(cookie);

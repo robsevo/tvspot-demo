@@ -590,14 +590,14 @@ async function verifyCandidate(c: Candidate, nowIso: string, doLiveness: boolean
   // liveness-probed set (it's an extra fetch); benched/extra links keep the old
   // load-only bar so we don't over-prune the reserve.
   //
-  // EXCEPTION: Origin's OWN curated links (origin "backend") are what example.com
+  // EXCEPTION: the catalog's OWN curated links (origin "catalog") are what the app
   // itself serves and plays — they're vouched-for. Their per-segment probe still
   // transiently 403s/times-out under relay throttle (many channels share 3
-  // upstreams), which was wrongly dropping ~60 live channels. So for backend
-  // origin, tier1+tier2 (playlist loads with real segments) is the bar; the
+  // upstreams), which was wrongly dropping ~60 live channels. So for a trusted
+  // catalog origin, tier1+tier2 (playlist loads with real segments) is the bar; the
   // segment fetch only RANKS (sets `live`), never gates. Scraped/untrusted
   // origins keep the strict blocking gate.
-  const trusted = c.origin === "backend";
+  const trusted = c.origin === "catalog";
   if (doLiveness && !trusted && !(await segmentLoads(c.verifyUrl))) return null;
 
   // Liveness as a RANKING flag, not a gate. The "plays ~15s then drops" source
@@ -679,7 +679,7 @@ export async function verifyCandidateMap(
   // the budget prioritizes discovering NEW working sources over re-confirming
   // ones we already know about.
   const entries = [...map.entries()].reverse();
-  let total = entries.length;
+  const total = entries.length;
 
   for (let i = 0; i < total; i += VERIFY_CONCURRENCY) {
     const elapsed = performance.now() - startMs;

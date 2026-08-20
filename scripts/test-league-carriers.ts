@@ -12,7 +12,7 @@
  * prefix, so every sibling landed on the parent. This is the same defect that
  * made the backend serve MTV Lebanon for MTV and ESPN8 for TSN (fixed there
  * 2026-07-28 with feed-qualifier tokens; see tests/python/test_channel_matching.py
- * in Origin). Measured here against the live 126-channel lineup, the bare
+ * in example). Measured here against the live 126-channel lineup, the bare
  * prefix handed sports leagues their NEWS siblings:
  *
  *   NHL            -> CBC News Network, RDS INFO

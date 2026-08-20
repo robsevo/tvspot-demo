@@ -263,7 +263,7 @@ export default function SearchPage() {
               <div className="w-16 h-16 rounded-full bg-card mx-auto mb-4 flex items-center justify-center">
                 <Search className="w-6 h-6 text-text-muted" />
               </div>
-              <p className="text-text-secondary text-sm">No results for "{query.trim()}"</p>
+              <p className="text-text-secondary text-sm">No results for &ldquo;{query.trim()}&rdquo;</p>
               <p className="text-text-muted text-xs mt-1">Try a different title</p>
             </div>
           ) : (

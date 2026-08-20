@@ -1,0 +1,52 @@
+{
+  "services": [
+    "Open Movies"
+  ],
+  "summary": {
+    "Open Movies": {
+      "movies_count": 3,
+      "series_count": 0,
+      "preview": [
+        {
+          "tmdb_id": 10378,
+          "name": "Big Buck Bunny"
+        },
+        {
+          "tmdb_id": 45745,
+          "name": "Sintel"
+        },
+        {
+          "tmdb_id": 133704,
+          "name": "Tears of Steel"
+        }
+      ]
+    }
+  },
+  "movies": [
+    {
+      "tmdb_id": 10378,
+      "title": "Big Buck Bunny",
+      "year": "2008",
+      "overview": "A giant rabbit with a heart bigger than himself takes revenge on three rodents tormenting the forest. Blender Foundation, released under CC-BY.",
+      "service": "Open Movies",
+      "media_type": "movie"
+    },
+    {
+      "tmdb_id": 45745,
+      "title": "Sintel",
+      "year": "2010",
+      "overview": "A lone warrior searches for the dragon she raised from a hatchling. Blender Foundation, released under CC-BY.",
+      "service": "Open Movies",
+      "media_type": "movie"
+    },
+    {
+      "tmdb_id": 133704,
+      "title": "Tears of Steel",
+      "year": "2012",
+      "overview": "A group of warriors and scientists gather at the Oude Kerk in Amsterdam to stage a crucial event. Blender Foundation, released under CC-BY.",
+      "service": "Open Movies",
+      "media_type": "movie"
+    }
+  ],
+  "series": []
+}

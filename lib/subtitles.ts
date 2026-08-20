@@ -107,7 +107,7 @@ const CUE_LINE =
  * Files already in WebVTT are passed through.
  */
 export function srtToVtt(input: string): string {
-  let text = input.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  const text = input.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
 
   // Already WebVTT — normalize the header and hand it back.
   if (/^\s*WEBVTT/.test(text)) return text.trimStart();

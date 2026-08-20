@@ -136,7 +136,7 @@ export default function TvMoviePage() {
         });
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [display.title, display.backdrop, cwId, updateProgress, remove],
   );
 

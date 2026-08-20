@@ -1,0 +1,34 @@
+[
+  {
+    "name": "Open Movies 24/7",
+    "online": true,
+    "category": "Entertainment",
+    "primary_url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+    "backup_urls": [
+      "https://test-streams.mux.dev/pts_shift/master.m3u8"
+    ]
+  },
+  {
+    "name": "Reference HLS",
+    "online": true,
+    "category": "Technology",
+    "primary_url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8",
+    "backup_urls": []
+  },
+  {
+    "name": "Tears of Steel TV",
+    "online": true,
+    "category": "Movies",
+    "primary_url": "https://test-streams.mux.dev/tos_ismc/main.m3u8",
+    "backup_urls": [
+      "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+    ]
+  },
+  {
+    "name": "Mux Demo",
+    "online": true,
+    "category": "Technology",
+    "primary_url": "https://stream.mux.com/v69RSHhFelSm4701snP22dYz2jICy4E4FUyk02rW4gxRM.m3u8",
+    "backup_urls": []
+  }
+]

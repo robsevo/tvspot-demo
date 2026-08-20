@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the annotated template MUST ship: it is the only documentation of what
+# the app reads, and the README tells you to copy it. `.env*` silently swallowed
+# it — a file that exists on disk, passes every review, and simply is not in the
+# repository. CI asserts it is tracked (see .github/workflows/ci.yml).
+!.env.example
 
 # vercel
 .vercel
@@ -49,3 +54,9 @@ next-env.d.ts
 
 # Tizen package artifacts (built from tizen/ — see tizen/README.md)
 tizen/*.wgt
+
+# Fire TV sideload build. `public/tvspot.apk` is a *build artifact* signed with a
+# release key — it is produced by `firetv/`, not edited here, and it must never be
+# committed. Drop your own signed build at that path and next.config.ts will serve
+# it from /fire.
+public/*.apk

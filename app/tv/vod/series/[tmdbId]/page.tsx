@@ -249,7 +249,7 @@ export default function TvSeriesPage() {
         });
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [playing, display.title, display.poster, seriesId, updateProgress, remove],
   );
 

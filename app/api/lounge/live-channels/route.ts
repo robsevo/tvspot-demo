@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getChannelSourcesMap } from "@/lib/channelSources";
+import { loadDemoChannels, usingDemoCatalog } from "@/lib/demoCatalog";
 
 /**
  * live-channels, with the nightly-verified links attached server-side.
@@ -20,7 +21,42 @@ export const dynamic = "force-dynamic";
 
 const BACKEND = process.env.BACKEND_API_URL || "https://api.example.com";
 
+/** Attach the freshness pipeline's verified links to a channel list. Shared by
+ *  both paths below so the enrichment cannot drift between them. */
+async function enrich(channels: { name?: string }[]) {
+  const names = channels
+    .map((c) => c?.name)
+    .filter((n: unknown): n is string => typeof n === "string");
+  const { urls, confidence } = await getChannelSourcesMap(names);
+  return channels.map((c) =>
+    c?.name && urls[c.name]
+      ? {
+          ...c,
+          verified_sources: urls[c.name],
+          // The pipeline's own confidence in those links. Lets the player pull
+          // the waiting bench IMMEDIATELY on a thin channel instead of
+          // discovering it the slow way — see useLiveSources.
+          source_confidence: confidence[c.name],
+        }
+      : c,
+  );
+}
+
 export async function GET(request: NextRequest) {
+  // No upstream configured: serve the bundled catalogue. This is what makes a
+  // fresh clone show a working channel grid with no account anywhere.
+  if (usingDemoCatalog()) {
+    const channels = await enrich(await loadDemoChannels());
+    return new NextResponse(JSON.stringify({ channels }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   const qs = request.nextUrl.searchParams.toString();
   const url = `${BACKEND}/lounge/live-channels${qs ? `?${qs}` : ""}`;
 
@@ -51,27 +87,7 @@ export async function GET(request: NextRequest) {
     const channels = data?.channels;
     if (!Array.isArray(channels)) return respond(body);
 
-    const { urls, confidence } = await getChannelSourcesMap(
-      channels.map((c: { name?: string }) => c?.name).filter((n: unknown): n is string => typeof n === "string"),
-    );
-
-    return respond(
-      JSON.stringify({
-        ...data,
-        channels: channels.map((c: { name?: string }) =>
-          c?.name && urls[c.name]
-            ? {
-                ...c,
-                verified_sources: urls[c.name],
-                // The pipeline's own confidence in those links. Lets the player
-                // pull the waiting bench IMMEDIATELY on a thin channel instead of
-                // discovering it the slow way — see useLiveSources.
-                source_confidence: confidence[c.name],
-              }
-            : c,
-        ),
-      }),
-    );
+    return respond(JSON.stringify({ ...data, channels: await enrich(channels) }));
   } catch {
     // Malformed JSON from the backend — pass it through rather than inventing a
     // shape the client doesn't expect.

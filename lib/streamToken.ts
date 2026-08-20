@@ -1,3 +1,4 @@
+import { signingSecret } from "@/lib/auth";
 /**
  * Signed access for /api/vod-stream.
  *
@@ -30,7 +31,7 @@ function b64url(bytes: ArrayBuffer): string {
 }
 
 async function sign(target: string, exp: number): Promise<string> {
-  const secret = process.env.JWT_SECRET || "dev-secret";
+  const secret = signingSecret();
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),

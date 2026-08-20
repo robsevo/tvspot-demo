@@ -310,7 +310,7 @@ button:active, a:active, [role="button"]:active, .pressable:active, label[for]:a
   }
 }
 
-/* HUD corner brackets — the signature Origin panel accent, brand-red. */
+/* HUD corner brackets — the signature example panel accent, brand-red. */
 .hud-corners { position: relative; }
 .hud-corners::before, .hud-corners::after {
   content: ""; position: absolute; width: 12px; height: 12px;

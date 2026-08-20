@@ -28,6 +28,13 @@ export interface SourceDef {
  *  in index.ts (import + SourceAdapter wrapper). */
 export const SOURCE_DEFS: SourceDef[] = [
   { name: "iptv_org", label: "iptv-org", enabled: true, priority: 10 },
-  { name: "github", label: "GitHub M3U", enabled: true, priority: 5 },
-  { name: "reddit", label: "Reddit", enabled: true, priority: 2 },
+  { name: "playlist_url", label: "Playlist URLs", enabled: true, priority: 5 },
 ];
+
+/**
+ * `priority` breaks ties when two sources offer the same channel and both
+ * verify: the higher number wins the ordering. It is deliberately NOT a quality
+ * judgement — measured latency and buffer health decide that (see verifier.ts).
+ * Priority only settles otherwise-equal candidates, so a well-regarded source
+ * cannot outrank a demonstrably faster stream.
+ */

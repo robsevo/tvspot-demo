@@ -4,6 +4,7 @@ import {
   signToken,
   sessionCookieOptions,
   SESSION_COOKIE,
+  ConfigError,
 } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
@@ -54,6 +55,16 @@ export async function POST(request: NextRequest) {
     response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
     return response;
   } catch (e) {
+    // A misconfigured deployment is not a malformed request. Reporting it as
+    // one sends the operator hunting through the client for a bug that is
+    // actually a missing environment variable.
+    if (e instanceof ConfigError) {
+      console.error("[auth] configuration error:", e.message);
+      return NextResponse.json(
+        { error: "Server is not configured for sign-in. See the server logs." },
+        { status: 500 },
+      );
+    }
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 }

@@ -1,22 +1,16 @@
 /** Pipeline-specific types for the link-freshness tool. */
 
-export interface CredentialSet {
-  source: string; // where the creds came from (post ID or URL)
-  server: string;
-  username: string;
-  password: string;
-}
-
 export interface M3uEntry {
   channelName: string;
   streamUrl: string;
-  credentialSource: string;
+  /** Which source adapter produced this entry, for provenance in the output. */
+  sourceName: string;
   /** Original #EXTINF line attributes (tvg-id, tvg-name, group-title, etc.) */
   attrs: Record<string, string>;
 }
 
 export interface MatchResult {
-  channelName: string; // example.com channel name
+  channelName: string; // canonical catalog channel name
   channelSlug: string; // slugified for JSON key
   candidates: M3uEntry[]; // all M3U entries that matched this channel
 }
@@ -32,7 +26,7 @@ export interface VerifiedSource {
   firstSeenUtc?: string;
   /** Where the link came from: the backend channel list, a specific source adapter,
    *  or carried over from a previous run's store. */
-  origin?: "iptv_org" | "github" | "reddit" | "backend" | "store";
+  origin?: "iptv_org" | "playlist_url" | "catalog" | "store";
   /** Passed the liveness check (edge advanced over time) on the last run. Used to
    *  RANK (live-first) — NOT to delete: a flaky 9s snapshot must not drop a
    *  loadable link, or we'd remove currently-working channels. */
@@ -74,7 +68,7 @@ export interface Candidate {
   verifyUrl: string;
   /** Browser-playable URL to persist if the test passes. */
   storeUrl: string;
-  origin: "iptv_org" | "github" | "reddit" | "backend" | "store";
+  origin: "iptv_org" | "playlist_url" | "catalog" | "store";
   /** Carried forward from a prior run, if this URL was already in the store. */
   firstSeenUtc?: string;
 }

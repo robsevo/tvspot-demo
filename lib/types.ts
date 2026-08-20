@@ -33,6 +33,9 @@ export interface CatalogSummaryEntry {
 export interface CatalogResponse {
   services: string[];
   summary: Record<string, CatalogSummaryEntry>;
+  /** Virtual sections (Classics/Theater) the server can actually populate.
+   *  Absent from older/real backends — the client then assumes all of them. */
+  virtual_services?: string[];
 }
 
 export interface ServiceCatalogResponse {

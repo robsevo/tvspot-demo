@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Typecheck, lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      # The demo content layer is generated, not committed as opaque blobs, so
+      # CI regenerates it and then checks it is byte-identical to what is in the
+      # tree. That catches an edit to make-demo-data.mjs that nobody re-ran.
+      - name: Demo data is reproducible
+        run: |
+          npm run demo:data
+          if ! git diff --quiet -- data/; then
+            echo "::error::data/ differs from the demo:data output — re-run npm run demo:data and commit."
+            git --no-pager diff --stat -- data/
+            exit 1
+          fi
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      - run: npm run build
+        env:
+          # Production build with no secret would refuse to sign tokens; the
+          # value is irrelevant to a build, it just has to exist.
+          JWT_SECRET: ci-build-only-not-a-real-secret
+
+  secrets:
+    name: No credentials or personal data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan the tree
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          # Shapes, not names: a list of known-bad literals is always one project behind.
+          pats = {
+            "key-shaped string": re.compile(r"\b(sk-[A-Za-z0-9]{16,}|AIza[A-Za-z0-9_\-]{20,}|ghp_[A-Za-z0-9]{20,}|xoxb-[A-Za-z0-9-]{20,})"),
+            "AWS access key id": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+            "private key block": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+            "absolute home path": re.compile(r"/(?:home|Users)/(?!runner\b)[a-z][a-z0-9_-]{1,31}/"),
+            "embedded stream credentials": re.compile(r"/(?:live|movie|series)/[^/\s\"']+/[^/\s\"']+/\d+\.(?:m3u8|ts|mp4)"),
+          }
+          skip_dirs = {".git", "node_modules", ".next", "docs"}
+          bad = 0
+          for dp, dn, fn in os.walk("."):
+              dn[:] = [d for d in dn if d not in skip_dirs]
+              for f in fn:
+                  if f == "package-lock.json":
+                      continue
+                  p = os.path.join(dp, f)
+                  try: data = open(p, encoding="utf-8", errors="ignore").read()
+                  except Exception: continue
+                  for label, rx in pats.items():
+                      m = rx.search(data)
+                      if m:
+                          print(f"::error file={p}::{label}: {m.group(0)[:48]}")
+                          bad = 1
+          print("scan complete")
+          sys.exit(bad)
+          PY
+
+      # Two halves of the same gate. Asking only "is a secret committed?" passes
+      # happily when the template is missing too — which is what `.env*` in
+      # .gitignore quietly did to .env.example.
+      - name: No real .env is committed, and the template IS
+        run: |
+          if git ls-files | grep -E '^\.env($|\.)' | grep -v '\.env\.example$'; then
+            echo "::error::an environment file is tracked"; exit 1
+          fi
+          if ! git ls-files --error-unmatch .env.example >/dev/null 2>&1; then
+            echo "::error::.env.example is not tracked — the setup docs reference a file that is not in the repo"
+            exit 1
+          fi
+          echo "ok"

@@ -1,0 +1,37 @@
+{
+  "generated_utc": "2026-01-01T00:00:00.000Z",
+  "movies": {
+    "10378": [
+      {
+        "url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+        "label": "1080p HLS",
+        "kind": "hls"
+      },
+      {
+        "url": "https://media.w3.org/2010/05/bunny/movie.mp4",
+        "label": "480p",
+        "kind": "mp4"
+      }
+    ],
+    "45745": [
+      {
+        "url": "https://download.blender.org/durian/trailer/sintel_trailer-1080p.mp4",
+        "label": "1080p",
+        "kind": "mp4"
+      },
+      {
+        "url": "https://media.w3.org/2010/05/sintel/trailer.mp4",
+        "label": "720p",
+        "kind": "mp4"
+      }
+    ],
+    "133704": [
+      {
+        "url": "https://test-streams.mux.dev/tos_ismc/main.m3u8",
+        "label": "HLS",
+        "kind": "hls"
+      }
+    ]
+  },
+  "series": {}
+}

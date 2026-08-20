@@ -27,11 +27,21 @@ function assembleCatalog(data: CatalogResponse): {
   // Guard against a malformed/empty backend response so a bad payload can't
   // throw and blank the whole picker.
   const realServices = Array.isArray(data.services) ? data.services : [];
-  const allServices = [...realServices, ...VIRTUAL_SERVICES];
+  // The server may declare which virtual sections it can actually fill (they are
+  // built from TMDB, not from the catalogue). When it says nothing, assume both
+  // — that is the long-standing behaviour and what a configured backend expects.
+  const virtual = Array.isArray(data.virtual_services)
+    ? data.virtual_services
+    : [...VIRTUAL_SERVICES];
+  const allServices = [...realServices, ...virtual];
   const allSummary = {
     ...(data.summary || {}),
-    "Classics": { movies_count: 30, series_count: 30, preview: "Classic movies and series before 2010" },
-    "Theater": { movies_count: 30, series_count: 0, preview: "Now playing and upcoming in theaters" },
+    ...(virtual.includes("Classics")
+      ? { "Classics": { movies_count: 30, series_count: 30, preview: "Classic movies and series before 2010" } }
+      : {}),
+    ...(virtual.includes("Theater")
+      ? { "Theater": { movies_count: 30, series_count: 0, preview: "Now playing and upcoming in theaters" } }
+      : {}),
     // "Other" returns nothing from the backend (count 0) but useServiceCatalog
     // populates it from the trending corpus (~40 movies + 40 series). Override
     // the summary so the card's count matches what actually opens.

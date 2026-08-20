@@ -12,8 +12,8 @@
  * serves a flawless playlist and dies twenty seconds in probes identically to one
  * that runs for three hours.
  *
- * That is the same mistake the VOD side made with its 2-byte range probe (it
- * measured the handshake, not the throughput — see lib/vod-resolve panelPenalty).
+ * That is the same mistake a 2-byte range probe makes: it measures the handshake,
+ * not the throughput.
  * The fix is the same: stop inferring, and record what happened.
  *
  * Playback is the only ground truth we have, it costs nothing to observe, and it
