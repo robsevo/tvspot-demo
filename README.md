@@ -443,7 +443,7 @@ TSN. Fuzzy matching needs a scoring function and a floor, not a `startsWith`.
 
 ## 13. License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Notes on what the licence covers: [NOTICE](NOTICE).
 
 The demo media is not covered by that licence and is not redistributed here: the
 app links to it. Blender Foundation open movies are CC-BY; the Mux, Apple and W3C

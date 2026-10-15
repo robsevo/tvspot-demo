@@ -1,0 +1,10 @@
+The demo media referenced by this application is NOT covered by this licence and
+is not redistributed here — the application links to it at runtime:
+
+  - Blender Foundation open movies (Big Buck Bunny, Sintel, Tears of Steel)
+    are released under the Creative Commons Attribution licence (CC-BY).
+    https://studio.blender.org/films/
+  - Mux, Apple and W3C public test streams remain the property of their owners
+    and are used here as the publicly-published test assets they are.
+
+scripts/make-demo-data.mjs lists every URL and its origin.
